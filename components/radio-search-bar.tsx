@@ -126,11 +126,11 @@ export function RadioSearchBar({ onAdd }: Props) {
   return (
     <div ref={panelRef} className="relative">
       <div
-        className={`relative flex items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-800/80 ring-1 ring-slate-700/60 backdrop-blur-sm transition-all focus-within:border-sky-500/50 focus-within:ring-2 focus-within:ring-sky-500/20 ${
-          showResults && hasResults ? "rounded-b-none border-b-0" : ""
+        className={`sb-rad-bar relative flex items-center gap-2 ${
+          showResults && hasResults ? "is-open" : ""
         }`}
       >
-        <span className="pl-3 text-slate-500">
+        <span className="ps-4 text-slate-500">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -150,7 +150,7 @@ export function RadioSearchBar({ onAdd }: Props) {
             }
           }}
           placeholder={t.searchRadioPlaceholder ?? "Search radio stations…"}
-          className="h-10 flex-1 bg-transparent py-2 pr-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
+          className="h-11 flex-1 bg-transparent py-2 pe-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
           aria-label={t.search}
           autoComplete="off"
         />
@@ -173,7 +173,7 @@ export function RadioSearchBar({ onAdd }: Props) {
       </div>
 
       {showResults && hasQuery && (
-        <div className="absolute left-0 right-0 top-full z-50 max-h-72 overflow-y-auto rounded-b-xl border border-t-0 border-slate-800/80 bg-slate-950/98 shadow-xl">
+        <div className="sb-rad-drop absolute left-0 right-0 top-full z-50 max-h-72 overflow-y-auto">
           {searching ? (
             <div className="py-6 text-center text-sm text-slate-500">{t.searching ?? "Searching…"}</div>
           ) : hasResults ? (
@@ -183,7 +183,7 @@ export function RadioSearchBar({ onAdd }: Props) {
               </p>
               <div className="space-y-0.5">
                 {results.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-slate-800/80">
+                  <div key={i} className="sb-rad-hit-row flex items-center gap-2 px-2 py-2 transition">
                     <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-800">
                       {r.cover ? (
                         <img src={r.cover} alt="" className="h-full w-full object-cover" />
@@ -204,14 +204,14 @@ export function RadioSearchBar({ onAdd }: Props) {
                       <button
                         type="button"
                         onClick={() => void handleAdd(r)}
-                        className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-600 bg-slate-800/90 px-2.5 text-xs font-medium text-slate-200 transition hover:bg-slate-700"
+                        className="sb-rad-btn"
                       >
                         {t.addToRadio ?? "Add to Radio"}
                       </button>
                       <button
                         type="button"
                         onClick={() => void handlePlay(r)}
-                        className="inline-flex h-8 items-center justify-center rounded-lg bg-[#1db954] px-2.5 text-xs font-semibold text-white transition hover:bg-[#1ed760]"
+                        className="sb-rad-btn sb-rad-btn-go"
                       >
                         {t.playNow}
                       </button>

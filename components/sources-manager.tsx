@@ -21,12 +21,13 @@ import {
   isDjCreatorHubModule,
   isEditCurrentModule,
   isGuestsModule,
+  isAlbumModule,
   isDjCreatorAssistantModule,
 } from "@/lib/center-module-context";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
 import { RoyaltyFreeMusicWorkspacePanel } from "@/components/royalty-free-music-workspace-panel";
 import { ShufersalBankWorkspacePanel } from "@/components/shufersal-bank-workspace-panel";
-import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED } from "@/lib/feature-flags";
+import { RFM_CATALOG_ENABLED, SHUFERSAL_BANK_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MyMusicLibraryWorkspacePanel } from "@/components/my-music-library-workspace-panel";
 import { MusicLibraryMetadataWorkspacePanel } from "@/components/music-library-metadata-workspace-panel";
 import { EditCurrentWorkspacePanel } from "@/components/edit-current-workspace-panel";
@@ -36,6 +37,7 @@ import Link from "next/link";
 import { ShareModal } from "@/components/share-modal";
 import { unifiedSourceToShareable } from "@/lib/share-utils";
 import { useLocale, useTranslations } from "@/lib/locale-context";
+import { useTr } from "@/lib/i18n/use-tr";
 import { labels } from "@/lib/locale-context";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
@@ -51,6 +53,8 @@ import { LibraryInputArea } from "@/components/library-input-area";
 import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
 import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
+import { AlbumWorkspacePanel } from "@/components/album-workspace-panel";
+import { RadioLibraryPanel } from "@/components/radio-library-panel";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
 import { guestLinkLedButtonClass } from "@/components/guest-link-button";
@@ -105,6 +109,7 @@ import {
   LIBRARY_PLAYLIST_TILE_SIDE_ACTION_CLUSTER_CLASS,
   LIBRARY_SIDE_ACTION_ICON_BTN_CLASS,
 } from "@/lib/library-side-action-styles";
+import { NewPlaylistPop } from "@/components/new-playlist-pop";
 import { libraryTilePresentationForUnifiedSource } from "@/lib/player-surface/library-tile-presentation";
 import { resolveLibraryKindBadge } from "@/lib/library-display-classification";
 import { inferTrackSourceChip } from "@/lib/track-source-chip";
@@ -137,6 +142,7 @@ type LibraryViewId =
   | "favorites"
   | "sources"
   | "saved_sources"
+  | "radio"
   | "dj_ai";
 type CollectionGroupId = "curated_masters" | "dayparts_hours" | "client_specific";
 type LibrarySelection =
@@ -265,36 +271,18 @@ function RailChevron({ dir }: { dir: "left" | "right" }) {
   );
 }
 
-/** Collapse control shown at a rail's inner edge while it is OPEN (lg+ only). */
-function RailCollapseToggle({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
-  return (
-    <div className={`hidden lg:flex ${side === "left" ? "justify-end" : "justify-start"}`}>
-      <button
-        type="button"
-        onClick={onClick}
-        title="Collapse panel"
-        aria-label="Collapse panel"
-        className="flex h-6 w-6 items-center justify-center rounded-md text-[#8b93a7] transition-colors hover:bg-white/5 hover:text-white"
-      >
-        <RailChevron dir={side === "left" ? "left" : "right"} />
-      </button>
-    </div>
-  );
-}
+/** ONE persistent chevron at a rail's inner edge (lg+ only). It never unmounts: the rail's width animates under it, so it
+ *  travels the whole way and the chevron turns with it (owner 2026-10-18: open/close as one movement). */
+/** Owner 2026-10-18: "New playlist" is a playlist-sized "+" row at the END of the playlists (next to where the new one appears);
+ *  the small pill in the header is hidden (code kept — flip to show it again). */
+const SHOW_PLAYLIST_TOP_PILL = false;
 
-/** Minimal 40px handle shown while a rail is COLLAPSED (lg+ only). */
-function RailExpandHandle({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+function RailToggle({ side, open, onClick }: { side: "left" | "right"; open: boolean; onClick: () => void }) {
+  const tr = useTr();
+  const label = open ? tr("Collapse panel") : tr("Expand panel");
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="Expand panel"
-      aria-label="Expand panel"
-      className="hidden w-full flex-1 items-start justify-center pt-1.5 text-[#8b93a7] transition-colors hover:text-white lg:flex"
-    >
-      <span className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-white/5">
-        <RailChevron dir={side === "left" ? "right" : "left"} />
-      </span>
+    <button type="button" onClick={onClick} title={label} aria-label={label} data-open={open} className={`sb-rail-toggle sb-rail-toggle--${side} hidden lg:flex`}>
+      <RailChevron dir={side} />
     </button>
   );
 }
@@ -354,6 +342,12 @@ function sbLogSourcesDiag(
     // eslint-disable-next-line no-console
     console.error("SOURCE_DISAPPEARED", { id: activeId, type: active?.type ?? "?", origin: active?.origin ?? "?", trigger, fetch: fetchDiag, wasActive: true });
   }
+}
+
+/** "Playlists" = real playlists only. A song saved from a search is stored as a ONE-track playlist (origin "playlist"), but it is a SINGLE — it lives under
+ *  All / Recently Added, never under Playlists (owner 2026-10-25: "why are there singles in my playlists?"). */
+function isRealPlaylistSource(s: UnifiedSource): boolean {
+  return s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s) && classifyLibraryEntityContract(s).entityKind === "collection";
 }
 
 export function SourcesManager({
@@ -863,9 +857,10 @@ function SourcesManagerInner({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
-  const { active: activeCenterModule, setActive: setActiveCenterModule } = useCenterModule();
+  const { active: activeCenterModule, setActive: setActiveCenterModule, workspaceId: centerWorkspaceId } = useCenterModule();
   const searchParams = useSearchParams();
   const { locale } = useLocale();
+  const tr = useTr();
   const { t } = useTranslations();
   const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -885,18 +880,66 @@ function SourcesManagerInner({
       /* ignore */
     }
   }, []);
-  const toggleLeftRail = () =>
+  /* rail open/close animation is switched on only AFTER the stored state was applied (no animation on page load) */
+  const railGridRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = railGridRef.current;
+    if (!el) return;
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => el.setAttribute("data-anim", "1")));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  /* while a rail moves, the page's heavy glass (backdrop blurs, blurred glows) is switched off for those ~650ms — every frame
+     re-lays-out the grid, and re-blurring dozens of tiles per frame is what made the movement stutter */
+  const railMoveTimer = useRef<number | null>(null);
+  const markRailMoving = () => {
+    const el = railGridRef.current;
+    if (!el) return;
+    el.setAttribute("data-moving", "1");
+    if (railMoveTimer.current) window.clearTimeout(railMoveTimer.current);
+    railMoveTimer.current = window.setTimeout(() => el.removeAttribute("data-moving"), 700);
+  };
+  const toggleLeftRail = () => {
+    markRailMoving();
+    toggleLeftRailState();
+  };
+  const toggleRightRail = () => {
+    markRailMoving();
+    toggleRightRailState();
+  };
+  const toggleLeftRailState = () =>
     setLeftRailOpen((v) => {
       const next = !v;
       try { localStorage.setItem("syncbiz-rail-left", next ? "open" : "collapsed"); } catch { /* ignore */ }
       return next;
     });
-  const toggleRightRail = () =>
+  const toggleRightRailState = () =>
     setRightRailOpen((v) => {
       const next = !v;
       try { localStorage.setItem("syncbiz-rail-right", next ? "open" : "collapsed"); } catch { /* ignore */ }
       return next;
     });
+  /* 2026-10-18 (owner): drag a song/link/file over the song list and the whole area blurs with a "+" — drop and it is added
+     to the library, the focus returns slowly. Only EXTERNAL payloads arm it (a link, a file); the app's own drags
+     (tiles, queue rows, playlists) carry `application/syncbiz-*` types and are left alone. */
+  const [libDropArmed, setLibDropArmed] = useState(false);
+  const libDropDepth = useRef(0);
+  const isExternalIngestDrag = (dt: DataTransfer | null): boolean => {
+    const types = Array.from(dt?.types ?? []);
+    if (types.some((t) => t.startsWith("application/syncbiz"))) return false;
+    return types.includes("Files") || types.includes("text/uri-list") || types.includes("text/plain") || types.includes("url");
+  };
+  useEffect(() => {
+    const off = () => {
+      libDropDepth.current = 0;
+      setLibDropArmed(false);
+    };
+    window.addEventListener("drop", off, true);
+    window.addEventListener("dragend", off, true);
+    return () => {
+      window.removeEventListener("drop", off, true);
+      window.removeEventListener("dragend", off, true);
+    };
+  }, []);
   /* Saved-to-library confirmation toast (simplification pass — "where did it save?"). */
   const [savedToast, setSavedToast] = useState<{ title: string } | null>(null);
   const savedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -907,13 +950,21 @@ function SourcesManagerInner({
   const [genreBrowseOpen, setGenreBrowseOpen] = useState(false);
   /* New-playlist modal — centered (replaced the native window.prompt at the top). */
   const [createPlaylistOpen, setCreatePlaylistOpen] = useState(false);
-  const [newPlaylistName, setNewPlaylistName] = useState("");
-  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   /* "Build" mode — after creating a playlist, the operator picks a genre and
      adds songs into it (the ＋ on cards adds straight to this playlist). */
   const [buildingPlaylist, setBuildingPlaylist] = useState<{ key: string; name: string } | null>(null);
   const [buildAddedCount, setBuildAddedCount] = useState(0);
-  const [selection, setSelection] = useState<LibrarySelection>({ type: "library_view", id: "all_library" });
+  /* `?view=radio` (the old /radio address redirects here) opens the library on its Radio heading — read at start, and again when
+     the address changes while this screen stays mounted (state adjusted during render, no effect). */
+  const viewParam = searchParams.get("view");
+  const [selection, setSelection] = useState<LibrarySelection>(
+    viewParam === "radio" ? { type: "library_view", id: "radio" } : { type: "library_view", id: "all_library" },
+  );
+  const [seenViewParam, setSeenViewParam] = useState(viewParam);
+  if (viewParam !== seenViewParam) {
+    setSeenViewParam(viewParam);
+    if (viewParam === "radio") setSelection({ type: "library_view", id: "radio" });
+  }
   const [customPlaylists, setCustomPlaylists] = useState<PlaylistTile[]>([]);
   const [playlistItemAssignments, setPlaylistItemAssignments] = useState<Record<string, string[]>>({});
   const [daypartPlaylistAssignments, setDaypartPlaylistAssignments] = useState<Record<string, string>>({});
@@ -1098,9 +1149,7 @@ function SourcesManagerInner({
       if (selection.id === "recently_added")
         return displaySources.filter((s) => !isDjCreatorWorkspacePlaylistSource(s)).slice(0, 24);
       if (selection.id === "playlists") {
-        return displaySources.filter(
-          (s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)
-        );
+        return displaySources.filter(isRealPlaylistSource);
       }
       if (selection.id === "user_playlists") {
         return displaySources.filter((s) => isUserSyncbizPlaylistSource(s));
@@ -1284,7 +1333,7 @@ function SourcesManagerInner({
 
   /** playlistId → compact schedule line, e.g. "Sun · Mon · 08:00–12:00 +1". */
   const playlistScheduleLineById = useMemo(() => {
-    const dayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => tr(d));
     const grouped = new Map<string, Schedule[]>();
     for (const s of playlistSchedules) {
       if (!s.enabled) continue;
@@ -1299,14 +1348,14 @@ function SourcesManagerInner({
         first.recurrence === "one_off" && first.oneOffDateLocal
           ? first.oneOffDateLocal
           : first.daysOfWeek.length >= 7
-            ? "Every day"
+            ? tr("Every day")
             : first.daysOfWeek.map((d) => dayShort[d] ?? "").filter(Boolean).join(" · ");
       const time = `${(first.startTimeLocal ?? "").slice(0, 5)}–${(first.endTimeLocal ?? "").slice(0, 5)}`;
       const extra = list.length > 1 ? ` +${list.length - 1}` : "";
       lines.set(pid, `${when || "—"} · ${time}${extra}`);
     }
     return lines;
-  }, [playlistSchedules]);
+  }, [playlistSchedules, tr]);
 
   /** Fallback matcher: playlist title (case-insensitive) → playlist id, for collection cards without a direct binding. */
   const playlistIdByTitle = useMemo(() => {
@@ -2120,9 +2169,9 @@ function SourcesManagerInner({
     [setSources]
   );
 
-  const handleCreatePlaylist = useCallback(async (nameArg: string) => {
+  const handleCreatePlaylist = useCallback(async (nameArg: string, opts?: { build?: boolean }): Promise<string | null> => {
     const name = (nameArg ?? "").trim();
-    if (!name) return;
+    if (!name) return null;
 
     const res = await fetch("/api/playlists", {
       method: "POST",
@@ -2135,7 +2184,7 @@ function SourcesManagerInner({
         cover: "",
       }),
     });
-    if (!res.ok) return;
+    if (!res.ok) return null;
 
     const created = await res.json();
     const sourceType = created.type as UnifiedSource["type"];
@@ -2153,16 +2202,18 @@ function SourcesManagerInner({
 
     savePlaylistToLocal(created);
     setSources((prev) => [unified, ...prev]);
+    if (opts?.build === false) return `syncbiz:${unified.id}`;
     // Enter BUILD mode: open the genre browser so the operator picks a genre and
     // adds songs straight into the new playlist (the ＋ on cards targets it).
     setBuildingPlaylist({ key: `syncbiz:${unified.id}`, name: created.name });
     setBuildAddedCount(0);
     setSelection({ type: "library_view", id: "all_library" });
     setGenreBrowseOpen(true);
+    return `syncbiz:${unified.id}`;
   }, [savePlaylistToLocal, setSelection, setSources]);
 
   const handleAddPlaylistTile = useCallback(() => {
-    const raw = window.prompt("Playlist name");
+    const raw = window.prompt(tr("Playlist name"));
     const label = (raw ?? "").trim();
     if (!label) return;
 
@@ -2518,6 +2569,7 @@ function SourcesManagerInner({
        * 3-column deck at lg, so workspace rails now widen to match.
        */}
       <div
+        ref={railGridRef}
         data-left-rail={leftRailOpen ? "open" : "collapsed"}
         data-right-rail={rightRailOpen ? "open" : "collapsed"}
         className="workspace-rail-grid grid w-full min-w-0 auto-rows-min grid-flow-row items-start content-start gap-3 lg:-mx-1 lg:h-full lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto] lg:overflow-hidden xl:-mx-1"
@@ -2526,7 +2578,7 @@ function SourcesManagerInner({
             with the "Ready" filter chip under the search bar; the always-open
             list looked cluttered). Keeps the daypart tiles + their Add button. */}
         <aside className="w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-2 lg:justify-self-stretch lg:max-h-[42vh] lg:overflow-y-auto">
-          <div className={leftRailOpen ? "" : "lg:hidden"}>
+          <div className="sb-rail-content sb-rail-content--left" data-open={leftRailOpen}>
           <div className="space-y-4 pt-1">
             {false ? (
             <section>
@@ -2614,7 +2666,7 @@ function SourcesManagerInner({
             <section>
               <div className="mb-1 flex items-center justify-between px-1">
                 <p className="library-section-title text-[10px] font-semibold uppercase tracking-[0.16em]">
-                  Playlist Tiles
+                  {tr("Playlist Tiles")}
                 </p>
                 <button
                   type="button"
@@ -2680,10 +2732,10 @@ function SourcesManagerInner({
                         <span className="min-w-0">
                           <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${pad.tone}`} aria-hidden />
-                            <span className="truncate">{pad.label}</span>
+                            <span className="truncate">{tr(pad.label)}</span>
                           </span>
                           <span className="library-card-meta block truncate text-[10px]">
-                            {assignedPlaylist?.title ?? "Playlist"}
+                            {assignedPlaylist?.title ?? tr("Playlist")}
                           </span>
                         </span>
                       </button>
@@ -2778,10 +2830,10 @@ function SourcesManagerInner({
                         <span className="min-w-0">
                           <span className="library-text-title flex items-center gap-1.5 text-sm font-semibold">
                             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
-                            <span className="truncate">{pad.label}</span>
+                            <span className="truncate">{tr(pad.label)}</span>
                           </span>
                           <span className="library-card-meta block truncate text-[10px]">
-                            {assignedPlaylist?.title ?? "Playlist"}
+                            {assignedPlaylist?.title ?? tr("Playlist")}
                           </span>
                         </span>
                       </button>
@@ -2834,9 +2886,40 @@ function SourcesManagerInner({
           </div>
         </aside>
 
-        <div className="library-list-shell library-list-shell--frameless relative row-start-1 min-w-0 self-start overflow-hidden p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3">
-          {/* Divider between the library nav and the songs area — inset from top/bottom (operator direction: no box, just a quiet line) */}
-          <span className="pointer-events-none absolute left-0 top-10 bottom-10 hidden w-px bg-white/[0.09] lg:block" aria-hidden />
+        <div
+          className={`library-list-shell library-list-shell--frameless relative row-start-1 min-w-0 self-start overflow-hidden p-2.5 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-stretch lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:px-3 xl:px-3${libDropArmed ? " sb-drop-armed" : ""}`}
+          onDragEnter={(e) => {
+            if (!showLibraryCenter || routeEmbedded || !isExternalIngestDrag(e.dataTransfer)) return;
+            libDropDepth.current += 1;
+            setLibDropArmed(true);
+          }}
+          onDragOver={(e) => {
+            if (!showLibraryCenter || routeEmbedded || !isExternalIngestDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={(e) => {
+            if (!isExternalIngestDrag(e.dataTransfer)) return;
+            libDropDepth.current = Math.max(0, libDropDepth.current - 1);
+            if (libDropDepth.current === 0) setLibDropArmed(false);
+          }}
+          onDrop={(e) => {
+            if (!showLibraryCenter || routeEmbedded || !isExternalIngestDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            libDropDepth.current = 0;
+            setLibDropArmed(false);
+            window.dispatchEvent(new CustomEvent("syncbiz:library-drop", { detail: { dataTransfer: e.dataTransfer } }));
+          }}
+        >
+          <span className="sb-drop-plus" aria-hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </span>
+          {/* Dividers between the side panels and the songs area — a quiet hairline that exists ONLY while its panel is open: it grows in
+              (and fades) on the same clock as the panel's movement, and is gone when the panel is closed (owner 2026-10-18). Styles: `.sb-rail-line*`. */}
+          <span className="sb-rail-line sb-rail-line--left" aria-hidden />
+          <span className="sb-rail-line sb-rail-line--right" aria-hidden />
           {routeEmbedded ? (
             <div className="sb-anim-rise flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto p-3 sm:p-4">
               <div className="flex shrink-0 justify-end">
@@ -2844,7 +2927,7 @@ function SourcesManagerInner({
                   type="button"
                   onClick={finishEmbeddedEditor}
                   aria-label="Close editor"
-                  title="Close"
+                  title={tr("Close")}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-900/70 text-slate-400 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04),0_2px_6px_rgba(0,0,0,0.25)] transition hover:border-slate-500/80 hover:bg-slate-800/80 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -2904,6 +2987,8 @@ function SourcesManagerInner({
             />
           ) : isGuestsModule(activeCenterModule) ? (
             <GuestInboxWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+          ) : isAlbumModule(activeCenterModule) ? (
+            <AlbumWorkspacePanel album={activeCenterModule.album} onClose={() => setActiveCenterModule(null)} />
           ) : isDjCreatorAssistantModule(activeCenterModule) ? (
             <DjCreatorAiShell
               variant="panel"
@@ -2972,7 +3057,7 @@ function SourcesManagerInner({
                       ? "bg-[#f5f5f7] text-[#111114]"
                       : "text-[#f5f5f7] hover:bg-white/[0.12]"
                   }`}
-                  title="Browse genres"
+                  title={tr("Browse genres")}
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -2980,7 +3065,7 @@ function SourcesManagerInner({
                     <rect x="3" y="14" width="7" height="7" rx="1.5" />
                     <rect x="14" y="14" width="7" height="7" rx="1.5" />
                   </svg>
-                  <span className="max-w-[7rem] truncate">{genreFilter || "Genres"}</span>
+                  <span className="max-w-[7rem] truncate">{genreFilter ? tr(genreFilter) : tr("Genres")}</span>
                 </button>
               )}
               {/* LIBRARY / Favorites rail links removed — the filter tabs above the
@@ -3008,13 +3093,13 @@ function SourcesManagerInner({
                   type="button"
                   onClick={() => setSelection({ type: "library_view", id: "recently_added" })}
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
-                  title="Shazam captures land in Recently Added. Phone-app link coming soon."
-                  aria-label="Shazam captures"
+                  title={tr("Shazam captures land in Recently Added. Phone-app link coming soon.")}
+                  aria-label={tr("Shazam captures")}
                 >
                   <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                     <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm3.6 13.9a3.9 3.9 0 0 1-2.8 1.2l-2.2.05a1.1 1.1 0 0 1-.05-2.2l2.2-.05a1.7 1.7 0 1 0-1.2-2.9l-1.3 1.25a1.1 1.1 0 0 1-1.53-1.58l1.3-1.26a3.9 3.9 0 0 1 5.58 5.49zM9.2 9.3l-2.2.05a1.7 1.7 0 1 0 1.2 2.9l1.3-1.25a1.1 1.1 0 0 1 1.53 1.58l-1.3 1.26A3.9 3.9 0 1 1 6.95 7.15l2.2-.05a1.1 1.1 0 0 1 .05 2.2z" />
                   </svg>
-                  <span>Shazam</span>
+                  <span>{tr("Shazam")}</span>
                 </button>
                 {/* Single Guest entry point — opens the Guest inbox in the center
                     monitor (the right-rail launcher was removed). */}
@@ -3022,24 +3107,41 @@ function SourcesManagerInner({
                   type="button"
                   onClick={() => setActiveCenterModule("guests")}
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
-                  title="Open Guest inbox"
-                  aria-label="Open Guest inbox"
+                  title={tr("Open Guest inbox")}
+                  aria-label={tr("Open Guest inbox")}
                 >
                   <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                     <circle cx="9" cy="7" r="4" />
                     <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
-                  <span>Guest</span>
+                  <span>{tr("Guest")}</span>
                 </button>
+                {/* Shufersal pilot demo bank (main, 2026-10-22) — in OUR bar, next to Guest. Absent entirely unless the flag is on AND this workspace is allow-listed. */}
+                {shufersalBankVisibleFor(centerWorkspaceId ?? null) ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveCenterModule(isShufersalBankModule(activeCenterModule) ? null : "shufersal-bank")}
+                    className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
+                    title="Shufersal Bank"
+                    aria-label="Shufersal Bank"
+                    aria-pressed={isShufersalBankModule(activeCenterModule)}
+                  >
+                    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M3 10 12 4l9 6" />
+                      <path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18" />
+                    </svg>
+                    <span>Shufersal</span>
+                  </button>
+                ) : null}
                 {/* Music Library Metadata is ADMIN-only internal management — intentionally NOT
                     launched from the player UI. The center module + panel + API remain wired
                     (center-module id "music-library-metadata"); no user-facing launcher here. */}
                 <button
                   type="button"
                   className={[guestLinkLedButtonClass, "h-10 shrink-0 justify-center px-3"].join(" ")}
-                  aria-label="My link (placeholder)"
-                  title="My link"
+                  aria-label={tr("My link (placeholder)")}
+                  title={tr("My link")}
                 >
                   <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -3047,7 +3149,7 @@ function SourcesManagerInner({
                     <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
                     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
-                  <span>Link</span>
+                  <span>{tr("Link")}</span>
                 </button>
               </div>
               <div className="flex shrink-0 items-center self-center px-2 sm:hidden" aria-hidden>
@@ -3071,7 +3173,7 @@ function SourcesManagerInner({
                 }`}
                 style={{ background: "linear-gradient(135deg,#3a3a3c,#1c1c1e)" }}
               >
-                All genres
+                {tr("All genres")}
               </button>
               {genres.map((g, i) => {
                 const coverSrc =
@@ -3108,7 +3210,7 @@ function SourcesManagerInner({
                     }`}
                     style={{ background: bg, animationDelay: `${Math.min(i * 30, 300)}ms` }}
                   >
-                    <span className="relative z-[1] line-clamp-2 max-w-[70%] break-words drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">{g}</span>
+                    <span className="relative z-[1] line-clamp-2 max-w-[70%] break-words drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">{tr(g)}</span>
                     {coverSrc ? (
                       <HydrationSafeImage
                         src={coverSrc}
@@ -3132,11 +3234,12 @@ function SourcesManagerInner({
                 {
                   id: "playlists",
                   label: "Playlists",
-                  count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
+                  count: displaySources.filter(isRealPlaylistSource).length,
                 },
                 { id: "user_playlists", label: "Your Playlists", count: userPlaylistContainers.length },
                 { id: "external_playlists", label: "Imported", count: containers.external.length },
                 { id: "sources", label: "Sources", count: containers.sources.length },
+                { id: "radio", label: "Radio", count: 0 },
                 { id: "favorites", label: "Favorites", count: favoriteIds.length },
               ] as Array<{ id: LibraryViewId; label: string; count: number }>
             ).map((c) => {
@@ -3152,7 +3255,7 @@ function SourcesManagerInner({
                     active ? "text-[#f5f5f7]" : "text-[#a1a1a6] hover:text-white"
                   }`}
                 >
-                  {c.label}
+                  {tr(c.label)}
                   <span
                     className={`absolute bottom-0 left-1 right-1 h-[2px] rounded-full bg-[#f5f5f7] transition-opacity duration-200 ${
                       active ? "opacity-100" : "opacity-0"
@@ -3169,7 +3272,7 @@ function SourcesManagerInner({
                 { id: "recently_added", count: Math.min(displaySources.length, 24) },
                 {
                   id: "playlists",
-                  count: displaySources.filter((s) => s.origin === "playlist" && !isDjCreatorWorkspacePlaylistSource(s)).length,
+                  count: displaySources.filter(isRealPlaylistSource).length,
                 },
                 { id: "user_playlists", count: userPlaylistContainers.length },
                 { id: "external_playlists", count: containers.external.length },
@@ -3207,7 +3310,7 @@ function SourcesManagerInner({
                 onClick={() => setGenreBrowseOpen((v) => !v)}
                 className="shrink-0 rounded-lg border border-white/[0.12] px-3 py-1.5 text-[12px] font-medium text-[#d1d1d6] transition-colors hover:bg-white/[0.08] hover:text-white"
               >
-                Genres
+                {tr("Genres")}
               </button>
               <button
                 type="button"
@@ -3227,7 +3330,7 @@ function SourcesManagerInner({
 
           <div
             key={`${viewMode}|${selection.type}|${"id" in selection ? selection.id : ""}|${"key" in selection ? selection.key : ""}`}
-            className="sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
+            className="sb-glow-scroll sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
           >
           {displaySources.length === 0 ? (
             <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
@@ -3495,8 +3598,8 @@ function SourcesManagerInner({
           ) : selectedSourceCards ? (
             <div className="space-y-4">
               <header className="library-list-shell rounded-2xl px-4 py-3">
-                <h2 className="library-text-title text-base font-semibold tracking-tight">Sources</h2>
-                <p className="library-text-subtitle mt-0.5 text-xs">Open, follow, and revisit recognizable channels and source worlds.</p>
+                <h2 className="library-text-title text-base font-semibold tracking-tight">{tr("Sources")}</h2>
+                <p className="library-text-subtitle mt-0.5 text-xs">{tr("Open, follow, and revisit recognizable channels and source worlds.")}</p>
               </header>
               <div className={LIBRARY_CARD_GRID_CLASS}>
                 {selectedSourceCards.map((s) => {
@@ -3527,14 +3630,14 @@ function SourcesManagerInner({
                         onClick={() => openSourceChannel(s.key)}
                         className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
                       >
-                        Open
+                        {tr("Open")}
                       </button>
                       <button
                         type="button"
                         onClick={() => toggleFollowedSource(s.key)}
                         className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
                       >
-                        {followedSourceKeys.includes(s.key) ? "Remove" : "Save"}
+                        {followedSourceKeys.includes(s.key) ? tr("Remove") : tr("Save")}
                       </button>
                     </div>
                   </div>
@@ -3636,14 +3739,16 @@ function SourcesManagerInner({
                           onClick={() => toggleFollowedSource(sourceOpenContext.key)}
                           className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
                         >
-                          {followedSourceKeys.includes(sourceOpenContext.key) ? "Remove" : "Save"}
+                          {followedSourceKeys.includes(sourceOpenContext.key) ? tr("Remove") : tr("Save")}
                         </button>
                       </div>
                     </div>
                   </div>
                 </header>
               ) : null}
-              {sourceOpenContext && sourceDetailItems ? (
+              {selection.type === "library_view" && selection.id === "radio" ? (
+                <RadioLibraryPanel />
+              ) : sourceOpenContext && sourceDetailItems ? (
                 <div className="space-y-8">
                   <section className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -3818,6 +3923,13 @@ function SourcesManagerInner({
                       </div>
                     )}
                   </section>
+                </div>
+              ) : selection.type === "library_view" && selection.id === "playlists" && visibleSources.length === 0 ? (
+                <div className="library-list-shell rounded-2xl px-6 py-12 text-center">
+                  <p className="library-empty-text text-sm">{locale === "he" ? "אין עדיין פלייליסטים" : "No playlists yet"}</p>
+                  <p className="library-text-subtitle mt-1 text-xs">
+                    {locale === "he" ? "שירים בודדים נמצאים תחת ״הכול״ ו״נוספו לאחרונה״" : "Single songs are under All and Recently Added"}
+                  </p>
                 </div>
               ) : (
               LIBRARY_SECTION_ORDER.map((sectionId: LibrarySectionId) => {
@@ -4003,12 +4115,13 @@ function SourcesManagerInner({
           )}
         </div>
 
-        <aside className="row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
-          <div className={leftRailOpen ? "space-y-4" : "space-y-4 lg:hidden"}>
-            {leftRailOpen ? <RailCollapseToggle side="left" onClick={toggleLeftRail} /> : null}
+        <aside className="relative row-start-1 w-full min-w-0 self-start p-1.5 lg:col-start-1 lg:row-start-1 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-y-auto">
+          <RailToggle side="left" open={leftRailOpen} onClick={toggleLeftRail} />
+          <div className="sb-rail-content sb-rail-content--left space-y-4" data-open={leftRailOpen}>
+            <div className="hidden h-10 lg:block" aria-hidden />
             <section>
               <p className="library-section-title px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                Library
+                {tr("Library")}
               </p>
               <div className="space-y-0.5">
                 {(() => {
@@ -4056,8 +4169,8 @@ function SourcesManagerInner({
                           setActiveCenterModule(null);
                           setSelection({ type: "library_view", id: "dj_ai" });
                         }}
-                        aria-label="DJ Creator playlists"
-                        title="DJ Creator — saved playlists from your catalog"
+                        aria-label={tr("DJ Creator playlists")}
+                        title={tr("DJ Creator — saved playlists from your catalog")}
                         className={`flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 hover:text-white ${
                           navViewActive("dj_ai") ? "text-white" : "text-[#a1a1a6]"
                         }`}
@@ -4091,14 +4204,13 @@ function SourcesManagerInner({
             </section>
 
           </div>
-          {!leftRailOpen ? <RailExpandHandle side="left" onClick={toggleLeftRail} /> : null}
         </aside>
 
         {/* ── RIGHT rail — DJ Creator AI pinned; ONE scrollbar, on the playlist list only ── */}
-        <aside className="flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
-          {rightRailOpen ? <RailCollapseToggle side="right" onClick={toggleRightRail} /> : null}
-          {!rightRailOpen ? <RailExpandHandle side="right" onClick={toggleRightRail} /> : null}
-          <div className={rightRailOpen ? "flex min-h-0 flex-1 flex-col gap-4" : "flex min-h-0 flex-1 flex-col gap-4 lg:hidden"}>
+        <aside className="relative flex w-full min-w-0 flex-col self-start p-1.5 lg:col-start-3 lg:row-start-1 lg:row-span-2 lg:justify-self-stretch lg:self-stretch lg:min-h-0 lg:overflow-hidden">
+          <RailToggle side="right" open={rightRailOpen} onClick={toggleRightRail} />
+          <div className="hidden h-10 shrink-0 lg:block" aria-hidden />
+          <div className="sb-rail-content sb-rail-content--right flex min-h-0 flex-1 flex-col gap-4" data-open={rightRailOpen}>
             <div className="shrink-0">
               <DjCreatorAiShell
                 variant="launcher"
@@ -4110,33 +4222,35 @@ function SourcesManagerInner({
             <section className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
                 <p className="library-section-title m-0 text-[10px] font-semibold uppercase tracking-[0.16em]">
-                  Your Playlists
+                  {tr("Your Playlists")}
                 </p>
-                {/* Create lives HERE — next to the list it creates into (moved from the left nav "+") */}
+                {/* Create lives HERE — next to the list it creates into (moved from the left nav "+"). With no
+                    playlist yet the big "+" tile below replaces it. */}
+                {SHOW_PLAYLIST_TOP_PILL && userPlaylistContainers.length > 0 ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setNewPlaylistName("");
-                    setCreatePlaylistOpen(true);
-                  }}
+                  onClick={() => setCreatePlaylistOpen(true)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/[0.1] bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold text-[#a1a1a6] transition-colors duration-150 hover:border-white/[0.18] hover:bg-white/[0.09] hover:text-[#f5f5f7]"
                 >
                   <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                     <path d="M12 5v14M5 12h14" />
                   </svg>
-                  New playlist
+                  {tr("New playlist")}
                 </button>
+                ) : null}
               </div>
               {userPlaylistContainers.length === 0 ? (
-                <p className="m-0 px-2 py-2 text-[11px] leading-relaxed text-[#6e6e73]">
-                  Create a playlist, then add songs from anywhere in the library — drag them here or use a card&apos;s ＋ button.
-                </p>
+                <button type="button" className="sb-pl-plus" onClick={() => setCreatePlaylistOpen(true)} aria-label={tr("New playlist")} title={tr("New playlist")}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden>
+                    <path d="M12 4.5v15M4.5 12h15" />
+                  </svg>
+                </button>
               ) : null}
               <div className="flex min-h-0 flex-1 flex-col">
                 {/* Compact rail list (cover · name · count · trash) — full view via the nav row */}
-                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1 max-h-[60vh] lg:max-h-none">
+                <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 max-h-[60vh] lg:max-h-none">
                 {userPlaylistContainers.slice(0, 30).map((p) => (
-                  <div key={p.key} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 hover:bg-white/[0.04]">
+                  <div key={p.key} className="sb-pl-row flex w-full items-center gap-2 rounded-2xl px-2 py-1.5 text-left text-xs">
                     <button
                       type="button"
                       draggable
@@ -4179,7 +4293,7 @@ function SourcesManagerInner({
                     >
                       <span
                         draggable={false}
-                        className="h-12 w-12 shrink-0 overflow-hidden rounded-md ring-1 ring-[color:var(--lib-border-thumb)] bg-[color:var(--lib-surface-card-art)]"
+                        className="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-[color:var(--lib-surface-card-art)]"
                       >
                         {p.cover ? (
                           <HydrationSafeImage
@@ -4193,8 +4307,8 @@ function SourcesManagerInner({
                         )}
                       </span>
                       <span draggable={false} className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-semibold text-[#f5f5f7]">{p.label}</span>
-                        <span className="block text-[11px] text-[#a1a1a6]">{p.itemCount} item</span>
+                        <span className="sb-pl-name block truncate text-[13px] font-semibold text-[#f5f5f7]">{p.label}</span>
+                        <span className="sb-pl-count block text-[11px] text-[#a1a1a6]">{p.itemCount} item</span>
                       </span>
                     </button>
                     <button
@@ -4212,6 +4326,13 @@ function SourcesManagerInner({
                     </button>
                   </div>
                 ))}
+                {userPlaylistContainers.length > 0 ? (
+                  <button type="button" className="sb-pl-add" onClick={() => setCreatePlaylistOpen(true)} aria-label={tr("New playlist")} title={tr("New playlist")}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
+                ) : null}
                 </div>
               </div>
             </section>
@@ -4337,76 +4458,13 @@ function SourcesManagerInner({
                 : t.confirmDelete
         }
       />
-      {/* ── New Playlist — CENTERED modal (replaced the native prompt at the top).
-          Names the playlist and explains how to fill it; opens it on create. */}
+      {/* ── New Playlist — the small glass name window (check turns green with a Face-ID-style draw, then the
+          playlist simply appears; no genre browser pops open). components/new-playlist-pop.tsx ── */}
       {createPlaylistOpen ? (
-        <div
-          className="fixed inset-0 z-[9985] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
-          onClick={() => { if (!creatingPlaylist) setCreatePlaylistOpen(false); }}
-        >
-          <div
-            className="sb-anim-modal w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-[#0f1015] shadow-[0_32px_96px_rgba(0,0,0,0.7)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const name = newPlaylistName.trim();
-                if (!name || creatingPlaylist) return;
-                setCreatingPlaylist(true);
-                void handleCreatePlaylist(name).finally(() => {
-                  setCreatingPlaylist(false);
-                  setCreatePlaylistOpen(false);
-                });
-              }}
-              className="p-5"
-            >
-              <div className="mb-4 flex items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0a84ff]/15 text-[#0a84ff]">
-                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                    <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                  </svg>
-                </span>
-                <div>
-                  <h2 className="text-[17px] font-semibold text-[#f5f5f7]">New playlist</h2>
-                  <p className="text-[12px] text-[#a1a1a6]">Give it a name — you can add songs right after.</p>
-                </div>
-              </div>
-              <input
-                autoFocus
-                type="text"
-                value={newPlaylistName}
-                onChange={(e) => setNewPlaylistName(e.target.value)}
-                placeholder="e.g. Friday Night, Chill Lunch, Summer Hits…"
-                className="w-full rounded-xl border border-white/[0.12] bg-white/[0.04] px-3.5 py-2.5 text-[15px] text-[#f5f5f7] placeholder:text-[#6e6e73] outline-none transition-colors focus:border-[#0a84ff]/60 focus:bg-white/[0.06]"
-              />
-              <div className="mt-3 flex items-start gap-2 rounded-xl bg-white/[0.03] px-3 py-2.5">
-                <svg className="mt-0.5 h-4 w-4 shrink-0 text-[#0a84ff]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" />
-                </svg>
-                <p className="text-[12px] leading-relaxed text-[#a1a1a6]">
-                  After it opens, add songs by <span className="text-[#d1d1d6]">dragging them in</span> from the library, or the <span className="text-[#d1d1d6]">＋</span> on any song card.
-                </p>
-              </div>
-              <div className="mt-5 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => { if (!creatingPlaylist) setCreatePlaylistOpen(false); }}
-                  className="rounded-lg px-3.5 py-2 text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-white"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newPlaylistName.trim() || creatingPlaylist}
-                  className="rounded-lg bg-[#f5f5f7] px-4 py-2 text-[13px] font-semibold text-[#111114] transition-transform hover:scale-[1.02] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-                >
-                  {creatingPlaylist ? "Creating…" : "Create & open"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NewPlaylistPop
+          onCreate={async (name) => (await handleCreatePlaylist(name, { build: false })) !== null}
+          onClose={() => setCreatePlaylistOpen(false)}
+        />
       ) : null}
       {/* Saved-to-library confirmation — loud, unmissable, self-dismissing */}
       {savedToast ? (
@@ -4443,6 +4501,9 @@ function SourcesManagerInner({
         yourPlaylists={addToPlaylistModalYourRows}
         readyPlaylists={addToPlaylistModalReadyRows}
         scheduledPlaylists={addToPlaylistModalScheduledRows}
+        itemTitle={addToPlaylistLeaf?.title ?? null}
+        itemCover={addToPlaylistLeaf?.cover ?? null}
+        onCreatePlaylist={(name) => handleCreatePlaylist(name, { build: false })}
         onPick={(playlistKey) => {
           if (!addToPlaylistLeaf) return;
           void appendLeafToDestinationPlaylistKey(addToPlaylistLeaf, playlistKey);

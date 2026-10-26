@@ -16,6 +16,7 @@ import { radioToShareable } from "@/lib/share-utils";
 import { getRadioStationsLocal, removeRadioStationLocal } from "@/lib/radio-local-store";
 import { useRadioNowPlaying } from "@/lib/use-radio-now-playing";
 import type { RadioStream } from "@/lib/source-types";
+import { useTr } from "@/lib/i18n/use-tr";
 
 type Props = {
   initialStations: RadioStream[];
@@ -142,6 +143,7 @@ function PauseGlyph({ className }: { className: string }) {
 
 /** "Now playing" card — shown while one of this workspace's stations is the current source. */
 function RadioNowPlaying({ stations }: { stations: RadioStream[] }) {
+  const tr = useTr();
   const { playSource, stop, pause, currentSource, status } = usePlayback();
   const { t } = useTranslations();
   const { locale } = useLocale();
@@ -171,7 +173,7 @@ function RadioNowPlaying({ stations }: { stations: RadioStream[] }) {
           {station.genre ? ` · ${station.genre}` : ""}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-2" role="group" aria-label="Radio controls">
+      <div className="flex shrink-0 items-center gap-2" role="group" aria-label={tr("Radio controls")}>
         <NeonControlButton size="sm" onClick={stop} title="Stop" aria-label="Stop">
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <rect x="6" y="6" width="12" height="12" rx="1" />
@@ -182,7 +184,7 @@ function RadioNowPlaying({ stations }: { stations: RadioStream[] }) {
             <PauseGlyph className="h-5 w-5" />
           </NeonControlButton>
         ) : (
-          <NeonControlButton size="md" onClick={() => playSource(radioToUnified(station))} active title="Play" aria-label="Play">
+          <NeonControlButton size="md" onClick={() => playSource(radioToUnified(station))} active title={tr("Play")} aria-label={tr("Play")}>
             <PlayGlyph className="h-5 w-5 ml-0.5" />
           </NeonControlButton>
         )}

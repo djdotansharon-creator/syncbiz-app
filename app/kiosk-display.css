@@ -1,0 +1,582 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+   KIOSK DISPLAY — the business's display screen (owner 2026-10-25). Component: components/kiosk-display.tsx.
+   The owner's reference: a deep colour field that glows from the song, content straight on it (no cards), big quiet type, soft pill chips.
+   Everything is sized in `em` from ONE number (--k-fs, 16px on a 1600×900 screen): the whole screen scales with the display, from a small monitor to a TV.
+   Dark and light looks share every rule through --k-w (the ink colour as an rgb triplet). No blur layers (the one exception: the veil behind the open password bar).
+   Also here: the owner's settings screen for it (`.sb-kset*`).
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* before React paints the cover, a locked screen starts on the same colour (no flash of the controller on a store screen that just booted); the component removes it again */
+html[data-sb-kiosk-boot="locked"]::before { content: ""; position: fixed; inset: 0; z-index: 9989; background: #04060f; }
+html[data-sb-kiosk-boot="locked"][data-sb-kiosk-theme="light"]::before { background: #f3f4f8; }
+
+/* the ink / base / veil are REGISTERED properties so that switching between the white and the black look is one slow, calm fade of everything at once (in step with the colours behind) */
+@property --k-w { syntax: "<number>+"; inherits: true; initial-value: 255 255 255; }
+@property --k-veil { syntax: "<number>+"; inherits: true; initial-value: 3 5 16; }
+@property --k-va { syntax: "<number>"; inherits: true; initial-value: 0.6; }
+@property --k-vb { syntax: "<number>"; inherits: true; initial-value: 0.3; }
+@property --k-vc { syntax: "<number>"; inherits: true; initial-value: 0.06; }
+@property --k-inv { syntax: "<color>"; inherits: true; initial-value: #0b1230; }
+@property --k-base { syntax: "<color>"; inherits: true; initial-value: #04060f; }
+
+/* while the display is up nothing behind it can scroll, and nothing on it scrolls except the few lists that are meant to (search results) */
+html[data-sb-kiosk="locked"], html[data-sb-kiosk="locked"] body { overflow: hidden !important; overscroll-behavior: none; }
+.sb-kiosk-root { position: fixed; inset: 0; z-index: 9990; overflow: hidden; overscroll-behavior: none; }
+.sb-kiosk {
+  --k-fs: clamp(10px, min(1vw, 1.7778vh), 40px);
+  --k-w: 255 255 255; --k-inv: #0b1230; --k-base: #04060f; --k-veil: 3 5 16; --k-va: 0.6; --k-vb: 0.3; --k-vc: 0.06;
+  --k-edge: 1.75em; --k-fade: 1800ms;
+  position: absolute; inset: 0; overflow: hidden; font-size: var(--k-fs); color: rgb(var(--k-w)); background: var(--k-base);
+  font-family: var(--font-rubik), var(--font-geist-sans), "Helvetica Neue", Arial, sans-serif;
+  animation: sb-kiosk-in 1400ms ease both;
+  transition: opacity 420ms ease, --k-w var(--k-fade) ease-in-out, --k-inv var(--k-fade) ease-in-out, --k-base var(--k-fade) ease-in-out, --k-veil var(--k-fade) ease-in-out, --k-va var(--k-fade) ease-in-out, --k-vb var(--k-fade) ease-in-out, --k-vc var(--k-fade) ease-in-out;
+}
+.sb-kiosk[data-theme="light"] { --k-w: 18 22 40; --k-inv: #ffffff; --k-base: #f3f4f8; --k-veil: 250 251 253; --k-va: 0.5; --k-vb: 0.22; --k-vc: 0.02; }
+.sb-kiosk[data-leaving="1"] { opacity: 0; pointer-events: none; }
+.sb-kiosk[data-leaving="1"] .sb-kiosk-stage { transform: translateY(1.4em); transition: transform 420ms ease; }
+@keyframes sb-kiosk-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* the background: the song's STRONG colours as four large soft glows (set by lib/cover-palette.ts), drifting slowly — transform only, no blur layer.
+   Two layers crossfade very slowly when the song changes; the hidden one holds still. */
+.sb-kiosk-field { position: absolute; inset: 0; overflow: hidden; }
+.sb-kiosk-glow { position: absolute; inset: 0; opacity: 0; transition: opacity var(--k-fade) ease-in-out; }
+.sb-kiosk-glow[data-front="1"] { opacity: 1; }
+/* the drift is so slow (a few pixels a second) that it is drawn in ~5 steps a second instead of 60 — it looks the same, and a computer without a graphics card is not kept busy redrawing the whole screen all the time */
+.sb-kiosk-glow i { position: absolute; border-radius: 50%; will-change: transform; animation: sb-kiosk-drift-a 48s steps(240, end) infinite alternate; }
+.sb-kiosk-glow i { transition: opacity var(--k-fade) ease-in-out; }
+.sb-kiosk[data-theme="light"] .sb-kiosk-glow i { opacity: 0.95; }
+.sb-kiosk-glow[data-front="0"] i { animation-play-state: paused; }
+.sb-kiosk-glow i:nth-child(1) { width: 92%; height: 130%; left: -22%; bottom: -46%; background: radial-gradient(closest-side, var(--c1) 0%, transparent 100%); }
+.sb-kiosk-glow i:nth-child(2) { width: 78%; height: 112%; right: -20%; top: -42%; background: radial-gradient(closest-side, var(--c2) 0%, transparent 100%); animation-name: sb-kiosk-drift-b; animation-duration: 58s; }
+.sb-kiosk-glow i:nth-child(3) { width: 66%; height: 100%; right: -6%; bottom: -52%; background: radial-gradient(closest-side, var(--c3) 0%, transparent 100%); animation-duration: 66s; animation-delay: -12s; }
+.sb-kiosk-glow i:nth-child(4) { width: 52%; height: 84%; left: 14%; top: -38%; background: radial-gradient(closest-side, var(--c4) 0%, transparent 100%); animation-name: sb-kiosk-drift-b; animation-duration: 54s; animation-delay: -20s; }
+@keyframes sb-kiosk-drift-a { from { transform: translate3d(-3%, 2%, 0) scale(1); } to { transform: translate3d(5%, -4%, 0) scale(1.16); } }
+@keyframes sb-kiosk-drift-b { from { transform: translate3d(4%, -3%, 0) scale(1.1); } to { transform: translate3d(-5%, 4%, 0) scale(0.96); } }
+/* a quiet veil on the side of the song keeps the type calm on strong colours (it flips with the layout) */
+.sb-kiosk-field::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, rgb(var(--k-veil) / var(--k-va)) 0%, rgb(var(--k-veil) / var(--k-vb)) 42%, rgb(var(--k-veil) / var(--k-vc)) 100%); pointer-events: none; }
+.sb-kiosk[data-song="right"] .sb-kiosk-field::after { background: linear-gradient(260deg, rgb(var(--k-veil) / var(--k-va)) 0%, rgb(var(--k-veil) / var(--k-vb)) 42%, rgb(var(--k-veil) / var(--k-vc)) 100%); }
+html[data-sb-fx="lite"] .sb-kiosk-glow i { animation: none; will-change: auto; transition: none; }
+/* light graphics (a simple computer): no per-frame colour animation of the whole screen — the look switches with a short fade, the glows just cross-dissolve */
+html[data-sb-fx="lite"] .sb-kiosk { transition: opacity 420ms ease; }
+html[data-sb-fx="lite"] .sb-kiosk-glow { transition: opacity 900ms ease; }
+html[data-sb-fx="lite"] .sb-kiosk-now { will-change: auto; }
+
+/* the layout: the song on one EDGE of the screen, ONE panel with its icons on the other edge, the clock in the middle on top. Hebrew and English are exact opposites
+   (the stage's direction is the language's opposite; every text keeps its own direction). The song sits a little in from its edge, the panel's icons close to theirs. */
+.sb-kiosk-stage { direction: var(--k-layout-dir, ltr); position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 7.4em 2.2em 7.4em 15em; padding-inline: 15em 2.2em; overflow: hidden; }
+.sb-kiosk-top { position: absolute; z-index: 2; top: 1.9em; left: 0; right: 0; display: flex; justify-content: center; pointer-events: none; }
+.sb-kiosk-top > * { pointer-events: auto; }
+
+/* the clock: big numerals, the date quiet underneath */
+.sb-kiosk-clock { display: flex; flex-direction: column; align-items: center; gap: 0.45em; line-height: 1; }
+.sb-kiosk-clock b { font-size: 3.9em; font-weight: 500; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.sb-kiosk-clock small { font-size: 1em; font-weight: 400; letter-spacing: 0.01em; color: rgb(var(--k-w) / 0.7); }
+
+/* the lock (on the song's side) and the sun / moon (on the other): only an icon each, no circle, the same distance from the top and from the side */
+.sb-kiosk-lock, .sb-kiosk-theme { position: absolute; z-index: 3; top: var(--k-edge); display: grid; place-items: center; width: 3.2em; height: 3.2em; padding: 0; border: 0; background: transparent; color: rgb(var(--k-w) / 0.7); cursor: pointer; transition: color 220ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* the lock's drawn shape starts ~1 px nearer the top than the side (its body is wider than its shackle is tall): nudged down so the DRAWN lock is the same distance from the top as from the side (measured: 46.3 / 46.3 px at 1600×900) */
+.sb-kiosk-lock { top: calc(var(--k-edge) + 0.0625em); }
+.sb-kiosk[data-song="left"] .sb-kiosk-lock, .sb-kiosk[data-song="right"] .sb-kiosk-theme { left: var(--k-edge); }
+.sb-kiosk[data-song="right"] .sb-kiosk-lock, .sb-kiosk[data-song="left"] .sb-kiosk-theme { right: var(--k-edge); }
+.sb-kiosk-lock:hover, .sb-kiosk-theme:hover { color: rgb(var(--k-w)); transform: scale(1.14); }
+.sb-kiosk-lock:active, .sb-kiosk-theme:active { transform: scale(0.92); }
+.sb-kiosk-lock:focus-visible, .sb-kiosk-theme:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+.sb-kiosk-scrim { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(2, 4, 14, 0.5); animation: sb-kiosk-in 260ms ease both; }
+.sb-kiosk[data-theme="light"] .sb-kiosk-scrim { background: rgba(240, 242, 248, 0.5); }
+/* the ONLY blur on the display screen, and only while the password bar is open (owner: the background should blur behind it); light graphics mode keeps a plain veil */
+html:not([data-sb-fx="lite"]) .sb-kiosk-scrim { background: rgba(2, 4, 14, 0.34); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+html:not([data-sb-fx="lite"]) .sb-kiosk[data-theme="light"] .sb-kiosk-scrim { background: rgba(240, 242, 248, 0.38); }
+.sb-kiosk[data-pin="1"] .sb-kiosk-glow i { animation-play-state: paused; }
+
+/* the bar: no frame, no word. The icon sits on the same side as the corner lock (the left in Hebrew): a lock; a grey ✓ once something is typed; a red lock when wrong; when right the ✓
+   draws itself into a ring and back into a quick green ✓ — the bar itself never changes colour. */
+.sb-kiosk-pinbar { direction: var(--k-layout-dir, ltr); display: flex; align-items: center; width: 27.5em; height: 4em; border-radius: 999px; background: #141a36; background: color-mix(in srgb, var(--k-tint, #3b4cff) 22%, #0c1128); box-shadow: 0 1.4em 3.8em rgba(0, 2, 24, 0.5); color: rgba(255, 255, 255, 0.85); animation: sb-kiosk-bar-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk[data-theme="light"] .sb-kiosk-pinbar { background: #ffffff; color: rgba(18, 22, 40, 0.85); box-shadow: 0 1.4em 3.6em rgba(30, 40, 90, 0.22); }
+@keyframes sb-kiosk-bar-in { from { opacity: 0; transform: scale(0.9) translateY(0.6em); } to { opacity: 1; transform: none; } }
+.sb-kiosk-pin-btn { flex: none; display: grid; place-items: center; width: 4em; height: 100%; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: default; transition: color 220ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease; }
+.sb-kiosk-pinbar[data-typed] .sb-kiosk-pin-btn { opacity: 0.6; cursor: pointer; }
+.sb-kiosk-pinbar[data-typed] .sb-kiosk-pin-btn:hover:not(:disabled) { opacity: 1; transform: scale(1.12); }
+.sb-kiosk-pin-btn:focus-visible { outline: 2px solid currentColor; outline-offset: -0.3em; }
+.sb-kiosk-pin-field { direction: var(--k-text-dir, ltr); position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; }
+.sb-kiosk-caret { position: absolute; inset-inline-start: 1.7em; top: 50%; width: 2px; height: 1.7em; margin-top: -0.85em; border-radius: 2px; background: currentColor; animation: sb-kiosk-blink 1.06s steps(1, end) infinite; pointer-events: none; }
+@keyframes sb-kiosk-blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+.sb-kiosk-pinbar:not([data-typed]) input { caret-color: transparent; }
+.sb-kiosk-pinbar input { flex: 1; min-width: 0; height: 100%; padding: 0 1.3em 0 1.7em; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 1.25em; letter-spacing: 0.24em; }
+[dir="rtl"] .sb-kiosk-pinbar input { padding: 0 1.7em 0 1.3em; }
+.sb-kiosk-pinbar input::placeholder { letter-spacing: 0; font-size: 0.85em; color: currentColor; opacity: 0.55; }
+.sb-kiosk-pinbar[data-state="bad"] { animation: sb-kiosk-shake 420ms ease both; }
+.sb-kiosk-pinbar[data-state="bad"] .sb-kiosk-pin-btn { color: #ff5a4f; }
+.sb-kiosk-pinbar[data-state="ok"] .sb-kiosk-pin-btn { color: #34d27b; opacity: 1; }
+.sb-kiosk-okmark .tick { stroke-dasharray: 1; stroke-dashoffset: 1; animation: sb-kiosk-tick 200ms ease-out 0ms forwards; }
+.sb-kiosk-okmark .ring { stroke-dasharray: 1; stroke-dashoffset: 1; transform-origin: center; transform: rotate(-60deg); animation: sb-kiosk-ring-draw 340ms ease-out 140ms forwards, sb-kiosk-ring-undraw 260ms ease-in 520ms forwards; }
+@keyframes sb-kiosk-tick { to { stroke-dashoffset: 0; } }
+@keyframes sb-kiosk-ring-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes sb-kiosk-ring-undraw { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -1; } }
+@keyframes sb-kiosk-shake { 20% { transform: translateX(-0.5em); } 40% { transform: translateX(0.45em); } 60% { transform: translateX(-0.25em); } 80% { transform: translateX(0.12em); } }
+
+/* the song */
+.sb-kiosk-now { direction: var(--k-text-dir, ltr); flex: none; width: 21.5em; will-change: transform; transform: translateX(calc(var(--k-sign, 1) * (50vw - 25.75em))); transition: transform 1000ms cubic-bezier(0.22, 1, 0.36, 1); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.sb-kiosk-art { position: relative; width: 100%; aspect-ratio: 1; border-radius: 2em; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgb(var(--k-w) / 0.12); color: rgb(var(--k-w) / 0.6); }
+.sb-kiosk-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+/* a new song: the new picture comes up with a slow, soft zoom while the old one sinks away underneath it */
+.sb-kiosk-art-new { animation: sb-kiosk-art-in 1900ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk-art-old { animation: sb-kiosk-art-out 1900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+@keyframes sb-kiosk-art-in { from { opacity: 0; transform: scale(1.1) translateY(2.5%); } to { opacity: 1; transform: none; } }
+@keyframes sb-kiosk-art-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.95); } }
+.sb-kiosk-meta { width: 100%; margin-top: 1.4em; text-align: center; animation: sb-kiosk-rise 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes sb-kiosk-rise { from { opacity: 0; transform: translateY(0.7em); } to { opacity: 1; transform: none; } }
+.sb-kiosk-title { margin: 0; font-size: 1.95em; font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-kiosk-artist { margin: 0.3em 0 0; font-size: 1.15em; color: rgb(var(--k-w) / 0.62); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the progress bar: only a thin line. Resting the mouse on it makes it swell up and down a little and shows the current minute under its left end (no start / end times) */
+.sb-kiosk-seek { position: relative; direction: ltr; width: 100%; height: 3em; margin-top: 0.5em; }
+.sb-kiosk-prog { position: absolute; left: 0; right: 0; top: 0.9em; height: max(2px, 0.125em); border-radius: 999px; background: rgb(var(--k-w) / 0.22); overflow: hidden; transition: height 220ms cubic-bezier(0.22, 1, 0.36, 1), top 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-prog span { display: block; height: 100%; border-radius: inherit; background: rgb(var(--k-w)); transition: width 400ms linear; }
+/* pressing a spot makes the fill GLIDE there; once it is dragged it follows the pointer (a hair of easing — no lag you can feel) */
+.sb-kiosk-seek[data-scrub="1"] .sb-kiosk-prog span { transition: width 90ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-seek[data-glide="1"] .sb-kiosk-prog span { transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-seek:hover .sb-kiosk-prog, .sb-kiosk-seek:active .sb-kiosk-prog { top: calc(0.9em - 1px); height: max(4px, 0.25em); }
+.sb-kiosk-at { position: absolute; left: 0; top: 2em; font-family: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace; font-size: 1em; font-weight: 300; letter-spacing: 0.08em; line-height: 1; font-variant-numeric: tabular-nums; color: rgb(var(--k-w) / 0.8); opacity: 0; transform: translateY(-0.25em); transition: opacity 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1); pointer-events: none; }
+/* where the owner allowed moving within the song the bar is a slider: it can be dragged, and while it is dragged it stays swollen and shows the minute it would jump to */
+.sb-kiosk-seek[data-seek="1"] { cursor: pointer; touch-action: none; user-select: none; }
+.sb-kiosk-seek[data-seek="1"]:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.7); outline-offset: 0.2em; border-radius: 0.6em; }
+.sb-kiosk-seek[data-scrub="1"] .sb-kiosk-prog { top: calc(0.9em - 1px); height: max(4px, 0.25em); }
+.sb-kiosk-seek[data-scrub="1"] .sb-kiosk-at { opacity: 1; transform: none; }
+.sb-kiosk-seek:hover .sb-kiosk-at, .sb-kiosk-seek:active .sb-kiosk-at { opacity: 1; transform: none; }
+
+/* the three buttons: big icons, NO circle behind them — under the pointer they only grow; a press squeezes the button, nudges the icon the way it points and sends out one soft ring */
+.sb-kiosk-ctl { direction: ltr; display: flex; align-items: center; justify-content: center; gap: 2em; margin-top: 0.3em; }
+.sb-kiosk-ctl button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 4.8em; height: 4.8em; padding: 0; border: 0; background: transparent; color: rgb(var(--k-w)); cursor: pointer; transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), color 300ms ease; }
+.sb-kiosk-ctl button.is-main { width: 6.6em; height: 6.6em; }
+.sb-kiosk-ctl button:hover { transform: scale(1.16); }
+.sb-kiosk-ctl button:active { transform: scale(0.86); transition-duration: 90ms; }
+.sb-kiosk-ctl button:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 0.2em; border-radius: 1em; }
+.sb-kiosk-ico { display: inline-flex; }
+.sb-kiosk-ico[data-hit] { animation: sb-kiosk-nudge-play 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk-ctl [data-kind="prev"] .sb-kiosk-ico[data-hit] { animation-name: sb-kiosk-nudge-prev; }
+.sb-kiosk-ctl [data-kind="next"] .sb-kiosk-ico[data-hit] { animation-name: sb-kiosk-nudge-next; }
+@keyframes sb-kiosk-nudge-prev { 0% { transform: translateX(0.45em); } 100% { transform: none; } }
+@keyframes sb-kiosk-nudge-next { 0% { transform: translateX(-0.45em); } 100% { transform: none; } }
+@keyframes sb-kiosk-nudge-play { 0% { transform: scale(0.78); } 100% { transform: none; } }
+/* play and pause sit on top of each other: the one that is not shown shrinks and fades while the other grows in (nothing re-mounts — so nothing flickers) */
+.sb-kiosk-swap { display: inline-grid; }
+.sb-kiosk-swap svg { grid-area: 1 / 1; transition: opacity 260ms ease, transform 340ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-swap svg[data-on="0"] { opacity: 0; transform: scale(0.55); }
+.sb-kiosk-pulse { position: absolute; inset: 14%; border: 0.12em solid rgb(var(--k-w) / 0.55); border-radius: 50%; pointer-events: none; animation: sb-kiosk-pulse 620ms ease-out both; }
+@keyframes sb-kiosk-pulse { from { opacity: 0.9; transform: scale(0.55); } to { opacity: 0; transform: scale(1.45); } }
+
+/* the volume, in the controller's own style (Apple-Music): a speaker and a thin capsule with a fill and no knob; it thickens a little under the pointer */
+.sb-kiosk-vol { direction: ltr; width: 100%; display: flex; align-items: center; gap: 0.8em; margin-top: 0.2em; color: rgb(var(--k-w) / 0.75); }
+.sb-kiosk-vol-ico { flex: none; }
+.sb-kiosk-vol-line { position: relative; flex: 1; min-width: 0; height: 2.2em; display: flex; align-items: center; cursor: pointer; touch-action: none; user-select: none; }
+.sb-kiosk-vol-track { position: relative; display: block; width: 100%; height: 0.4em; border-radius: 999px; background: rgb(var(--k-w) / 0.22); overflow: hidden; transition: height 160ms ease; }
+.sb-kiosk-vol-track b { position: absolute; left: 0; top: 0; bottom: 0; width: var(--v); border-radius: inherit; background: rgb(var(--k-w) / 0.96); transition: width 340ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* same as the progress bar: pressed → glides there; dragged → follows the pointer; anything else (a fade, the controller) eases to its place */
+.sb-kiosk-vol[data-drag="1"] .sb-kiosk-vol-track b { transition: width 90ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-vol[data-glide="1"] .sb-kiosk-vol-track b { transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-vol-line:hover .sb-kiosk-vol-track, .sb-kiosk-vol[data-drag="1"] .sb-kiosk-vol-track { height: 0.55em; }
+.sb-kiosk-vol-line:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.7); outline-offset: 0.1em; border-radius: 0.6em; }
+
+/* the other edge: ONE panel and a slim rail of icons */
+.sb-kiosk-side { direction: var(--k-layout-dir, ltr); flex: none; display: flex; align-items: center; gap: 4.35em; }
+.sb-kiosk-panel { width: 31em; min-width: 0; display: flex; flex-direction: column; opacity: 0; visibility: hidden; pointer-events: none; transform: translateX(calc(var(--k-sign, 1) * 2.4em)); transition: opacity 450ms ease, transform 800ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 800ms; }
+/* nothing open: the player stands in the middle (see .sb-kiosk-now) and the next song is a small notice in the corner; one icon open: the player slides to its side and the panel comes in */
+.sb-kiosk[data-panel="1"] .sb-kiosk-now { transform: none; }
+.sb-kiosk[data-panel="1"] .sb-kiosk-panel { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 280ms, 280ms, 0s; }
+/* the panel's pages are CARDS in a vertical stack: a fixed box (so the panel never jumps), soft edges top and bottom, each page centred in it; swapping pages slides them up or down
+   (the direction follows the order of the icons on the rail) */
+.sb-kiosk-panel-box { position: relative; height: 30em; overflow: hidden; }
+.sb-kiosk-panel-box[data-moving="1"] { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 3em, #000 calc(100% - 3em), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 3em, #000 calc(100% - 3em), transparent 100%); }
+.sb-kiosk-card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 0.8em; will-change: transform, opacity; }
+.sb-kiosk-card[data-id="search"] { justify-content: flex-start; padding-top: 4.5em; }
+.sb-kiosk-card > h3 { flex: none; margin: 0 0 1.1em; font-size: 1.5em; font-weight: 700; }
+.sb-kiosk-pane { flex: none; display: flex; flex-direction: column; }
+/* moving between pages is always UP: the old page leaves upward (quickly, fading) and the new one comes up from further below a moment later — so they never pile onto each other */
+.sb-kiosk-card[data-state="in"] { animation: sb-kiosk-card-in 900ms cubic-bezier(0.22, 1, 0.36, 1) 170ms both; }
+.sb-kiosk-card[data-state="out"] { animation: sb-kiosk-card-out 560ms cubic-bezier(0.55, 0, 0.7, 0.4) both; pointer-events: none; }
+.sb-kiosk-card[data-state="in"] .sb-kiosk-next li, .sb-kiosk-card[data-state="out"] .sb-kiosk-next li, .sb-kiosk-card[data-state="in"] .sb-kiosk-hits li { animation: none; }
+@keyframes sb-kiosk-card-in { from { opacity: 0; transform: translateY(13em); } to { opacity: 1; transform: none; } }
+@keyframes sb-kiosk-card-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-13em); } }
+
+/* the icons that switch the panel — a quiet column on the edge */
+.sb-kiosk-rail { flex: none; display: flex; flex-direction: column; gap: 0.7em; }
+.sb-kiosk-rail button { display: grid; place-items: center; width: 3.7em; height: 3.7em; padding: 0; border: 0; background: transparent; color: rgb(var(--k-w) / 0.4); cursor: pointer; transition: color 450ms ease, transform 450ms cubic-bezier(0.22, 1, 0.36, 1), filter 450ms ease; }
+.sb-kiosk-rail button:hover { color: rgb(var(--k-w) / 0.75); transform: scale(1.1); }
+.sb-kiosk-rail button:active { transform: scale(0.9); transition-duration: 120ms; }
+.sb-kiosk-rail button[data-active="1"] { color: rgb(var(--k-w)); transform: scale(1.22); filter: drop-shadow(0 0 0.45em rgb(var(--k-w) / 0.4)); }
+.sb-kiosk-rail button[data-active="1"]:hover { transform: scale(1.28); }
+.sb-kiosk-rail button:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; border-radius: 1em; }
+
+/* (the search box keeps a steady height so the field does not jump when results appear) */
+.sb-kiosk-searchbox { display: flex; flex-direction: column; gap: 1.1em; }
+.sb-kiosk-search { position: relative; flex: none; height: 3.8em; display: flex; align-items: center; border-radius: 999px; background: rgb(var(--k-w) / 0.1); color: rgb(var(--k-w) / 0.7); transition: background-color 200ms ease; }
+.sb-kiosk-search:focus-within { background: rgb(var(--k-w) / 0.16); }
+/* only the bar: the magnifier waits in the middle; when the bar is CLICKED (focus) or something is typed it glides to where reading starts (the right in Hebrew, the left in English) and the
+   writing line appears next to it — resting the pointer on the bar does nothing (owner 2026-10-26) */
+.sb-kiosk-search-ico { position: absolute; top: 50%; inset-inline-start: 50%; transform: translate(calc(var(--k-sign, 1) * 50%), -50%); transition: inset-inline-start 520ms cubic-bezier(0.22, 1, 0.36, 1), transform 520ms cubic-bezier(0.22, 1, 0.36, 1), color 300ms ease; pointer-events: none; }
+.sb-kiosk-search[data-typed="1"] .sb-kiosk-search-ico, .sb-kiosk-search:focus-within .sb-kiosk-search-ico { inset-inline-start: 1.5em; transform: translate(0, -50%); color: rgb(var(--k-w) / 0.85); }
+.sb-kiosk-search input { flex: 1; min-width: 0; height: 100%; padding: 0 1.5em; border: 0; outline: 0; background: transparent; color: rgb(var(--k-w)); font: inherit; font-size: 1.15em; caret-color: transparent; transition: padding 520ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-search[data-typed="1"] input, .sb-kiosk-search:focus-within input { padding-inline-start: 3.6em; caret-color: currentColor; }
+.sb-kiosk-search input { cursor: text; }
+/* four results and a "More" button fit as they are; after "More" the list is bounded and scrolls (soft edge at the bottom) */
+.sb-kiosk-hits-wrap { position: relative; max-height: 20.4em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.sb-kiosk-hits-wrap[data-long="1"] { padding-bottom: 2em; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.4em), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 2.4em), transparent); }
+.sb-kiosk-hits-wrap::-webkit-scrollbar { display: none; }
+.sb-kiosk-more { display: block; margin: 1em auto 0; height: 2.6em; padding: 0 1.8em; border: 0; border-radius: 999px; background: rgb(var(--k-w) / 0.12); color: rgb(var(--k-w) / 0.9); font: inherit; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: background-color 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-more:hover { background: rgb(var(--k-w) / 0.22); transform: scale(1.05); }
+.sb-kiosk-more:active { transform: scale(0.95); }
+.sb-kiosk-more:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+/* "My playlists": the same rows as the results, with a ▶ that puts the playlist on and the ⋯ */
+.sb-kiosk-plist-acts { display: inline-flex; align-items: center; gap: 0.1em; }
+.sb-kiosk-plist-play { display: grid; place-items: center; width: 2.6em; height: 2.6em; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--k-w) / 0.12); color: rgb(var(--k-w) / 0.9); cursor: pointer; transition: background-color 200ms ease, color 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-plist-play:hover { background: rgb(var(--k-w) / 0.22); transform: scale(1.1); }
+.sb-kiosk-plist-play:active { transform: scale(0.92); }
+.sb-kiosk-plist-play[data-fired="1"] { background: rgb(var(--k-w)); color: var(--k-inv); }
+.sb-kiosk-plist-play:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+.sb-kiosk-hits { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.75em; }
+.sb-kiosk-hits li { display: grid; grid-template-columns: 3.6em minmax(0, 1fr) auto; align-items: center; gap: 0.9em; }
+.sb-kiosk-hit-art { width: 3.6em; aspect-ratio: 1; border-radius: 0.8em; overflow: hidden; background: rgb(var(--k-w) / 0.12); }
+.sb-kiosk-hit-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-kiosk-hit-name { min-width: 0; display: flex; flex-direction: column; gap: 0.1em; }
+.sb-kiosk-hit-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.15em; font-weight: 650; }
+.sb-kiosk-hit-name small { font-size: 0.82em; color: rgb(var(--k-w) / 0.55); }
+/* the three dots of a result */
+.sb-kiosk-dots { display: grid; place-items: center; width: 2.6em; height: 2.6em; padding: 0; border: 0; background: transparent; color: rgb(var(--k-w) / 0.5); cursor: pointer; transition: color 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-dots:hover, .sb-kiosk-dots[aria-expanded="true"] { color: rgb(var(--k-w)); transform: scale(1.16); }
+.sb-kiosk-dots:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); border-radius: 0.6em; }
+
+/* the glass sheet of a result: it opens beside the list on the side of the middle of the screen (the left in Hebrew, the right in English), so it never covers the list or the player */
+.sb-kiosk-panel { position: relative; }
+.sb-kiosk-sheet { position: absolute; z-index: 4; top: min(var(--top, 0px), calc(100% - 20em)); width: 18.5em; max-height: 22em; display: flex; flex-direction: column; gap: 0.25em; padding: 0.7em; border-radius: 1.6em; background: rgb(var(--k-w) / 0.08); box-shadow: 0 1.6em 4em rgba(0, 2, 24, 0.3); animation: sb-kiosk-sheet-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both; transform-origin: calc(50% + var(--k-sign, 1) * 50%) 20%; }
+.sb-kiosk[data-song="left"] .sb-kiosk-sheet { right: calc(100% + 1.3em); }
+.sb-kiosk[data-song="right"] .sb-kiosk-sheet { left: calc(100% + 1.3em); }
+html:not([data-sb-fx="lite"]) .sb-kiosk-sheet { -webkit-backdrop-filter: blur(26px) saturate(1.25); backdrop-filter: blur(26px) saturate(1.25); }
+html[data-sb-fx="lite"] .sb-kiosk-sheet { background: rgb(var(--k-veil) / 0.78); }
+@keyframes sb-kiosk-sheet-in { from { opacity: 0; transform: translateX(calc(var(--k-sign, 1) * 1.8em)) scale(0.93); } to { opacity: 1; transform: none; } }
+.sb-kiosk-sheet-item { display: flex; align-items: center; gap: 0.9em; height: 3.3em; padding: 0 1em; border: 0; border-radius: 1.1em; background: transparent; color: rgb(var(--k-w) / 0.92); font: inherit; font-size: 1.05em; font-weight: 600; text-align: start; cursor: pointer; transition: background-color 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-sheet-item:hover { background: rgb(var(--k-w) / 0.12); transform: scale(1.02); }
+.sb-kiosk-sheet-item:active { transform: scale(0.97); }
+.sb-kiosk-sheet-item svg { flex: none; opacity: 0.85; }
+.sb-kiosk-sheet-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-kiosk-sheet-back { align-self: flex-start; height: 2.4em; padding: 0 0.9em; border: 0; border-radius: 999px; background: transparent; color: rgb(var(--k-w) / 0.6); font: inherit; font-size: 0.9em; cursor: pointer; }
+.sb-kiosk-sheet-back:hover { color: rgb(var(--k-w)); }
+.sb-kiosk-sheet-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; display: flex; flex-direction: column; gap: 0.2em; }
+.sb-kiosk-sheet-scroll::-webkit-scrollbar { display: none; }
+.sb-kiosk-sheet-note { margin: 0; padding: 1.2em 1em; text-align: center; font-size: 1.05em; font-weight: 650; }
+.sb-kiosk-when { display: flex; flex-direction: column; gap: 0.8em; padding: 0.4em 0.5em 0.6em; }
+.sb-kiosk-when-day { display: flex; align-items: center; justify-content: center; gap: 0.7em; height: 3em; padding: 0 1.1em; border: 0; border-radius: 999px; background: rgb(var(--k-w) / 0.1); color: rgb(var(--k-w)); font: inherit; font-size: 1em; font-weight: 650; cursor: pointer; transition: background-color 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-when-day:hover { background: rgb(var(--k-w) / 0.18); transform: scale(1.03); }
+.sb-kiosk-when-day:active { transform: scale(0.97); }
+.sb-kiosk-when-day:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+/* the calendar that opens from the date button (inside the same glass sheet, which grows a little taller for it) */
+.sb-kiosk-sheet[data-view="cal"] { max-height: 26em; top: min(var(--top, 0px), calc(100% - 25.4em)); }
+.sb-kiosk-cal { display: flex; flex-direction: column; gap: 0.3em; padding: 0.1em 0.5em 0.5em; animation: sb-kiosk-rise 380ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk-cal-head { display: flex; align-items: center; justify-content: space-between; height: 2.4em; }
+.sb-kiosk-cal-head b { font-size: 1em; font-weight: 700; }
+.sb-kiosk-cal-nav { display: grid; place-items: center; width: 2.2em; height: 2.2em; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgb(var(--k-w) / 0.85); cursor: pointer; transition: background-color 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease; }
+.sb-kiosk-cal-nav:hover:not(:disabled) { background: rgb(var(--k-w) / 0.14); transform: scale(1.1); }
+.sb-kiosk-cal-nav:active:not(:disabled) { transform: scale(0.92); }
+.sb-kiosk-cal-nav:disabled { opacity: 0.25; cursor: default; }
+[dir="rtl"] .sb-kiosk-cal-nav svg { transform: scaleX(-1); }
+.sb-kiosk-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.12em; }
+.sb-kiosk-cal-grid > span { display: grid; place-items: center; height: 1.8em; font-size: 0.8em; font-weight: 600; color: rgb(var(--k-w) / 0.5); }
+.sb-kiosk-cal-day { height: 2.2em; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgb(var(--k-w) / 0.92); font: inherit; font-size: 0.92em; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-cal-day:hover:not(:disabled) { background: rgb(var(--k-w) / 0.16); transform: scale(1.1); }
+.sb-kiosk-cal-day:active:not(:disabled) { transform: scale(0.92); }
+.sb-kiosk-cal-day[data-today="1"] { box-shadow: inset 0 0 0 1.5px rgb(var(--k-w) / 0.45); }
+.sb-kiosk-cal-day[data-on="1"] { background: rgb(var(--k-w)); color: var(--k-inv); box-shadow: none; }
+.sb-kiosk-cal-day:disabled { opacity: 0.25; cursor: default; }
+.sb-kiosk-cal-day:focus-visible, .sb-kiosk-cal-nav:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 1px; }
+.sb-kiosk-when input[type="time"] { height: 3em; padding: 0 1em; border: 0; border-radius: 1em; outline: 0; background: rgb(var(--k-w) / 0.1); color: rgb(var(--k-w)); font: inherit; font-size: 1.3em; font-variant-numeric: tabular-nums; text-align: center; color-scheme: dark; }
+.sb-kiosk[data-theme="light"] .sb-kiosk-when input[type="time"] { color-scheme: light; }
+.sb-kiosk-when-go { height: 3em; border: 0; border-radius: 999px; background: rgb(var(--k-w)); color: var(--k-inv); font: inherit; font-size: 1em; font-weight: 700; cursor: pointer; transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-when-go:hover { transform: scale(1.04); }
+.sb-kiosk-when-go:active { transform: scale(0.96); }
+
+.sb-kiosk-empty { margin: 0; font-size: 1.05em; color: rgb(var(--k-w) / 0.5); }
+.sb-kiosk-next { display: flex; flex-direction: column; }
+.sb-kiosk-next ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1em; }
+.sb-kiosk-next li, .sb-kiosk-hits li { animation: sb-kiosk-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards; animation-delay: calc(min(var(--i, 0), 8) * 50ms); }
+.sb-kiosk-next li { display: grid; grid-template-columns: 3.6em minmax(0, 1fr) auto; align-items: center; gap: 0.9em; }
+.sb-kiosk-next-art { width: 3.6em; aspect-ratio: 1; border-radius: 0.8em; overflow: hidden; background: rgb(var(--k-w) / 0.12); }
+.sb-kiosk-next-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-kiosk-next-text { min-width: 0; display: flex; flex-direction: column; gap: 0.15em; }
+.sb-kiosk-next-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.15em; font-weight: 650; }
+.sb-kiosk-next-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; color: rgb(var(--k-w) / 0.58); }
+/* the handle: three bars, the middle one shorter. Press it and the song follows the pointer up or down while the others make room (exactly like the queue in the controller) */
+.sb-kiosk-grip { display: grid; place-items: center; width: 2.6em; height: 2.6em; padding: 0; border: 0; background: transparent; color: rgb(var(--k-w) / 0.4); cursor: grab; touch-action: none; transition: color 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-grip:hover, .sb-kiosk-next li[data-drag="1"] .sb-kiosk-grip { color: rgb(var(--k-w)); transform: scale(1.14); }
+.sb-kiosk-next li[data-drag="1"] .sb-kiosk-grip { cursor: grabbing; }
+.sb-kiosk-grip:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 0.1em; border-radius: 0.6em; }
+.sb-kiosk-next li[data-drag="1"] { position: relative; z-index: 2; }
+.sb-kiosk-next li { user-select: none; }
+
+/* jingles: big soft chips you can press */
+.sb-kiosk-chips { display: flex; flex-wrap: wrap; gap: 0.8em; }
+.sb-kiosk-chip { display: inline-flex; align-items: center; gap: 0.6em; height: 3.1em; padding: 0 1.4em; border-radius: 999px; background: rgb(var(--k-w) / 0.12); color: rgb(var(--k-w) / 0.92); font-size: 1.05em; font-weight: 600; white-space: nowrap; }
+.sb-kiosk-chip i { flex: none; width: 0.65em; height: 0.65em; border-radius: 999px; }
+.sb-kiosk-chip.is-btn { border: 0; font-family: inherit; cursor: pointer; transition: background-color 180ms ease, color 180ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-chip.is-btn:hover { background: rgb(var(--k-w) / 0.2); }
+.sb-kiosk-chip.is-btn:active { transform: scale(0.96); }
+.sb-kiosk-chip.is-btn[data-fired="1"] { background: rgb(var(--k-w)); color: var(--k-inv); }
+
+/* making a new jingle on the display (the "+ New jingle" chip and its four calm steps) */
+.sb-kiosk-chip.is-new { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(var(--k-w) / 0.35); color: rgb(var(--k-w) / 0.85); }
+.sb-kiosk-chip.is-new:hover { background: rgb(var(--k-w) / 0.12); }
+.sb-kiosk-jmake { display: flex; flex-direction: column; gap: 1em; animation: sb-kiosk-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk-jmake-q { margin: 0; font-size: 1.35em; font-weight: 700; }
+.sb-kiosk-jtext { width: 100%; resize: none; padding: 1em 1.2em; border: 0; outline: 0; border-radius: 1.4em; background: rgb(var(--k-w) / 0.1); color: rgb(var(--k-w)); font: inherit; font-size: 1.05em; line-height: 1.5; transition: background-color 200ms ease; }
+.sb-kiosk-jtext::placeholder { color: rgb(var(--k-w) / 0.4); }
+.sb-kiosk-jtext:focus { background: rgb(var(--k-w) / 0.16); }
+.sb-kiosk-jmake-quote { margin: 0; padding: 1em 1.2em; border-radius: 1.4em; background: rgb(var(--k-w) / 0.08); font-size: 1.05em; line-height: 1.5; color: rgb(var(--k-w) / 0.85); max-height: 8em; overflow: hidden; }
+.sb-kiosk-jmake-err { margin: 0; font-size: 0.95em; color: #ff8a80; }
+.sb-kiosk[data-theme="light"] .sb-kiosk-jmake-err { color: #c62828; }
+.sb-kiosk-jbtns { display: flex; flex-wrap: wrap; gap: 0.7em; }
+.sb-kiosk-jbtn { height: 3.1em; padding: 0 1.7em; border: 0; border-radius: 999px; background: rgb(var(--k-w)); color: var(--k-inv); font: inherit; font-size: 1em; font-weight: 700; cursor: pointer; transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease, background-color 200ms ease; }
+.sb-kiosk-jbtn:hover:not(:disabled) { transform: scale(1.04); }
+.sb-kiosk-jbtn:active:not(:disabled) { transform: scale(0.96); }
+.sb-kiosk-jbtn:disabled { opacity: 0.35; cursor: default; }
+.sb-kiosk-jbtn.is-quiet { background: rgb(var(--k-w) / 0.12); color: rgb(var(--k-w) / 0.92); }
+.sb-kiosk-jbtn.is-quiet:hover:not(:disabled) { background: rgb(var(--k-w) / 0.2); }
+.sb-kiosk-jbtn:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+.sb-kiosk-jmake-wait { display: flex; flex-direction: column; align-items: center; gap: 1em; padding: 2.5em 0; }
+.sb-kiosk-jmake-wait p { margin: 0; font-size: 1.15em; font-weight: 600; color: rgb(var(--k-w) / 0.85); }
+.sb-kiosk-jmake-ok { font-size: 1.6em !important; }
+.sb-kiosk-jspin { width: 2.6em; height: 2.6em; border-radius: 50%; border: 0.22em solid rgb(var(--k-w) / 0.2); border-top-color: rgb(var(--k-w)); animation: sb-kiosk-spin 900ms linear infinite; }
+@keyframes sb-kiosk-spin { to { transform: rotate(360deg); } }
+
+/* today: what is on now and what is still to come — a calm list */
+.sb-kiosk-day ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1.1em; }
+.sb-kiosk-day li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.9em; color: rgb(var(--k-w) / 0.62); }
+.sb-kiosk-day li i { width: 0.65em; height: 0.65em; border-radius: 999px; }
+.sb-kiosk-day-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.25em; font-weight: 650; }
+.sb-kiosk-day li small { font-size: 0.95em; font-variant-numeric: tabular-nums; }
+.sb-kiosk-day li[data-current="1"] { color: rgb(var(--k-w)); }
+.sb-kiosk-day li[data-current="1"] small { padding: 0.2em 0.65em; border-radius: 999px; background: rgb(var(--k-w) / 0.16); font-weight: 700; }
+
+/* the next song as a notice in the corner on the icons' side (bottom-right in Hebrew, bottom-left in English); gone while a panel is open */
+.sb-kiosk-notice { position: absolute; z-index: 2; bottom: var(--k-edge); display: flex; align-items: center; gap: 0.9em; max-width: 20.2em; padding: 0; animation: sb-kiosk-notice-in 1000ms cubic-bezier(0.22, 1, 0.36, 1) backwards; transition: opacity 600ms ease 200ms, transform 800ms cubic-bezier(0.22, 1, 0.36, 1) 200ms; }
+.sb-kiosk[data-song="left"] .sb-kiosk-notice { right: var(--k-edge); }
+.sb-kiosk[data-song="right"] .sb-kiosk-notice { left: var(--k-edge); }
+/* when a panel opens the notice leaves quickly: it slides toward the edge of the screen it sits on, shrinks a hair and fades (and comes back the same way when the panel closes) */
+.sb-kiosk[data-panel="1"] .sb-kiosk-notice { opacity: 0; transform: translateX(calc(var(--k-sign, 1) * 3.2em)) scale(0.92); pointer-events: none; transition: opacity 300ms ease-in, transform 440ms cubic-bezier(0.5, 0, 0.75, 0); }
+.sb-kiosk-notice-art { flex: none; width: 3.4em; aspect-ratio: 1; border-radius: 0.8em; overflow: hidden; background: rgb(var(--k-w) / 0.12); }
+.sb-kiosk-notice-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-kiosk-notice-text { min-width: 0; display: flex; flex-direction: column; gap: 0.1em; }
+.sb-kiosk-notice-text small { font-size: 0.8em; letter-spacing: 0.04em; color: rgb(var(--k-w) / 0.55); }
+.sb-kiosk-notice-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.05em; font-weight: 650; }
+.sb-kiosk-notice-text em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88em; font-style: normal; color: rgb(var(--k-w) / 0.6); }
+@keyframes sb-kiosk-notice-in { from { opacity: 0; transform: translateY(1.6em); } to { opacity: 1; transform: none; } }
+.sb-kiosk[data-intro="1"] .sb-kiosk-notice { animation-delay: 1500ms; }
+
+/* when the screen comes up (owner: calm — the colours of the song first, then everything rises into place from below, one after another) */
+@keyframes sb-kiosk-rise-in { from { opacity: 0; transform: translateY(2.4em); } to { opacity: 1; transform: none; } }
+.sb-kiosk[data-intro="1"] :is(.sb-kiosk-clock, .sb-kiosk-lock, .sb-kiosk-theme, .sb-kiosk-minibar, .sb-kiosk-art, .sb-kiosk-seek, .sb-kiosk-ctl, .sb-kiosk-vol, .sb-kiosk-meta, .sb-kiosk-rail button) { animation: sb-kiosk-rise-in 1400ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-clock { animation-delay: 250ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-art { animation-delay: 380ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-minibar { animation-delay: 560ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-meta { animation-delay: 560ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-seek { animation-delay: 700ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-ctl { animation-delay: 800ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-vol { animation-delay: 920ms; }
+.sb-kiosk[data-intro="1"] :is(.sb-kiosk-lock, .sb-kiosk-theme) { animation-delay: 1000ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-rail button:nth-child(1) { animation-delay: 560ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-rail button:nth-child(2) { animation-delay: 660ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-rail button:nth-child(3) { animation-delay: 760ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-rail button:nth-child(4) { animation-delay: 860ms; }
+.sb-kiosk[data-intro="1"] .sb-kiosk-rail button:nth-child(5) { animation-delay: 960ms; }
+
+/* the small square of the supermarket look (Lock screen design → "mini", owner 2026-10-26): in the top corner next to the colour (sun / moon) button — the right in Hebrew, the left in English —
+   with the song's name beside it (to its left in Hebrew, to its right in English). Pointer on the square → the two pause bars; a press pauses / resumes; paused → the play triangle stays. */
+.sb-kiosk-minibar { position: absolute; z-index: 3; top: calc(var(--k-edge) - 0.8em); display: flex; align-items: center; gap: 0.95em; direction: ltr; }
+.sb-kiosk[data-song="left"] .sb-kiosk-minibar { right: calc(var(--k-edge) + 3.4em); flex-direction: row-reverse; }
+.sb-kiosk[data-song="right"] .sb-kiosk-minibar { left: calc(var(--k-edge) + 3.4em); }
+.sb-kiosk-mini { position: relative; display: block; flex: none; width: 4.8em; aspect-ratio: 1; padding: 0; border: 0; border-radius: 1.1em; overflow: hidden; background: transparent; color: #fff; font: inherit; cursor: pointer; isolation: isolate; transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1); }
+div.sb-kiosk-mini { cursor: default; }
+button.sb-kiosk-mini:hover { transform: scale(1.07); }
+button.sb-kiosk-mini:active { transform: scale(0.94); transition-duration: 100ms; }
+.sb-kiosk-mini:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.85); outline-offset: 3px; }
+.sb-kiosk-mini .sb-kiosk-art { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 0; }
+.sb-kiosk-mini-veil { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.42); opacity: 0; transition: opacity 280ms ease; }
+.sb-kiosk-mini-ico { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(0.85); transition: opacity 280ms ease, transform 340ms cubic-bezier(0.22, 1, 0.36, 1); pointer-events: none; }
+.sb-kiosk-mini-ico .sb-kiosk-swap svg { width: 2em; height: 2em; filter: drop-shadow(0 0.1em 0.4em rgba(0, 0, 0, 0.45)); }
+.sb-kiosk-mini:hover :is(.sb-kiosk-mini-veil, .sb-kiosk-mini-ico), .sb-kiosk-mini:focus-visible :is(.sb-kiosk-mini-veil, .sb-kiosk-mini-ico), .sb-kiosk-mini[data-paused="1"] :is(.sb-kiosk-mini-veil, .sb-kiosk-mini-ico) { opacity: 1; transform: none; }
+.sb-kiosk-mini-veil { transform: none; }
+.sb-kiosk-mini-text { direction: var(--k-text-dir, ltr); min-width: 0; max-width: 22em; display: flex; flex-direction: column; gap: 0.15em; text-align: left; transition: opacity 300ms ease, transform 360ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk[data-song="left"] .sb-kiosk-mini-text { text-align: right; }
+.sb-kiosk-mini-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.25em; font-weight: 700; line-height: 1.25; }
+.sb-kiosk-mini-text em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95em; font-style: normal; color: rgb(var(--k-w) / 0.65); }
+/* the name slides out from behind the square only while the pointer rests on it (owner 2026-10-26); under the square a thin bar always shows how far the song has got */
+.sb-kiosk-mini-text { opacity: 0; transform: translateX(calc(var(--k-sign, 1) * 0.9em)); pointer-events: none; animation: none; }
+.sb-kiosk-mini-wrap:hover ~ .sb-kiosk-mini-text, .sb-kiosk-mini-wrap:focus-within ~ .sb-kiosk-mini-text { opacity: 1; transform: none; }
+.sb-kiosk-minibar { pointer-events: none; }
+.sb-kiosk-mini-wrap { pointer-events: auto; }
+@media (hover: none) { .sb-kiosk-mini-text { opacity: 1; transform: none; } }
+.sb-kiosk-mini-wrap { position: relative; flex: none; width: 4.8em; height: 4.8em; }
+.sb-kiosk-mini-prog { position: absolute; left: 0; right: 0; top: calc(100% + 0.55em); height: max(2px, 0.2em); border-radius: 999px; background: rgb(var(--k-w) / 0.25); overflow: hidden; }
+.sb-kiosk-mini-prog span { display: block; height: 100%; border-radius: inherit; background: rgb(var(--k-w)); transition: width 400ms linear; }
+
+/* the small-square layout has no player column: the pages (jingles, search, playlists, up next, today) open on the FULL screen — one big page in the middle, the icons on the edge */
+.sb-kiosk[data-layout="mini"] .sb-kiosk-stage { justify-content: flex-end; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-panel { position: absolute; z-index: 2; top: 11.5em; left: 50%; width: min(62em, calc(100% - 24em)); transform: translateX(-50%) scale(0.97); transition: opacity 380ms ease, transform 600ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 600ms; }
+.sb-kiosk[data-layout="mini"][data-panel="1"] .sb-kiosk-panel { transform: translateX(-50%); transition-delay: 0s; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-panel-box { height: 37em; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-pane { width: min(100%, 46em); margin-inline: auto; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-card > h3 { width: min(100%, calc(46em / 1.5)); margin-inline: auto; } /* (the heading is 1.5 em: its own em is 1.5× the screen's) */
+.sb-kiosk[data-song="left"][data-layout="mini"] .sb-kiosk-sheet { right: calc(50% + 24em); left: auto; }
+.sb-kiosk[data-song="right"][data-layout="mini"] .sb-kiosk-sheet { left: calc(50% + 24em); right: auto; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-card[data-id="jingles"] .sb-kiosk-chips { gap: 1.1em; }
+.sb-kiosk[data-layout="mini"] .sb-kiosk-card[data-id="jingles"] .sb-kiosk-chip { height: 4.4em; padding: 0 2.2em; font-size: 1.3em; }
+.sb-kiosk-panel-close { position: absolute; z-index: 3; top: 0.4em; inset-inline-end: 0.4em; display: grid; place-items: center; width: 2.8em; height: 2.8em; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgb(var(--k-w) / 0.6); cursor: pointer; transition: color 200ms ease, background-color 200ms ease, transform 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kiosk-panel-close:hover { color: rgb(var(--k-w)); background: rgb(var(--k-w) / 0.12); transform: scale(1.08); }
+.sb-kiosk-panel-close:focus-visible { outline: 2px solid rgb(var(--k-w) / 0.8); outline-offset: 2px; }
+
+/* the controller's button for the display screen: a quiet icon in the corner of the player cell */
+.sb-kiosk-launch { position: absolute; z-index: 6; right: 14px; bottom: 6px; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; background: transparent; color: rgba(255, 255, 255, 0.62); cursor: pointer; transition: color 200ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* the video (and its volume badge) sits in the bottom corner on its own side: right in English, left in Hebrew — the pill takes the other corner */
+html[dir="ltr"] .sb-kiosk-launch { right: auto; left: 14px; bottom: 6px; }
+.sb-kiosk-launch:hover { color: #fff; transform: scale(1.14); }
+.sb-kiosk-launch:active { transform: scale(0.94); }
+.sb-kiosk-launch:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
+
+/* the gear-menu entry that puts the display screen up */
+.sb-kiosk-menu-row { display: flex; width: 100%; align-items: center; gap: 10px; padding: 7px 10px; margin-top: 4px; border: 0; border-radius: 10px; background: transparent; color: #f5f5f7; font: inherit; font-size: 14px; cursor: pointer; text-align: start; }
+.sb-kiosk-menu-row:hover { background: rgba(255, 255, 255, 0.07); }
+.sb-kiosk-menu-row svg { color: rgba(255, 255, 255, 0.8); }
+
+@media (max-width: 760px) {
+  .sb-kiosk-stage { flex-direction: column; justify-content: flex-start; gap: 2.6em; overflow-y: auto; padding: 7em 1.6em 3em; }
+  .sb-kiosk-now, .sb-kiosk-panel { width: min(100%, 31em); }
+  .sb-kiosk-side { width: min(100%, 36em); justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) { .sb-kiosk, .sb-kiosk *, .sb-kiosk-scrim, .sb-kiosk-pinbar { animation: none !important; } }
+
+/* ═══════════════════════════ the owner's settings screen (Access Control → Display screen) ═══════════════════════════
+   A calm column on the management page (black or white by the display mode): a title, a few cards, switches. */
+.sb-kset { width: min(780px, 100%); margin: 0 auto; padding: clamp(8px, 2vh, 28px) 0 64px; color: #f5f5f7; }
+.sb-kset-head { margin-bottom: 26px; }
+.sb-kset-head h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -0.02em; }
+.sb-kset-head p { margin: 8px 0 0; font-size: 15px; line-height: 1.5; color: rgba(255, 255, 255, 0.6); max-width: 60ch; }
+.sb-kset-card { margin-bottom: 18px; padding: 24px 26px; border-radius: 26px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+.sb-kset-card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+.sb-kset-card > p { margin: 0 0 18px; font-size: 14px; line-height: 1.5; color: rgba(255, 255, 255, 0.58); }
+.sb-kset-badge { display: inline-flex; align-items: center; height: 24px; margin-inline-start: 10px; padding: 0 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.75); vertical-align: middle; }
+.sb-kset-badge[data-on="1"] { background: rgba(48, 209, 88, 0.2); color: #6ee89a; }
+
+.sb-kset-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sb-kset-field { display: flex; flex-direction: column; gap: 6px; }
+.sb-kset-field span { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.7); }
+.sb-kset-field input { height: 46px; padding: 0 16px; border: 0; outline: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.09); color: inherit; font: inherit; font-size: 17px; letter-spacing: 0.2em; }
+.sb-kset-field input:focus { background: rgba(255, 255, 255, 0.14); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+.sb-kset-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.sb-kset-btn { height: 44px; padding: 0 22px; border: 0; border-radius: 999px; background: #f5f5f7; color: #111; font: inherit; font-size: 15px; font-weight: 650; cursor: pointer; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease; }
+.sb-kset-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.sb-kset-btn:disabled { opacity: 0.4; cursor: default; }
+.sb-kset-btn.is-quiet { background: rgba(255, 255, 255, 0.1); color: inherit; }
+.sb-kset-msg { font-size: 14px; font-weight: 600; }
+.sb-kset-msg[data-kind="ok"] { color: #6ee89a; }
+.sb-kset-msg[data-kind="bad"] { color: #ff8a80; }
+
+.sb-kset-rows { display: flex; flex-direction: column; }
+.sb-kset-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 14px 0; }
+.sb-kset-row + .sb-kset-row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.sb-kset-ico { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; background: rgba(255, 255, 255, 0.09); color: rgba(255, 255, 255, 0.85); }
+.sb-kset-row b { display: block; font-size: 16px; font-weight: 650; }
+.sb-kset-row small { display: block; margin-top: 2px; font-size: 13.5px; line-height: 1.4; color: rgba(255, 255, 255, 0.55); }
+.sb-kset-switch { position: relative; flex: none; width: 52px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background-color 220ms ease; }
+/* (the knob is a child element: the management pages give every button an invisible ::after touch target that would move a pseudo-element knob) */
+.sb-kset-switch i { position: absolute; top: 3px; inset-inline-start: 3px; width: 26px; height: 26px; border-radius: 999px; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kset-switch[aria-checked="true"] { background: #30d158; }
+.sb-kset-switch[aria-checked="true"] i { transform: translateX(20px); }
+[dir="rtl"] .sb-kset-switch[aria-checked="true"] i { transform: translateX(-20px); }
+.sb-kset-switch:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sb-kset-cap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 240px) 52px; align-items: center; gap: 16px; margin-top: 6px; padding: 14px 0 2px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.sb-kset-cap span { font-size: 14px; color: rgba(255, 255, 255, 0.7); }
+.sb-kset-cap b { font-size: 16px; font-variant-numeric: tabular-nums; text-align: end; }
+.sb-kset-cap input { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px; outline: none; cursor: pointer; background: linear-gradient(to right, #f5f5f7 0, #f5f5f7 var(--v), rgba(255, 255, 255, 0.2) var(--v), rgba(255, 255, 255, 0.2) 100%); }
+.sb-kset-cap input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 999px; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4); }
+.sb-kset-cap input::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 999px; background: #fff; }
+.sb-kset-note { margin-top: 6px; font-size: 13px; color: rgba(255, 255, 255, 0.45); }
+
+/* ═══════════════════════════ the owner's LOCK SCREEN DESIGN page (top-bar tab) ═══════════════════════════
+   The preview is the real screen in miniature: the same proportions (1 em of the preview = 1 % of the screen's width), mirrored for Hebrew. */
+.sb-kdes { width: min(1240px, 100%); padding-bottom: 32px; }
+.sb-kdes-head { margin-bottom: 20px; }
+.sb-kdes-head h1 { margin: 0; font-size: 28px; font-weight: 650; letter-spacing: -0.02em; }
+.sb-kdes-head p { margin: 6px 0 0; font-size: 15px; color: rgba(255, 255, 255, 0.6); }
+.sb-kdes-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 1000px) { .sb-kdes-grid { grid-template-columns: minmax(0, 1fr); } }
+.sb-kdes-presets { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.sb-kdes-controls { margin: 0; padding: 6px 24px 18px; }
+.sb-kdes-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 66px; padding: 12px 0; }
+.sb-kdes-row[data-stack="1"] { flex-direction: column; align-items: stretch; gap: 12px; }
+.sb-kdes-row[data-stack="1"] .sb-kdes-row-c { justify-content: flex-start; }
+.sb-kdes-row + .sb-kdes-row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.sb-kdes-row-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sb-kdes-row-t b { font-size: 16px; font-weight: 650; }
+.sb-kdes-row-t small { font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+.sb-kdes-row-c { flex: none; display: flex; justify-content: flex-end; }
+.sb-kdes-seg { display: inline-flex; padding: 4px; gap: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
+.sb-kdes-seg button { height: 38px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, 0.72); font: inherit; font-size: 14.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background-color 240ms ease, color 240ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kdes-seg button:hover:not([data-on]) { color: #fff; }
+.sb-kdes-seg button:active { transform: scale(0.96); }
+.sb-kdes-seg button[data-on="1"] { background: #f5f5f7; color: #111; }
+.sb-kdes-seg button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sb-kdes-preview { container-type: inline-size; position: relative; aspect-ratio: 16 / 9; border-radius: 22px; overflow: hidden; background: #050816; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 50px rgba(0, 0, 0, 0.35); }
+.sb-kdes-screen { position: absolute; inset: 0; direction: ltr; font-size: 1cqw; color: #fff; }
+.sb-kdes-glow { position: absolute; border-radius: 50%; opacity: 0.85; transition: transform 600ms ease; }
+.sb-kdes-glow.a { width: 90%; height: 130%; left: -22%; bottom: -46%; background: radial-gradient(closest-side, #b3122a, transparent); }
+.sb-kdes-glow.b { width: 75%; height: 110%; right: -18%; top: -40%; background: radial-gradient(closest-side, #1d6fb4, transparent); }
+.sb-kdes-clock { position: absolute; top: 1.9em; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 0.5em; line-height: 1; }
+.sb-kdes-clock b { font-size: 3.9em; font-weight: 500; }
+.sb-kdes-clock span { width: 9em; height: 0.9em; border-radius: 0.5em; background: rgba(255, 255, 255, 0.4); }
+.sb-kdes-song { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); width: 21.5em; display: flex; flex-direction: column; align-items: center; transition: opacity 300ms ease; }
+.sb-kdes-cover { display: grid; place-items: center; width: 100%; aspect-ratio: 1; border-radius: 2em; background: linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.08)); color: rgba(255, 255, 255, 0.55); }
+.sb-kdes-cover svg { width: 36%; height: 36%; }
+.sb-kdes-title { margin-top: 1.4em; width: 15em; height: 1.7em; border-radius: 0.9em; background: rgba(255, 255, 255, 0.92); }
+.sb-kdes-artist { margin-top: 0.6em; width: 9em; height: 1.1em; border-radius: 0.6em; background: rgba(255, 255, 255, 0.4); }
+.sb-kdes-seek { position: relative; margin-top: 1.5em; width: 100%; height: 0.3em; border-radius: 1em; background: rgba(255, 255, 255, 0.25); }
+.sb-kdes-seek::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 22%; border-radius: inherit; background: #fff; }
+.sb-kdes-ctl { display: flex; align-items: center; gap: 2em; margin-top: 1.6em; }
+.sb-kdes-ctl svg { width: 2.6em; height: 2.6em; }
+.sb-kdes-ctl svg.big { width: 3.9em; height: 3.9em; }
+.sb-kdes-vol { margin-top: 1.2em; width: 100%; height: 0.45em; border-radius: 1em; background: rgba(255, 255, 255, 0.25); }
+.sb-kdes-minibar { position: absolute; top: 0.95em; right: 5.15em; display: flex; flex-direction: row-reverse; align-items: center; gap: 0.95em; }
+.sb-kdes-preview:not([data-he]) .sb-kdes-minibar { right: auto; left: 5.15em; flex-direction: row; }
+.sb-kdes-mini { position: relative; display: grid; place-items: center; width: 4.8em; aspect-ratio: 1; border-radius: 1.1em; overflow: hidden; background: linear-gradient(135deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.1)); }
+.sb-kdes-mini::before { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.3); }
+.sb-kdes-mini svg { position: relative; width: 2em; height: 2em; }
+.sb-kdes-miniwrap { position: relative; width: 4.8em; height: 4.8em; }
+.sb-kdes-prog { position: absolute; left: 0; right: 0; top: calc(100% + 0.55em); height: 0.2em; border-radius: 1em; background: rgba(255, 255, 255, 0.25); }
+.sb-kdes-prog::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 38%; border-radius: inherit; background: #fff; }
+.sb-kdes-page { position: absolute; top: 11.5em; left: 50%; width: 62em; height: 37em; transform: translateX(-50%); border-radius: 2em; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.04); display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 1.6em; padding: 0 10em; }
+.sb-kdes-page span { width: 16em; height: 4.4em; border-radius: 999px; background: rgba(255, 255, 255, 0.14); }
+.sb-kdes-rail { position: absolute; top: 50%; transform: translateY(-50%); right: 4em; display: flex; flex-direction: column; gap: 0.9em; }
+.sb-kdes-preview:not([data-he]) .sb-kdes-rail { right: auto; left: 4em; }
+.sb-kdes-rail span { display: grid; place-items: center; color: rgba(255, 255, 255, 0.85); }
+.sb-kdes-rail svg { width: 3.1em; height: 3.1em; }
+.sb-kdes-notice { position: absolute; bottom: 1.75em; right: 1.75em; display: flex; flex-direction: row-reverse; align-items: center; gap: 0.9em; }
+.sb-kdes-preview:not([data-he]) .sb-kdes-notice { right: auto; left: 1.75em; flex-direction: row; }
+.sb-kdes-notice .art { width: 3.4em; aspect-ratio: 1; border-radius: 0.8em; background: rgba(255, 255, 255, 0.35); }
+.sb-kdes-notice .txt { display: flex; flex-direction: column; gap: 0.5em; }
+.sb-kdes-notice .txt i { display: block; height: 0.8em; border-radius: 0.5em; background: rgba(255, 255, 255, 0.7); }
+.sb-kdes-notice .txt i:first-child { width: 8em; }
+.sb-kdes-notice .txt i:last-child { width: 5em; background: rgba(255, 255, 255, 0.35); }
+.sb-kdes-lock { position: absolute; top: 2.25em; left: 2.25em; width: 2.2em; height: 2.2em; border-radius: 0.6em; background: rgba(255, 255, 255, 0.55); }
+.sb-kdes-lock.theme { left: auto; right: 2.25em; background: rgba(255, 255, 255, 0.35); }
+.sb-kdes-preview:not([data-he]) .sb-kdes-lock { left: auto; right: 2.25em; }
+.sb-kdes-preview:not([data-he]) .sb-kdes-lock.theme { right: auto; left: 2.25em; }
+.sb-kdes-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 14px; }
+.sb-kdes-link { font-size: 14px; color: rgba(255, 255, 255, 0.7); text-decoration: underline; text-underline-offset: 3px; transition: color 180ms ease; }
+.sb-kdes-link:hover { color: #fff; }
+.sb-kdes-icons { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+.sb-kdes-ib { display: flex; flex-direction: column; align-items: center; gap: 5px; width: 74px; padding: 10px 4px 8px; border: 0; border-radius: 16px; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.72); font: inherit; cursor: pointer; transition: background-color 240ms ease, color 240ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-kdes-ib svg { width: 24px; height: 24px; }
+.sb-kdes-ib span { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.sb-kdes-ib:hover:not([data-on]) { color: #fff; background: rgba(255, 255, 255, 0.13); }
+.sb-kdes-ib:active { transform: scale(0.95); }
+.sb-kdes-ib[data-on="1"] { background: #f5f5f7; color: #111; }
+.sb-kdes-ib:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* (management pages keep their dark canvas in every display mode — the existing Access Control page does too — so nothing here changes in the white display) */
+@media (max-width: 640px) { .sb-kset-fields { grid-template-columns: minmax(0, 1fr); } }

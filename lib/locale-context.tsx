@@ -12,7 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { LOCALE_COOKIE_NAME } from "@/lib/constants";
 import { getTranslations } from "@/lib/translations";
-import { isKnownLocale, DEFAULT_LOCALE, type Locale } from "@/lib/locales";
+import { isKnownLocale, DEFAULT_LOCALE, LOCALES, type Locale } from "@/lib/locales";
 
 export type { Locale };
 
@@ -24,6 +24,7 @@ type LocaleContextValue = {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 const STORAGE_KEY = "syncbiz-locale";
+const isRtlLocale = (l: Locale) => !!LOCALES.find((x) => x.code === l)?.rtl;
 
 function readStoredLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;
@@ -45,8 +46,8 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     setLocaleState(stored);
     setLocaleCookie(stored);
     document.documentElement.lang = stored;
-    // Layout stays LTR for every language — only the text changes (owner directive).
-    document.documentElement.dir = "ltr";
+    // owner 2026-10-20: Hebrew / Arabic mirror the whole interface (the server already rendered this direction)
+    document.documentElement.dir = isRtlLocale(stored) ? "rtl" : "ltr";
   }, []);
 
   const setLocale = useCallback(
@@ -56,7 +57,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(STORAGE_KEY, next);
         setLocaleCookie(next);
         document.documentElement.lang = next;
-        document.documentElement.dir = "ltr"; // always LTR — only text localizes
+        document.documentElement.dir = isRtlLocale(next) ? "rtl" : "ltr";
         router.refresh();
       }
     },
@@ -95,6 +96,8 @@ export const labels: Record<string, { en: string; he: string }> = {
   logs: { en: "Logs", he: "לוגים" },
   settings: { en: "Settings", he: "הגדרות" },
   "access-control": { en: "Access Control", he: "בקרת גישה" },
+  jingles: { en: "Jingles", he: "ג'ינגלים" },
+  "display-design": { en: "Lock screen design", he: "עיצוב מסך נעילה" },
   architecture: { en: "Architecture", he: "ארכיטקטורה" },
   playlists: { en: "Playlists", he: "פלייליסטים" },
   library: { en: "Library", he: "ספרייה" },

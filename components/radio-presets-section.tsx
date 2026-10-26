@@ -4,9 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { RadioArt } from "@/components/radio-art";
 import { radioToUnified } from "@/lib/radio-utils";
 import { addRadioStationLocal } from "@/lib/radio-local-store";
-import { RadioIcon } from "@/components/ui/radio-icon";
 import type { RadioStream } from "@/lib/source-types";
 
 type Preset = { key: string; name: string; genre: string; url: string; cover: string | null };
@@ -96,55 +96,38 @@ export function RadioPresetsSection({ stations, onAdded }: Props) {
   if (presets.length === 0) return null;
 
   return (
-    <section aria-labelledby="radio-presets-title" className="space-y-3">
-      <h2 id="radio-presets-title" className="text-sm font-semibold text-slate-200">
+    <section aria-labelledby="radio-presets-title">
+      <h2 id="radio-presets-title" className="sb-rad-title">
         {he ? "תחנות ישראליות" : "Israeli stations"}
       </h2>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+      <div className="sb-rad-grid">
         {presets.map((p) => {
           const saved = savedFor(p);
           const busy = busyKey === p.key;
           return (
-            <div key={p.key} className="group min-w-0">
-              <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-700/70 ring-1 ring-slate-800/80 transition group-hover:ring-slate-600">
-                {p.cover ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.cover}
-                    alt=""
-                    className="h-full w-full object-contain p-2"
-                    onError={(e) => (e.currentTarget.src = "/radio-default.svg")}
-                  />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center">
-                    <RadioIcon className="h-8 w-8 text-slate-100" />
-                  </span>
-                )}
+            <div key={p.key} className="sb-rad-tile" data-busy={busy ? "1" : undefined}>
+              <div className="sb-rad-art">
+                <RadioArt cover={p.cover} />
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void handlePlay(p)}
                   aria-label={he ? `נגן ${p.name}` : `Play ${p.name}`}
-                  className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/40 focus-visible:bg-black/40 focus-visible:outline-none disabled:cursor-wait"
+                  className="sb-rad-hit"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                    <svg className="h-4 w-4 ml-0.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <span className="sb-rad-glyph">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden style={{ marginInlineStart: 2 }}>
                       <path d="M8 5v14l11-7z" />
                     </svg>
                   </span>
                 </button>
               </div>
-              <p className="mt-1.5 truncate text-xs font-medium text-slate-100">{p.name}</p>
+              <p className="sb-rad-name" dir="auto" title={p.name}>{p.name}</p>
               {saved ? (
-                <p className="text-[11px] text-slate-500">✓ {he ? "בספרייה" : "Saved"}</p>
+                <p className="sb-rad-sub">✓ {he ? "בספרייה" : "Saved"}</p>
               ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void handleAdd(p)}
-                  className="text-[11px] font-medium text-sky-400 transition hover:text-sky-300 disabled:opacity-50"
-                >
-                  + {he ? "הוסף" : "Add"}
+                <button type="button" disabled={busy} onClick={() => void handleAdd(p)} className="sb-rad-addlink">
+                  + {he ? "הוסיפו" : "Add"}
                 </button>
               )}
             </div>

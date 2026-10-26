@@ -9,6 +9,7 @@ import type { WorkspaceBusinessProfileJson } from "@/lib/workspace-business-prof
 import type { BusinessType } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, useMemo, useState, useTransition } from "react";
+import { useTr } from "@/lib/i18n/use-tr";
 
 type InitialProfile = WorkspaceBusinessProfileJson | Omit<WorkspaceBusinessProfileJson, "adminNotes">;
 
@@ -83,6 +84,7 @@ export function WorkspaceBusinessProfileForm({
   canEdit,
   embedInPlatformAdminSection,
 }: Props) {
+  const tr = useTr();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [submitting, setSubmitting] = useState(false);
@@ -229,7 +231,7 @@ export function WorkspaceBusinessProfileForm({
         setError(data.error ?? `HTTP ${res.status}`);
         return;
       }
-      setInfo("Saved.");
+      setInfo(tr("Saved."));
       if (data.profile) {
         setPrimaryBusinessType(data.profile.primaryBusinessType as BusinessType);
         setCuisineOrConcept(data.profile.cuisineOrConcept ?? "");
@@ -263,11 +265,11 @@ export function WorkspaceBusinessProfileForm({
       {!embeddedAdmin ? (
         <div>
           <h2 className={variant === "admin" ? "text-xs font-semibold uppercase tracking-wide text-neutral-400" : "text-sm font-semibold text-slate-50"}>
-            Business profile
+            {tr("Business profile")}
           </h2>
           <p className={variant === "admin" ? "mt-1 text-[11px] text-neutral-500" : "mt-0.5 text-xs text-slate-400"}>
-            Music / brand identity for this workspace — used later for catalog intelligence and recommendations. Branch-level{" "}
-            <code className="rounded bg-black/30 px-1">businessType</code> is separate and not synced here.
+            {tr("Music / brand identity for this workspace — used later for catalog intelligence and recommendations. Branch-level")}{" "}
+            <code className="rounded bg-black/30 px-1">businessType</code> {tr("is separate and not synced here.")}
           </p>
           {workspaceLabel ? (
             <p className="mt-1 font-mono text-[11px] text-neutral-500">{workspaceLabel}</p>
@@ -277,14 +279,14 @@ export function WorkspaceBusinessProfileForm({
 
       {!canEdit ? (
         <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[12px] text-amber-200">
-          You can view this profile. Only workspace admins can edit (tenant route).
+          {tr("You can view this profile. Only workspace admins can edit (tenant route).")}
         </div>
       ) : null}
 
-      <AdminSection embedded={embeddedAdmin} title="Identity">
+      <AdminSection embedded={embeddedAdmin} title={tr("Identity")}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label className={labelCls}>Primary business type</label>
+            <label className={labelCls}>{tr("Primary business type")}</label>
             <select
               value={primaryBusinessType}
               onChange={(e) => setPrimaryBusinessType(e.target.value as BusinessType)}
@@ -293,36 +295,36 @@ export function WorkspaceBusinessProfileForm({
             >
               {BUSINESS_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t.replace(/_/g, " ")}
+                  {tr(t.replace(/_/g, " "))}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className={labelCls}>Energy level</label>
+            <label className={labelCls}>{tr("Energy level")}</label>
             <select value={energyLevel} onChange={(e) => setEnergyLevel(e.target.value)} disabled={disabled} className={inputCls}>
               <option value="">—</option>
-              <option value="LOW">Low</option>
-              <option value="MEDIUM">Medium</option>
-              <option value="HIGH">High</option>
+              <option value="LOW">{tr("Low")}</option>
+              <option value="MEDIUM">{tr("Medium")}</option>
+              <option value="HIGH">{tr("High")}</option>
             </select>
           </div>
         </div>
 
         <div>
-          <label className={labelCls}>Cuisine / concept</label>
+          <label className={labelCls}>{tr("Cuisine / concept")}</label>
           <input
             type="text"
             value={cuisineOrConcept}
             onChange={(e) => setCuisineOrConcept(e.target.value)}
             disabled={disabled}
             className={inputCls}
-            placeholder="e.g. Italian, Mediterranean"
+            placeholder={tr("e.g. Italian, Mediterranean")}
           />
         </div>
 
         <div>
-          <label className={labelCls}>Concept tags (one per line)</label>
+          <label className={labelCls}>{tr("Concept tags (one per line)")}</label>
           <textarea
             value={conceptTags}
             onChange={(e) => setConceptTags(e.target.value)}
@@ -334,10 +336,10 @@ export function WorkspaceBusinessProfileForm({
         </div>
       </AdminSection>
 
-      <AdminSection embedded={embeddedAdmin} title="Locale & culture">
+      <AdminSection embedded={embeddedAdmin} title={tr("Locale & culture")}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
-            <label className={labelCls}>Country code</label>
+            <label className={labelCls}>{tr("Country code")}</label>
             <input
               type="text"
               value={countryCode}
@@ -349,7 +351,7 @@ export function WorkspaceBusinessProfileForm({
             />
           </div>
           <div>
-            <label className={labelCls}>Primary language</label>
+            <label className={labelCls}>{tr("Primary language")}</label>
             <input
               type="text"
               value={primaryLanguage}
@@ -362,7 +364,7 @@ export function WorkspaceBusinessProfileForm({
         </div>
 
         <div>
-          <label className={labelCls}>Culture notes</label>
+          <label className={labelCls}>{tr("Culture notes")}</label>
           <textarea
             value={cultureNotes}
             onChange={(e) => setCultureNotes(e.target.value)}
@@ -373,7 +375,7 @@ export function WorkspaceBusinessProfileForm({
         </div>
 
         <div>
-          <label className={labelCls}>Additional languages (one per line)</label>
+          <label className={labelCls}>{tr("Additional languages (one per line)")}</label>
           <textarea
             value={additionalLanguages}
             onChange={(e) => setAdditionalLanguages(e.target.value)}
@@ -384,9 +386,9 @@ export function WorkspaceBusinessProfileForm({
         </div>
       </AdminSection>
 
-      <AdminSection embedded={embeddedAdmin} title="Audience & mood">
+      <AdminSection embedded={embeddedAdmin} title={tr("Audience & mood")}>
         <div>
-          <label className={labelCls}>Audience descriptors (one per line)</label>
+          <label className={labelCls}>{tr("Audience descriptors (one per line)")}</label>
           <textarea
             value={audienceDescriptors}
             onChange={(e) => setAudienceDescriptors(e.target.value)}
@@ -398,7 +400,7 @@ export function WorkspaceBusinessProfileForm({
         </div>
 
         <div>
-          <label className={labelCls}>Desired mood notes</label>
+          <label className={labelCls}>{tr("Desired mood notes")}</label>
           <textarea
             value={desiredMoodNotes}
             onChange={(e) => setDesiredMoodNotes(e.target.value)}
@@ -409,21 +411,21 @@ export function WorkspaceBusinessProfileForm({
         </div>
       </AdminSection>
 
-      <AdminSection embedded={embeddedAdmin} title="Opening hours">
+      <AdminSection embedded={embeddedAdmin} title={tr("Opening hours")}>
         <div>
-          <label className={labelCls}>Opening hours (summary)</label>
+          <label className={labelCls}>{tr("Opening hours (summary)")}</label>
           <textarea
             value={openingHoursSummary}
             onChange={(e) => setOpeningHoursSummary(e.target.value)}
             disabled={disabled}
             rows={2}
             className={inputCls}
-            placeholder="Free text — not tied to schedules"
+            placeholder={tr("Free text — not tied to schedules")}
           />
         </div>
 
         <div>
-          <label className={labelCls}>Opening hours structured (JSON object, optional)</label>
+          <label className={labelCls}>{tr("Opening hours structured (JSON object, optional)")}</label>
           {variant === "admin" ? (
             <AdminJsonHint>
               Paste a JSON object (curly braces — not a list). Leave blank to clear; invalid JSON will show the same error as before when you save.
@@ -440,12 +442,12 @@ export function WorkspaceBusinessProfileForm({
         </div>
       </AdminSection>
 
-      <AdminSection embedded={embeddedAdmin} title="Daypart preferences">
+      <AdminSection embedded={embeddedAdmin} title={tr("Daypart preferences")}>
         <div>
-          <label className={labelCls}>Daypart preferences (JSON object — keys e.g. MORNING / AFTERNOON / EVENING / NIGHT)</label>
+          <label className={labelCls}>{tr("Daypart preferences (JSON object — keys e.g. MORNING / AFTERNOON / EVENING / NIGHT)")}</label>
           {variant === "admin" ? (
             <AdminJsonHint>
-              Optional labels per daypart as a JSON object. Keys like MORNING / AFTERNOON / EVENING / NIGHT — still must be an object, not an array.
+              {tr("Optional labels per daypart as a JSON object. Keys like MORNING / AFTERNOON / EVENING / NIGHT — still must be an object, not an array.")}
             </AdminJsonHint>
           ) : null}
           <textarea
@@ -459,9 +461,9 @@ export function WorkspaceBusinessProfileForm({
         </div>
       </AdminSection>
 
-      <AdminSection embedded={embeddedAdmin} title="Style hints">
+      <AdminSection embedded={embeddedAdmin} title={tr("Style hints")}>
         <div>
-          <label className={labelCls}>Preferred style hints (one per line)</label>
+          <label className={labelCls}>{tr("Preferred style hints (one per line)")}</label>
           <textarea
             value={preferredStyleHints}
             onChange={(e) => setPreferredStyleHints(e.target.value)}
@@ -472,7 +474,7 @@ export function WorkspaceBusinessProfileForm({
         </div>
 
         <div>
-          <label className={labelCls}>Blocked style hints (one per line)</label>
+          <label className={labelCls}>{tr("Blocked style hints (one per line)")}</label>
           <textarea
             value={blockedStyleHints}
             onChange={(e) => setBlockedStyleHints(e.target.value)}
@@ -484,9 +486,9 @@ export function WorkspaceBusinessProfileForm({
       </AdminSection>
 
       {variant === "admin" ? (
-        <AdminSection embedded={embeddedAdmin} title="Platform-only notes">
+        <AdminSection embedded={embeddedAdmin} title={tr("Platform-only notes")}>
           <div>
-            <label className={labelCls}>Admin notes (platform)</label>
+            <label className={labelCls}>{tr("Admin notes (platform)")}</label>
             <textarea
               value={adminNotes}
               onChange={(e) => setAdminNotes(e.target.value)}
@@ -517,7 +519,7 @@ export function WorkspaceBusinessProfileForm({
                 : "rounded-lg border border-emerald-700/80 bg-emerald-600/90 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
             }
           >
-            {submitting ? "Saving…" : "Save profile"}
+            {submitting ? tr("Saving…") : tr("Save profile")}
           </button>
         </div>
       ) : null}
