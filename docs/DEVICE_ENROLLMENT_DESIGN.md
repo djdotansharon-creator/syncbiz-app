@@ -78,7 +78,7 @@ Designated-MASTER rules, the Lenovo pilot station and its accepted baseline, the
 - **Scope in the WS token:** broad scopes must carry the expression, not an expanded id list (blueprint D21) — decided in Phase 0.
 - **Existing devices when the flag turns on:** all already-registered `StationDevice` rows are auto-approved ("grandfathered") so nothing goes dark; an admin reviews the list once.
 - Email: a verified sending domain and the notification mail function (see §5.6); push depends on the phone app (Phase 5).
-- **The Android native streamer's code is not in this repository or in any connected repository** — where it lives (and where it gets its token) is a question for the owner; Phase 4b cannot be finished without it.
+- **The Android native streamer does not exist yet** (owner, 2026-10-27: "there is no Android for now — we will sit on it later"). The `/streamer` web page and the Android-shell code paths in the repo are for it; its token source is to be designed together with it, before Phase 4b is declared complete for Android.
 - Naming for the UI (Hebrew): נגן / שלט רחוק, "ממתין לאישור", "הקצאת נגנים" — to confirm with the owner when Phase 3 starts.
 
 ## 11. Phase 0 findings (audit 2026-10-27, read-only; key claims re-checked against the code)
@@ -132,4 +132,4 @@ Designated-MASTER rules, the Lenovo pilot station and its accepted baseline, the
 | 4 | Iron rule: a refusal is never a CONTROL signal to a station (it clears the cache and stops music) → dedicated close / error code, MAIN must ignore it safely. | §6 |
 | 5 | Refusal at `token-from-session` must be terminal (403 is retried forever). | §6 |
 | 6 | `RESEND_FROM` is optional, default `onboarding@resend.dev` delivers only to the Resend account owner → manager mails need a verified domain; only a password-reset mail exists. | §5.6 |
-Also: D-B1 gets the "tab closed = music stops, no failover" consequence; the Android streamer's code location is an open question for the owner.
+Also: D-B1 gets the "tab closed = music stops, no failover" consequence; the Android streamer does not exist yet (to be designed later).
