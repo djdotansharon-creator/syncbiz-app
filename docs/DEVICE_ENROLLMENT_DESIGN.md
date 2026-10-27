@@ -1,6 +1,6 @@
 # Device enrollment — design plan (draft 1, 2026-10-27)
 
-**Status: PLAN ONLY (draft 2, after the first review round). No code, no migration, nothing deployed.** Every phase below needs the owner's explicit yes before it starts (database migration, WS / MASTER area, installer, PROD). **Phases 1–5 do not start before the pilot is stabilised and the reviewers have gone through this document** (§12). Phase 0 (audit, docs) is the only thing done.
+**Status (draft 3, 2026-10-27): phases 1–4 are IMPLEMENTED as two DRAFT, DORMANT pull requests — part A (database model, rules, API, Control Room panel) and part B (device gate, signed role, WS rule), see §14. Nothing is merged or deployed; the migration is applied to the local database only.** Every phase below needs the owner's explicit yes before it starts (database migration, WS / MASTER area, installer, PROD). **Phases 1–5 do not start before the pilot is stabilised and the reviewers have gone through this document** (§12). Phase 0 (audit, docs) is the only thing done.
 Companion: `docs/DEVICE_ENROLLMENT_REQUIREMENTS.md` (the owner's model + audit of what exists). Builds on `docs/CONTROL_ROOM_BLUEPRINT.md` (D1 designation, D2 activation code, D21 composite scopes, §3 capabilities) — **extends it, adds no second auth system**.
 Labels: `EXISTING` / `EXTEND` / `NEW`.
 
@@ -133,3 +133,24 @@ Designated-MASTER rules, the Lenovo pilot station and its accepted baseline, the
 | 5 | Refusal at `token-from-session` must be terminal (403 is retried forever). | §6 |
 | 6 | `RESEND_FROM` is optional, default `onboarding@resend.dev` delivers only to the Resend account owner → manager mails need a verified domain; only a password-reset mail exists. | §5.6 |
 Also: D-B1 gets the "tab closed = music stops, no failover" consequence; the Android streamer does not exist yet (to be designed later).
+
+## 14. Implementation status (2026-10-27) — what was built, and how it differs from this plan
+Built (draft PRs, dormant, nothing merged): **part A** `son/enroll-a-core-2026-10-27` (DATABASE + SERVER + RENDERER) and **part B** `son/enroll-b-gate-2026-10-27`, stacked on A (SERVER: token mint + WS server, + RENDERER). How to switch on / off and go back: `docs/DEVICE_ENROLLMENT_ROLLBACK.md`.
+
+| Plan item | Built? | Note |
+|---|---|---|
+| §3 `DeviceEnrollment`, `maxPlayers`, enrollment switch + TTL | yes | additive migration `20261027161357_device_enrollment`; the switch is two columns on `WorkspaceEntitlement` (not a JSON on `Workspace`) |
+| `WorkspaceRole` / custom Discord-like roles | **no — deferred (D-S1)** | v1 uses the existing roles: admin = everything; `MANAGER` = their own assigned branches |
+| §5.1 status call, §5.2 request, §5.3 approve / reject / revoke, allocation meter, grandfathering, audit | yes | Control Room "Waiting for approval" panel; Hebrew + English |
+| §5.3 "replace the current player" | **not through enrollment** | a second Player is a standby; replacing uses *Replace main station* (the activation-code flow); the server refuses `mode: replace` explicitly |
+| §5.6 notifications | Control Room badge only (D-N1) | email needs a verified Resend domain; push needs the phone app |
+| §6 enforcement point 1 (token mint) | yes, **browser / renderer route only** | the two desktop mint routes are not gated in v1 (they carry the pinned-order source-text test and the MAIN terminal-status rules, §6 iron rules) |
+| §6 enforcement point 2 (WS REGISTER takes the role from the claim) | **partly** | an approved **REMOTE** is forced to CONTROL, never promoted, `SET_MASTER` ignored; the client-chosen `owner_global` / `controller` registration is not yet overridden by the claim |
+| §6 server-side grandfathered list for old desktop tokens | **no** | old 7–30-day desktop tokens are untouched; stations are approved automatically at switch-on |
+| §6 enforcement point 3 (push a disconnect on revoke) | **no** | a revoke takes effect at the next token (browser tokens live 60 s) |
+| D-B1 Browser Player | yes, **without touching constitution §11** | a browser may be approved as PLAYER (`playerClass: browser`) and then competes under the existing lease in zones with no designated station; **designating a browser as a zone's permanent MASTER is still NOT possible** (§11 unchanged — that amendment is only needed if the owner wants it later) |
+| D-I1 browser identity | yes | enrollment id = the profile's stable `device_id` (`lib/enrollment-device-id.ts`); extra tabs share it (the lease still picks the tab that plays) |
+| D-O1 offline acceptance | **tests not run on a station** | the design keeps "no claim = today's behaviour"; the Lenovo-class regression list must be run on TEST before PROD |
+| Phase 4a device credential, phase 5 phones / notifications | no | later |
+
+**Verified locally (not on a Lenovo / TEST / PROD):** pure rules 32 checks; a real local PostgreSQL 27 checks (isolation, scopes, allocation, expiry, audit); the real WS server 10 checks + all existing WS regression tests green; typecheck + production build; an end-to-end run in real browsers (turn on → unknown device blocked and asks → approved → token carries the role → revoked).
