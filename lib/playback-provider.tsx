@@ -30,7 +30,7 @@ import {
   isYouTubeMultiTrackUrl,
   unifiedPlaylistSourceId,
 } from "./playlist-utils";
-import { getShuffle, setShufflePreference, getRepeatMode, hasChosenRepeatMode } from "./mix-preferences";
+import { getShuffle, setShufflePreference, getPlaybackRepeatMode, hasChosenRepeatMode } from "./mix-preferences";
 import { supportsEmbedded, getSourceArtworkUrl } from "./player-utils";
 import { log as mvpLog } from "./mvp-logger";
 import { reportPlaybackIncident, classifySource as classifyIncidentSource, hostOnly as incidentHost } from "./playback-telemetry-client";
@@ -2102,7 +2102,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
      * - manual next press: "track" must NOT trap the user — treat it as playlist-loop
      *   so pressing next always advances; "off" still refuses to wrap past the end.
      */
-    const rawRepeatMode = getRepeatMode();
+    const rawRepeatMode = getPlaybackRepeatMode();
     const effectiveRepeatMode: "playlist" | "track" | "off" =
       auditTransportCase === "ended_auto"
         ? rawRepeatMode
@@ -2514,7 +2514,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const s = stateRef.current;
       if (!s.currentSource) return null;
       /* Track-loop: natural end replays the same song — no auto-advance target. */
-      const autoRepeatMode = getRepeatMode();
+      const autoRepeatMode = getPlaybackRepeatMode();
       if (autoRepeatMode === "track") return null;
 
       if (isPlayNextSourceId(s.currentSource.id) && s.playNextQueue.length > 0) {
@@ -2545,6 +2545,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           getShuffledIndex,
         );
         if (step.kind === "exhausted") return null;
+        // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
+        if (step.kind === "restart" && s.playNextQueue.length > 0) return null;
         const track = sessionTracks[step.nextIndex];
         const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
         const embedded = track ? canEmbedInCard(track.type) : false;
@@ -2572,6 +2574,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         getShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
+      // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
+      if (step.kind === "restart" && s.playNextQueue.length > 0) return null;
       const track = tracks[step.nextIndex];
       const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
@@ -2585,7 +2589,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     const s = stateRef.current;
     if (!s.currentSource) return null;
     /* Track-loop: natural end replays the same song — no auto-advance target. */
-    const autoRepeatMode = getRepeatMode();
+    const autoRepeatMode = getPlaybackRepeatMode();
     if (autoRepeatMode === "track") return null;
 
     const sessionTracks = getPlaylistSessionTracks(s);
@@ -2601,6 +2605,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         getShuffledIndex,
       );
       if (step.kind === "exhausted") return null;
+      // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
+      if (step.kind === "restart" && s.playNextQueue.length > 0) return null;
       const track = sessionTracks[step.nextIndex];
       const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
       const embedded = track ? canEmbedInCard(track.type) : false;
@@ -2631,6 +2637,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       getShuffledIndex,
     );
     if (step.kind === "exhausted") return null;
+    // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
+    if (step.kind === "restart" && s.playNextQueue.length > 0) return null;
     const track = tracks[step.nextIndex];
     const url = canonicalYouTubeWatchUrlForPlayback(track?.url ?? s.currentSource.url);
     const embedded = track ? canEmbedInCard(track.type) : false;

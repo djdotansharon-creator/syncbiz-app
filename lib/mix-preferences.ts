@@ -129,6 +129,23 @@ export function getRepeatMode(): RepeatMode {
   return DEFAULT_REPEAT_MODE;
 }
 
+/**
+ * The loop mode playback FOLLOWS at the end of a list (owner 2026-10-27). LOOP "off" stops a list only when the operator
+ * chose it; the untouched default never leaves a store silent: whatever is lined up in Play Next (a recommended song for an
+ * online list — AutoplayRecommender) plays first, otherwise the list starts again (a royalty-free bank, local files, a
+ * station without recommendations, no network). The LOOP button keeps showing `getRepeatMode()`.
+ */
+export function getPlaybackRepeatMode(): RepeatMode {
+  if (typeof window === "undefined") return "playlist";
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_REPEAT_MODE);
+    if (raw === "playlist" || raw === "track" || raw === "off") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "playlist";
+}
+
 export function setRepeatMode(mode: RepeatMode): void {
   if (typeof window === "undefined") return;
   try {

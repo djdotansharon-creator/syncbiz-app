@@ -31,7 +31,7 @@ import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
 import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved, mainBootSource } from "@/lib/device-mode-guard";
-import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode, onRepeatModeChanged, getMixDuration, type RepeatMode } from "@/lib/mix-preferences";
+import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, getPlaybackRepeatMode, setRepeatMode, onRepeatModeChanged, getMixDuration, type RepeatMode } from "@/lib/mix-preferences";
 import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
@@ -1370,7 +1370,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         mainTrackIndex: masterState?.currentTrackIndex ?? null,
         mainSessionTrackCount: masterState?.sessionTracks?.length ?? null,
         direction,
-        repeatMode: opts?.automatic === "failure" ? (getRepeatMode() === "off" ? "off" : "playlist") : getRepeatMode(),
+        repeatMode: opts?.automatic === "failure" ? (getPlaybackRepeatMode() === "off" ? "off" : "playlist") : getPlaybackRepeatMode(),
         repeatCurrent: opts?.automatic === "eof",
       });
       if (!step) return false;
@@ -1599,7 +1599,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const desktop = (window as any).syncbizDesktop;
     if (typeof desktop?.setPlaybackPrefs !== "function") return;
-    const push = () => { void desktop.setPlaybackPrefs({ autoMix: getAutoMix(), repeatMode: getRepeatMode() }); };
+    const push = () => { void desktop.setPlaybackPrefs({ autoMix: getAutoMix(), repeatMode: getPlaybackRepeatMode() }); };
     push();
     const offA = onAutoMixChanged(push);
     const offR = onRepeatModeChanged(push);
