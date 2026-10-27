@@ -388,6 +388,36 @@ async function main() {
   const onAppUp = runBoot("/sources", true, true);
   assert("X1 the dark cover of a device left locked is NEVER put over the sign-in / sign-up / reset pages (a browser whose sign-in expired used to show only the cover over the login page), still comes up on the app's own pages, removes itself after 10 s if the display screen did not come up, and leaves it to the display when it did", onLogin.start === null && runBoot("/signup", true, false).start === null && runBoot("/", true, false).start === null && onApp.start === "locked" && onApp.end === null && onApp.ms === 10000 && onAppUp.start === "locked" && onAppUp.end === "locked", { onLogin, onApp, onAppUp });
 
+  // ── 2026-10-27: working hours — limits while open, everything once closed (owner: "when the place is closed workers play what they like") ──
+  store.clear();
+  const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo, d, h, mi); // local time
+  // 2026-10-25 is a Sunday (0), 2026-10-31 a Saturday (6)
+  k.setKioskPermissions({ search: false, volumeMax: 40 });
+  assert("Y1 with no hours set the owner's limits always apply (exactly as before)", k.getKioskHours().enabled === false && k.getEffectiveKioskPermissions(at(2026, 9, 25, 23, 0)).search === false && k.getEffectiveKioskPermissions(at(2026, 9, 25, 23, 0)).volumeMax === 40);
+  k.setKioskHours({ enabled: true, days: [0, 1, 2, 3, 4, 5], from: "09:00", to: "21:00" });
+  const open = k.getEffectiveKioskPermissions(at(2026, 9, 25, 12, 0));
+  assert("Y2 while the business is open the owner's limits apply", open.search === false && open.volumeMax === 40);
+  const late = k.getEffectiveKioskPermissions(at(2026, 9, 25, 21, 30));
+  assert("Y3 after closing time everything is open to staff, up to full volume", Object.entries(late).every(([key, v]) => (key === "volumeMax" ? v === 100 : v === true)));
+  assert("Y4 closing time itself already counts as closed; opening time already counts as open", k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 25, 21, 0)) === false && k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 25, 9, 0)) === true && k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 25, 8, 59)) === false);
+  assert("Y5 a day that is not a working day is closed all day", k.getEffectiveKioskPermissions(at(2026, 9, 31, 12, 0)).search === true);
+  k.setKioskHours({ days: [0, 1, 2, 3, 4, 5, 6], from: "22:00", to: "02:00" });
+  const h2 = k.getKioskHours();
+  assert("Y6 a window that runs past midnight is open late at night and early the next morning, closed in between", k.isWithinKioskHours(h2, at(2026, 9, 25, 23, 0)) && k.isWithinKioskHours(h2, at(2026, 9, 26, 1, 30)) && !k.isWithinKioskHours(h2, at(2026, 9, 26, 2, 0)) && !k.isWithinKioskHours(h2, at(2026, 9, 26, 12, 0)));
+  k.setKioskHours({ days: [5], from: "22:00", to: "02:00" });
+  assert("Y7 …and the early-morning part belongs to the day before (Friday night runs into Saturday, not into Friday morning)", k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 31, 1, 0)) === true && k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 30, 1, 0)) === false);
+  k.setKioskHours({ days: [0, 1], from: "08:00", to: "08:00" });
+  assert("Y8 from = to means the whole day on the chosen days", k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 25, 3, 0)) === true && k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 26, 3, 0)) === true && k.isWithinKioskHours(k.getKioskHours(), at(2026, 9, 27, 3, 0)) === false);
+  assert("Y9 the owner's own limits are NOT changed by the hours (the settings page keeps showing what he set)", k.getKioskPermissions().search === false && k.getKioskPermissions().volumeMax === 40);
+  store.set("syncbiz-kiosk-settings", JSON.stringify({ hours: { enabled: true, days: [9, "x", 2, 2, -1], from: "25:99", to: 7 } }));
+  const bad = k.getKioskHours();
+  assert("Y10 damaged hours fall back safely (bad days dropped, bad times back to the default) and never lock staff out", bad.enabled === true && bad.days.join() === "2" && bad.from === "09:00" && bad.to === "21:00");
+  store.clear();
+  const kioskSrc = read("lib", "kiosk.ts");
+  const dispSrc = read("components", "kiosk-display.tsx");
+  const setSrc = read("components", "management", "display-settings-console.tsx");
+  assert("Y11 the display screen follows the clock (effective permissions, re-checked every 30 s) while the settings page edits the owner's own limits", /export function useKioskPermissions\(\)[\s\S]{0,200}effectiveSnapshot/.test(kioskSrc) && /setInterval\(cb, 30_000\)/.test(kioskSrc) && /useKioskPermissions\(\)/.test(dispSrc) && !/useKioskOwnerPermissions/.test(dispSrc) && /useKioskOwnerPermissions\(\)/.test(setSrc) && !/\buseKioskPermissions\b/.test(setSrc));
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
 }

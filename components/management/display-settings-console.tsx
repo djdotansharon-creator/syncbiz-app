@@ -9,7 +9,7 @@
 
 import { useState, type FormEvent, type ReactElement, type ReactNode } from "react";
 import { useLocale } from "@/lib/locale-context";
-import { DEFAULT_KIOSK_PIN, KIOSK_VOLUME_MIN_CAP, hasCustomKioskPin, lockKiosk, setKioskPermissions, setKioskPin, useKioskPermissions, type KioskPermissions } from "@/lib/kiosk";
+import { DEFAULT_KIOSK_PIN, KIOSK_VOLUME_MIN_CAP, hasCustomKioskPin, lockKiosk, isWithinKioskHours, setKioskHours, setKioskPermissions, setKioskPin, useKioskHours, useKioskOwnerPermissions, type KioskPermissions } from "@/lib/kiosk";
 
 const HE = {
   title: "מסך תצוגה",
@@ -39,6 +39,14 @@ const HE = {
   playlists: ["הפליילסטים שלי", "עמוד בצד המסך עם הפליילסטים המוכנים של העסק, ולחיצה אחת מעלה פליילסט. אם תכבו — העמוד והאייקון שלו נעלמים"],
   seek: ["הזזת השיר בזמן", "גרירת פס ההתקדמות לדקה אחרת בשיר. אם תכבו — עובדים לא יכולים לקפוץ לדקה מסוימת"],
   volMax: "העוצמה הגבוהה ביותר שעובדים יכולים להגדיר",
+  hoursTitle: "שעות פעילות",
+  hoursText: "בשעות העבודה חלות ההגבלות שלמעלה. כשהעסק סגור המסך נפתח והעובדים יכולים הכול, כולל לנגן מה שבא להם.",
+  hoursSwitch: ["כללים אחרים כשהעסק סגור", "מחוץ לשעות ולימים שתבחרו, כל הכפתורים פתוחים והעוצמה עד הסוף"],
+  hoursDays: "ימי עבודה",
+  hoursFrom: "פתיחה",
+  hoursTo: "סגירה",
+  days: ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"],
+  hoursNow: (open: boolean) => (open ? "עכשיו: העסק פתוח, ההגבלות חלות" : "עכשיו: העסק סגור, הכול פתוח לעובדים"),
   showTitle: "הצגת המסך",
   showText: "מעלה את מסך התצוגה על המחשב הזה. המוזיקה ממשיכה לנגן ולא נפסקת.",
   show: "פתחו את מסך התצוגה",
@@ -72,6 +80,14 @@ const EN = {
   playlists: ["My playlists", "A page on the side of the screen with the business's ready-made playlists, one press puts one on. Switch it off and the page and its icon disappear"],
   seek: ["Move within the song", "Drag the progress bar to another minute. Switch it off and staff cannot jump to a particular minute"],
   volMax: "The loudest staff can set the volume",
+  hoursTitle: "Opening hours",
+  hoursText: "While the business is open the limits above apply. When it is closed the screen opens up and staff can do everything, including playing whatever they like.",
+  hoursSwitch: ["Different rules when the business is closed", "Outside the days and hours you pick, every button is open and the volume goes all the way up"],
+  hoursDays: "Working days",
+  hoursFrom: "Opens",
+  hoursTo: "Closes",
+  days: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  hoursNow: (open: boolean) => (open ? "Right now: open — the limits apply" : "Right now: closed — everything is open to staff"),
   showTitle: "Show the screen",
   showText: "Puts the display screen up on this computer. The music keeps playing — nothing stops.",
   show: "Open the display screen",
@@ -114,7 +130,8 @@ function Card({ title, badge, children, text }: { title: string; badge?: ReactNo
 export function DisplaySettingsConsole(): ReactElement {
   const { locale } = useLocale();
   const t = locale === "he" ? HE : EN;
-  const perms = useKioskPermissions();
+  const perms = useKioskOwnerPermissions();
+  const hours = useKioskHours();
   const [custom, setCustom] = useState(() => hasCustomKioskPin());
   const [a, setA] = useState("");
   const [b, setB] = useState("");
@@ -186,6 +203,42 @@ export function DisplaySettingsConsole(): ReactElement {
             <span>{t.volMax}</span>
             <input type="range" min={KIOSK_VOLUME_MIN_CAP} max={100} step={5} value={perms.volumeMax} onChange={(e) => setKioskPermissions({ volumeMax: Number(e.target.value) })} aria-label={t.volMax} style={{ ["--v" as string]: `${((perms.volumeMax - KIOSK_VOLUME_MIN_CAP) / (100 - KIOSK_VOLUME_MIN_CAP)) * 100}%` } as React.CSSProperties} />
             <b>{perms.volumeMax}%</b>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card title={t.hoursTitle} text={t.hoursText}>
+        <div className="sb-kset-rows">
+          <div className="sb-kset-row sb-kset-row--plain">
+            <span>
+              <b>{t.hoursSwitch[0]}</b>
+              <small>{t.hoursSwitch[1]}</small>
+            </span>
+            <button type="button" role="switch" aria-checked={hours.enabled} aria-label={t.hoursSwitch[0]} className="sb-kset-switch" onClick={() => setKioskHours({ enabled: !hours.enabled })}>
+              <i aria-hidden />
+            </button>
+          </div>
+        </div>
+        {hours.enabled ? (
+          <div className="sb-kset-hours">
+            <div className="sb-kset-days" role="group" aria-label={t.hoursDays}>
+              {t.days.map((label, d) => (
+                <button key={d} type="button" data-on={hours.days.includes(d) ? "1" : undefined} aria-pressed={hours.days.includes(d)} onClick={() => setKioskHours({ days: hours.days.includes(d) ? hours.days.filter((x) => x !== d) : [...hours.days, d] })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="sb-kset-times">
+              <label className="sb-kset-field">
+                <span>{t.hoursFrom}</span>
+                <input type="time" value={hours.from} onChange={(e) => e.target.value && setKioskHours({ from: e.target.value })} />
+              </label>
+              <label className="sb-kset-field">
+                <span>{t.hoursTo}</span>
+                <input type="time" value={hours.to} onChange={(e) => e.target.value && setKioskHours({ to: e.target.value })} />
+              </label>
+            </div>
+            <p className="sb-kset-now">{t.hoursNow(isWithinKioskHours(hours, new Date()))}</p>
           </div>
         ) : null}
       </Card>

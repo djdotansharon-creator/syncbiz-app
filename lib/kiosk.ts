@@ -46,7 +46,17 @@ export type KioskPermissions = {
 export const DEFAULT_KIOSK_PERMISSIONS: KioskPermissions = { skip: true, pause: true, search: true, reorder: true, jingles: true, volume: true, seek: true, library: true, playlists: true, createJingles: true, volumeMax: 80 };
 export const KIOSK_VOLUME_MIN_CAP = 20;
 
-type Stored = { perms?: Partial<KioskPermissions>; pinHash?: string; pinSalt?: string };
+/**
+ * Working hours (owner 2026-10-27): while the business is OPEN the owner's limits above apply to staff; once it is CLOSED (outside these days / hours) the screen opens up and staff
+ * may do everything — play whatever they like. Off by default (the limits then always apply, exactly as before). `days` are 0 = Sunday … 6 = Saturday; `from` / `to` are "HH:MM"
+ * on the device's own clock. A window that ends before it starts (22:00 → 02:00) runs past midnight; from = to means the whole day.
+ */
+export type KioskHours = { enabled: boolean; days: number[]; from: string; to: string };
+export const DEFAULT_KIOSK_HOURS: KioskHours = { enabled: false, days: [0, 1, 2, 3, 4, 5], from: "09:00", to: "21:00" };
+/** what staff may do while the business is closed: everything, up to full volume */
+export const OPEN_KIOSK_PERMISSIONS: KioskPermissions = { skip: true, pause: true, search: true, reorder: true, jingles: true, volume: true, seek: true, library: true, playlists: true, createJingles: true, volumeMax: 100 };
+
+type Stored = { perms?: Partial<KioskPermissions>; hours?: Partial<KioskHours>; pinHash?: string; pinSalt?: string };
 
 // ───────────────────────────────────────────────── lock ─────────────────────────────────────────────────
 
@@ -147,6 +157,44 @@ export function setKioskPermissions(patch: Partial<KioskPermissions>): void {
   write({ ...cur, perms: { ...getKioskPermissions(), ...patch } });
 }
 
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const toMinutes = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+
+/** The working hours as the owner set them (anything missing or damaged falls back to the default for that part). */
+export function getKioskHours(): KioskHours {
+  if (typeof window === "undefined") return DEFAULT_KIOSK_HOURS;
+  const h = parse(readRaw()).hours ?? {};
+  return {
+    enabled: h.enabled === true,
+    days: Array.isArray(h.days) ? Array.from(new Set((h.days as unknown[]).filter((d): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6))).sort() : DEFAULT_KIOSK_HOURS.days,
+    from: typeof h.from === "string" && HHMM.test(h.from) ? h.from : DEFAULT_KIOSK_HOURS.from,
+    to: typeof h.to === "string" && HHMM.test(h.to) ? h.to : DEFAULT_KIOSK_HOURS.to,
+  };
+}
+
+export function setKioskHours(patch: Partial<KioskHours>): void {
+  const cur = parse(readRaw());
+  write({ ...cur, hours: { ...getKioskHours(), ...patch } });
+}
+
+/** True while the business is open by these hours (the owner's limits apply). Pure — the clock is passed in. */
+export function isWithinKioskHours(h: KioskHours, now: Date): boolean {
+  const m = now.getHours() * 60 + now.getMinutes();
+  const day = now.getDay();
+  const from = toMinutes(h.from);
+  const to = toMinutes(h.to);
+  if (from === to) return h.days.includes(day);
+  if (from < to) return h.days.includes(day) && m >= from && m < to;
+  return (h.days.includes(day) && m >= from) || (h.days.includes((day + 6) % 7) && m < to);
+}
+
+/** What staff may do on the display screen RIGHT NOW: the owner's limits while the business is open (or when no hours are set), everything once it is closed. */
+export function getEffectiveKioskPermissions(now: Date = new Date()): KioskPermissions {
+  const h = getKioskHours();
+  if (h.enabled && !isWithinKioskHours(h, now)) return OPEN_KIOSK_PERMISSIONS;
+  return getKioskPermissions();
+}
+
 // ───────────────────────────────────────────────── password ─────────────────────────────────────────────────
 
 async function sha256(text: string): Promise<string> {
@@ -213,6 +261,52 @@ function permsSnapshot(): KioskPermissions {
   return permsCache;
 }
 
-export function useKioskPermissions(): KioskPermissions {
+/** The permissions the OWNER set (what the settings page edits) — never changed by the working hours. */
+export function useKioskOwnerPermissions(): KioskPermissions {
   return useSyncExternalStore(subscribe, permsSnapshot, () => DEFAULT_KIOSK_PERMISSIONS);
+}
+
+let hoursRaw = "\u0000";
+let hoursCache: KioskHours = DEFAULT_KIOSK_HOURS;
+function hoursSnapshot(): KioskHours {
+  const raw = readRaw();
+  if (raw !== hoursRaw) {
+    hoursRaw = raw;
+    hoursCache = getKioskHours();
+  }
+  return hoursCache;
+}
+
+/** The working hours as the owner set them (for the settings page). */
+export function useKioskHours(): KioskHours {
+  return useSyncExternalStore(subscribe, hoursSnapshot, () => DEFAULT_KIOSK_HOURS);
+}
+
+/** the same, plus a tick every 30 s so the screen follows the clock when the business opens or closes */
+function subscribeWithClock(cb: () => void): () => void {
+  const off = subscribe(cb);
+  const timer = window.setInterval(cb, 30_000);
+  return () => {
+    off();
+    window.clearInterval(timer);
+  };
+}
+
+let effKey = "\u0000";
+let effCache: KioskPermissions = DEFAULT_KIOSK_PERMISSIONS;
+function effectiveSnapshot(): KioskPermissions {
+  const raw = readRaw();
+  const h = getKioskHours();
+  const closed = h.enabled && !isWithinKioskHours(h, new Date());
+  const key = `${raw}|${closed ? "closed" : "open"}`;
+  if (key !== effKey) {
+    effKey = key;
+    effCache = closed ? OPEN_KIOSK_PERMISSIONS : getKioskPermissions();
+  }
+  return effCache;
+}
+
+/** What staff may do on the display screen right now (the owner's limits while the business is open, everything once it is closed — see `KioskHours`). */
+export function useKioskPermissions(): KioskPermissions {
+  return useSyncExternalStore(subscribeWithClock, effectiveSnapshot, () => DEFAULT_KIOSK_PERMISSIONS);
 }

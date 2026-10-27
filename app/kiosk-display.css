@@ -496,6 +496,16 @@ html[dir="ltr"] .sb-kiosk-launch { right: auto; left: 14px; bottom: 6px; }
 .sb-kset-cap input { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px; outline: none; cursor: pointer; background: linear-gradient(to right, #f5f5f7 0, #f5f5f7 var(--v), rgba(255, 255, 255, 0.2) var(--v), rgba(255, 255, 255, 0.2) 100%); }
 .sb-kset-cap input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 999px; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4); }
 .sb-kset-cap input::-moz-range-thumb { width: 20px; height: 20px; border: 0; border-radius: 999px; background: #fff; }
+.sb-kset-row--plain { grid-template-columns: minmax(0, 1fr) auto; }
+.sb-kset-hours { margin-top: 6px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.sb-kset-days { display: flex; flex-wrap: wrap; gap: 8px; }
+.sb-kset-days button { min-width: 46px; height: 40px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.09); color: rgba(255, 255, 255, 0.7); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background-color 200ms ease, color 200ms ease, transform 200ms ease; }
+.sb-kset-days button:hover { background: rgba(255, 255, 255, 0.15); }
+.sb-kset-days button[data-on="1"] { background: #f5f5f7; color: #111; }
+.sb-kset-days button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sb-kset-times { display: grid; grid-template-columns: repeat(2, minmax(0, 160px)); gap: 12px; margin-top: 14px; }
+.sb-kset-times .sb-kset-field input { letter-spacing: 0.04em; color-scheme: dark; }
+.sb-kset-now { margin: 14px 0 0; font-size: 13.5px; color: rgba(255, 255, 255, 0.58); }
 .sb-kset-note { margin-top: 6px; font-size: 13px; color: rgba(255, 255, 255, 0.45); }
 
 /* ═══════════════════════════ the owner's LOCK SCREEN DESIGN page (top-bar tab) ═══════════════════════════
