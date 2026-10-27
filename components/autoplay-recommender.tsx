@@ -11,6 +11,9 @@
  * themselves), LOOP-this-track, a CONTROL device (the master does it), a queue the operator already filled, and
  * `localStorage syncbiz:autoplayNext = "off"`. A song never repeats within the last 40. Renders null.
  * 2026-10-23 (owner): with LOOP off, the LAST song of a list (album / playlist with tracks) is treated like a single song too.
+ * 2026-10-27 (owner): OFF BY DEFAULT — VONO never lines up a song the business did not choose. A list / a single song
+ * starts again at its end instead (getPlaybackRepeatMode). Enabled only by an explicit `localStorage syncbiz:autoplayNext = "on"`;
+ * while off, a recommendation still waiting from before is taken out of Play Next so it never plays.
  */
 
 import { useEffect, useRef } from "react";
@@ -114,7 +117,7 @@ export function AutoplayRecommender(): null {
     else if (sessionLen > 1 && !lastOfList) why = `part-of-a-playlist(${sessionLen} tracks)`;
     else {
       try {
-        if (localStorage.getItem("syncbiz:autoplayNext") === "off") why = "switched-off";
+        if (localStorage.getItem("syncbiz:autoplayNext") !== "on") why = "switched-off"; // opt-in only (owner 2026-10-27)
       } catch {
         /* ignore */
       }
@@ -125,7 +128,7 @@ export function AutoplayRecommender(): null {
         loggedSkip.current = `${seed}|${why}`;
         console.log("[VONO Autoplay] skipped", { why, seed, title });
       }
-      if (why.startsWith("part-of-a-playlist")) {
+      if (why.startsWith("part-of-a-playlist") || why === "switched-off") {
         // left the LAST song of a list (prev / another track): a recommendation lined up for it must not fire in the middle of the list
         for (const it of live.current.queue) {
           if (it.genre !== AUTOPLAY_GENRE) continue;

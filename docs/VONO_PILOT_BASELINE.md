@@ -45,8 +45,10 @@
 - **🔴 MAIN REVIEW 2026-10-27 (read-only; main `fdaa8ea` = redesign PRs #66–#70 merged → LIVE ON PROD).** No server / desktop /
   DB / API change; middleware only adds protected routes. Findings (owner decides each; one defect per PR):
   1. **END OF LIST = SILENCE (P0) — FIXED IN CODE, PR open (owner 2026-10-27):** #67 made LOOP "off" the default → a bank
-     (stream-url) / online list / station list stopped at its end. Owner rule: bank → restart; online list → recommended song, and
-     without one → restart; only an operator's explicit "off" stops. `getPlaybackRepeatMode()` (renderer + MAIN prefs).
+     (stream-url) / online list / station list stopped at its end. Owner rule (final, 2026-10-27): bank, customer URL list /
+     playlist, single song, desktop / Lenovo → START AGAIN; VONO never lines up a song the business did not choose (the
+     AutoplayRecommender is opt-in only: `localStorage syncbiz:autoplayNext = "on"`); only an operator's explicit LOOP "off"
+     stops. `getPlaybackRepeatMode()` (renderer + MAIN prefs).
   2. **Heavy graphics are back (P0 for Windows):** the #60 look (104 backdrop-filters) returned; Lite mode only on hardware the
      boot script guesses is weak. Owner 2026-10-27: **Lite by default on the desktop app and Windows** — next PR.
   3. "Weekdays" jingle schedules (the new dialog's default) fire ONCE a week (`schedule-storage.ts` lastFiringMs/periodMs) — PROVEN BY TEST.

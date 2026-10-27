@@ -121,6 +121,32 @@ async function main() {
   };
   const naturalEnd = () => run(() => A().next({ auditTransportCase: "ended_auto" }));
 
+  // ── O. DEFAULT (owner 2026-10-27): VONO never lines up a song the business did not choose — the list starts again ────
+  // The recommendation service answers in this block, so "nothing lined up" proves the default switch, not a failing service.
+  const listO = playlist("own-three", 3);
+  quiet();
+  await run(() => A().playSource(listO, 2));
+  await settle();
+  const oListLined = autoplayLined();
+  await naturalEnd();
+  await settle();
+  loud();
+  assert("O1 default: LAST song of a customer list -> no recommended song is lined up", oListLined === 0, { lined: oListLined });
+  assert("O2 default: the last song ends -> the list starts again from its first song", A().currentSource?.id === listO.id && A().currentTrackIndex === 0 && A().status === "playing" && autoplayLined() === 0, { id: A().currentSource?.id, idx: A().currentTrackIndex, status: A().status });
+  quiet();
+  await reset();
+  await run(() => A().playSource(single));
+  await settle();
+  const oSingleLined = autoplayLined();
+  await naturalEnd();
+  await settle();
+  loud();
+  assert("O3 default: a single song -> nothing lined up; it ends -> the same song starts again", oSingleLined === 0 && A().currentSource?.id === single.id && A().status === "playing", { lined: oSingleLined, id: A().currentSource?.id, status: A().status });
+  quiet();
+  await reset();
+
+  // ── Everything below (L / S / Q) is the OPT-IN recommendation mode: localStorage syncbiz:autoplayNext = "on" ──────
+  store.set("syncbiz:autoplayNext", "on");
   quiet();
   // ── L. the last song of a list (loop OFF = the default) ───────────────────────────────────────────────────────────
   const list3 = playlist("album-three", 3);
@@ -158,6 +184,7 @@ async function main() {
   loud();
   assert("L6 loop ON, last song: nothing lined up (the list loops)", autoplayLined() === 0, A().playNextQueue.map((s) => s.title));
   store.clear();
+  store.set("syncbiz:autoplayNext", "on");
 
   // a LOCAL playlist through the real provider: its last file ends -> the list starts again from the first file
   const localList: UnifiedSource = (() => {
@@ -202,6 +229,7 @@ async function main() {
     return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
   };
   store.clear();
+  store.set("syncbiz:autoplayNext", "on");
   await run(() => A().playSource(single));
   await settle();
   const lined = A().playNextQueue.map((s) => s.title);
