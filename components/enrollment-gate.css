@@ -1,0 +1,34 @@
+/* The not-yet-approved device's screen (owner 2026-10-27): one calm card over a solid dark page — nothing of the account shows behind it. */
+.vono-enr { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 24px; background: #0b0b0d; color: #f5f5f7; overflow-y: auto; }
+.vono-enr-card { width: min(520px, 100%); padding: 34px 30px 30px; border-radius: 28px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 24px 70px rgba(0, 0, 0, 0.5); text-align: center; }
+.vono-enr-card h2 { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 650; }
+.vono-enr-sub { margin: 10px 0 0; font-size: 15.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.62); }
+.vono-enr-small { font-size: 13.5px; color: rgba(255, 255, 255, 0.45); }
+.vono-enr-state { margin: 14px 0 0; padding: 10px 14px; border-radius: 14px; background: rgba(255, 200, 87, 0.12); color: #ffd98a; font-size: 14.5px; font-weight: 600; }
+.vono-enr-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0 8px; }
+.vono-enr-choice button { display: grid; justify-items: center; gap: 4px; padding: 16px 12px 14px; border: 0; border-radius: 20px; background: rgba(255, 255, 255, 0.06); color: #f5f5f7; font: inherit; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); transition: background-color 200ms ease, box-shadow 200ms ease; }
+.vono-enr-choice button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.vono-enr-choice button:disabled { opacity: 0.35; cursor: default; }
+.vono-enr-choice button[data-on="1"][data-kind="player"] { box-shadow: inset 0 0 0 2px #30d158; }
+.vono-enr-choice button[data-on="1"][data-kind="remote"] { box-shadow: inset 0 0 0 2px #7db8ff; }
+.vono-enr-choice .ic { display: grid; place-items: center; width: 38px; height: 38px; }
+.vono-enr-choice [data-kind="player"] .ic { color: #30d158; }
+.vono-enr-choice [data-kind="remote"] .ic { color: #7db8ff; }
+.vono-enr-choice b { font-size: 17px; font-weight: 700; }
+.vono-enr-choice small { font-size: 12.5px; line-height: 1.4; color: rgba(255, 255, 255, 0.55); }
+.vono-enr-field { display: grid; gap: 6px; margin-top: 12px; text-align: start; }
+.vono-enr-field span { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.7); }
+.vono-enr-field select, .vono-enr-field input { height: 44px; padding: 0 14px; border: 0; outline: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.09); color: inherit; font: inherit; font-size: 15px; color-scheme: dark; }
+.vono-enr-field select:focus, .vono-enr-field input:focus { background: rgba(255, 255, 255, 0.14); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
+.vono-enr-err { margin: 12px 0 0; font-size: 14px; font-weight: 600; color: #ff8a80; }
+.vono-enr-send { margin-top: 20px; height: 48px; padding: 0 30px; border: 0; border-radius: 999px; background: #f5f5f7; color: #111; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 200ms ease, opacity 200ms ease; }
+.vono-enr-send:hover:not(:disabled) { transform: translateY(-1px); }
+.vono-enr-send:disabled { opacity: 0.4; cursor: default; }
+.vono-enr-send:focus-visible, .vono-enr-choice button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vono-enr-dots { margin: 18px 0 4px; }
+.vono-enr-dots i { display: inline-block; width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: #ffc857; animation: vono-enr-b 1.3s infinite ease-in-out; }
+.vono-enr-dots i:nth-child(2) { animation-delay: 0.2s; }
+.vono-enr-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes vono-enr-b { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .vono-enr-dots i { animation: none; } }
+@media (max-width: 480px) { .vono-enr-choice { grid-template-columns: 1fr; } }

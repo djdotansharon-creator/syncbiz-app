@@ -35,6 +35,7 @@ import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, setRepeatMode,
 import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
+import { wsTokenUrl } from "@/lib/enrollment-device-id";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -323,7 +324,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
       console.info("[SyncBiz WS client] token refresh requested", { role: "device" });
     }
     const fetchToken = () => {
-      fetch("/api/auth/ws-token")
+      fetch(wsTokenUrl())
         .then((r) => {
           if (cancelled) return;
           if (r.status === 401) {

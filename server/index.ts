@@ -129,6 +129,11 @@ type DeviceConnection = {
    * MASTER on a designated branch.
    */
   designatedTrusted?: boolean;
+  /**
+   * Device enrollment (docs/DEVICE_ENROLLMENT_DESIGN.md §6): the SIGNED role the manager approved for this device (from the token, never from the client's message).
+   * REMOTE = never MASTER, never auto-promoted, SET_MASTER ignored. null / absent = legacy behaviour, exactly as before.
+   */
+  enrollmentRole?: "PLAYER" | "REMOTE" | null;
 };
 
 const devices = new Map<string, DeviceConnection>();
@@ -380,6 +385,7 @@ function isEligibleConnectedPlaybackCandidate(d: DeviceConnection, roomKey: stri
   if (d.roomKey !== roomKey) return false;
   if (d.ws.readyState !== 1) return false;
   if (d.isMobile) return false;
+  if (d.enrollmentRole === "REMOTE") return false; // an approved Remote is never a playback candidate
   const intent = d.registrationIntent;
   if (!intent) return true;
   return (
@@ -1102,6 +1108,10 @@ wss.on("connection", (ws) => {
           // Non-designated branch, but an embedded Electron renderer must still NEVER elect (non-electing mirror).
           mode = "CONTROL";
           masterDecisionReason = "embedded renderer -> CONTROL (non-electing)";
+        } else if (auth.enrollmentRole === "REMOTE") {
+          // Device enrollment: the manager approved this device as a REMOTE (signed claim) — it controls, it never plays and never elects.
+          mode = "CONTROL";
+          masterDecisionReason = "enrollment: approved Remote -> CONTROL (never MASTER)";
         } else if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
           if (masterByBranch.get(key) === deviceId) {
@@ -1238,6 +1248,7 @@ wss.on("connection", (ws) => {
           roomKey,
           registrationIntent,
           designatedTrusted,
+          enrollmentRole: auth.enrollmentRole,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
         logLeaseEvent("register", {
@@ -1401,6 +1412,12 @@ wss.on("connection", (ws) => {
       const userId = conn?.userId ?? "";
       const branchId = conn?.branchId ?? DEFAULT_BRANCH_ID;
       const key = conn?.roomKey ?? runtimeBranchKey(conn?.workspaceId, userId, branchId);
+
+      // Device enrollment: an approved Remote can never ask to become MASTER.
+      if (conn?.enrollmentRole === "REMOTE") {
+        logLeaseEvent("set_master_blocked", { userId, branchId, deviceId, reason: "enrollment_remote", triggeredBy: "SET_MASTER" });
+        return;
+      }
 
       // ── Pilot PERMANENT MASTER: SET_MASTER cannot bypass a designation ───────────────────────────────────
       // On a designated branch, ONLY the trusted designated station may be MASTER. SET_MASTER from anyone else

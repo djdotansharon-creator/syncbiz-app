@@ -16,6 +16,7 @@ import {
 } from "@/lib/syncbiz-device-model";
 import { isPhoneUa, isTabletUa } from "@/lib/ua-detection";
 import { useStationBranchId } from "@/lib/station-branch";
+import { wsTokenUrl } from "@/lib/enrollment-device-id";
 
 export function getWsUrl(): string {
   if (typeof window === "undefined") return "";
@@ -482,7 +483,7 @@ export function useRemoteController(options?: {
       console.info("[SyncBiz WS client] token refresh requested", { role: "controller" });
     }
     const fetchToken = (retry = false) => {
-      fetch("/api/auth/ws-token")
+      fetch(wsTokenUrl())
         .then((r) => {
           if (cancelled) return;
           if (r.status === 401) {
@@ -630,7 +631,7 @@ export function useRemoteController(options?: {
       console.info("[SyncBiz WS client] proactive token refresh scheduled", { role: "controller", refreshAt });
     }
     const id = setInterval(() => {
-      fetch("/api/auth/ws-token")
+      fetch(wsTokenUrl())
         .then((r) => r.ok ? r.json() : null)
         .then((data: { token?: string } | null) => {
           if (data?.token) {
@@ -746,7 +747,7 @@ export function useRemoteOwner() {
       console.info("[SyncBiz WS client] token refresh requested", { role: "owner" });
     }
     const fetchToken = (retry = false) => {
-      fetch("/api/auth/ws-token")
+      fetch(wsTokenUrl())
         .then((r) => {
           if (cancelled) return;
           if (r.status === 401) {
@@ -867,7 +868,7 @@ export function useRemoteOwner() {
       console.info("[SyncBiz WS client] proactive token refresh scheduled", { role: "owner", refreshAt });
     }
     const id = setInterval(() => {
-      fetch("/api/auth/ws-token")
+      fetch(wsTokenUrl())
         .then((r) => r.ok ? r.json() : null)
         .then((data: { token?: string } | null) => {
           if (data?.token) {

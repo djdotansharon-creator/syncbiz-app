@@ -52,6 +52,11 @@ export type WsTokenClaims = {
    */
   stationBranchId?: string | null;
   designatedMasterByBranch?: Record<string, string>;
+  /**
+   * Device enrollment (additive, signed; docs/DEVICE_ENROLLMENT_DESIGN.md §6): the role the manager APPROVED for this device. The WS server trusts this, never the client's own message:
+   * REMOTE = never MASTER, never auto-promoted. Absent = legacy behaviour (today's), always.
+   */
+  enrollmentRole?: "PLAYER" | "REMOTE";
 };
 
 function mintToken(
@@ -71,6 +76,7 @@ function mintToken(
     stationDeviceId?: string;
     stationBranchId?: string;
     designatedMasterByBranch?: Record<string, string>;
+    enrollmentRole?: "PLAYER" | "REMOTE";
   } = {
     purpose,
     userId: userId.trim(),
@@ -86,6 +92,7 @@ function mintToken(
   if (claims?.designatedMasterByBranch && Object.keys(claims.designatedMasterByBranch).length > 0) {
     payload.designatedMasterByBranch = claims.designatedMasterByBranch;
   }
+  if (claims?.enrollmentRole === "PLAYER" || claims?.enrollmentRole === "REMOTE") payload.enrollmentRole = claims.enrollmentRole;
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
   const sig = signPayload(payloadB64);
   return `${payloadB64}.${sig}`;
