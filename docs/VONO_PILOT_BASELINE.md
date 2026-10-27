@@ -42,6 +42,33 @@
   (scheduled jingles included) are fire-and-forget: a half-open socket (still OPEN, network silently gone) loses a
   command sent into it, and the ms between a socket close and the next React render can too. Needs a server
   delivery ACK + idempotency key per command — a protocol change; NOT in PR #64; not started without the owner.
+- **🔴 AUDIT 2026-10-25 (read-only, NOT fixed — owner decides order): F6 + stale CONTROL display + F9.** Owner PROD
+  report reproduced on the local app + WS (PROVEN BY RUNTIME, screenshots in the cloud session).
+  **F6 — promoted browser MASTER stays silent (browser-only / non-designated rooms; designated rooms never
+  auto-promote, PROVEN BY CODE).** Server promotion sends only `SET_DEVICE_MODE MASTER` (no session). The client
+  has an adoption path (`lib/device-player-context.tsx` ~1076: `pendingMasterAdoptionRef` armed on CONTROL→MASTER),
+  but the effect that performs it depends only on `masterState` / `isBranchConnected` / `currentSource` / stable
+  `playSource`/`pause` — none change on promotion → it never runs (PROVEN BY CODE; runtime: promoted tab MASTER,
+  "READY", `masterHasSource: true` from the dead MASTER, source WAS resolvable). Second gap: adoption resolves only
+  library ids (`fetchUnifiedSourcesWithFallback`) — pasted URL (`playnext-*`) / music-bank ephemeral sources would
+  still fail; the mount-time restore handles them (`urlSource` / `ephemeral` recovery).
+  **Why a NEW tab plays:** the MASTER persists `syncbiz-playback-recovery-v2` in localStorage (profile-wide); a new
+  tab restores it while provisionally MASTER, gets CONTROL, re-claims (playing-player protection) → granted since
+  the promoted MASTER is not playing → new tab MASTER, promoted tab demoted (PROVEN BY RUNTIME).
+  **Side finding:** every tab opened while the MASTER plays briefly enters local "playing" (restore) before
+  MASTER_LOCKED_PLAYING stops it (PROVEN BY RUNTIME; audible blip NOT measured).
+  **Stale CONTROL display:** server deletes the closed MASTER's `deviceState` but sends clients nothing; client
+  `masterState` is never cleared → CONTROL shows "NOW PLAYING" of a dead MASTER until a new MASTER sends state
+  (10.4 s measured) — and indefinitely if nobody is promoted (designated station offline: PROVEN BY CODE, not yet
+  runtime-checked against the Lenovo). P1 for the pilot (misleading, no audio impact).
+  **F9 — pad with pre-roll bell on a BROWSER MASTER (PROVEN BY RUNTIME):** every pad = `handlePadPlay` →
+  PLAY_INTERRUPT; with `preRoll` it sends TWO commands back-to-back (bell, jingle). The 2nd pauses the bell → the
+  bell's `play()` promise rejects → its `.catch(done)` runs restore → music resumes 34 ms after the jingle starts:
+  bell never heard, jingle over the music. Pad without bell: pause → jingle → resume (correct). Desktop MAIN queues
+  bell → jingle with duck 40 % (PROVEN BY CODE; volume display dips during the duck by design). Phone pads send
+  `{url}` only (no bell). Candidate fix (not approved): send ONE PLAY_INTERRUPT `{url, preRoll, bellStyle}` — both
+  the MAIN (`interruptUrlsForPayload`) and the browser handler already support it.
+  Recommended order (owner to approve each): Lenovo/TEST check of the stale display → F6 → stale display → F9.
 - **✅ BROWSER TAB IDENTITY — PR #63 MERGED 2026-10-23 (`a6e4c2f`) — ACCEPTED IN PROD — owner-attested 2026-10-24**
   (Dotan on the live site; not independently inspected by Claude): 2 tabs = MASTER + CONTROL; pads from either tab →
   once, in the MASTER; phone remote → MASTER; MASTER refresh stays MASTER; MASTER close → CONTROL promoted after
