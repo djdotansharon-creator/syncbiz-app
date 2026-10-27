@@ -60,7 +60,7 @@ export function DeviceRoleBadge(): ReactElement | null {
   return (
     <span className="sb-role-icon inline-flex h-8 items-center justify-center gap-1.5 px-1" data-role={isPlayer ? "player" : "remote"} role="status" aria-label={label}>
       {isPlayer ? <PlayerIcon /> : <RemoteIcon />}
-      <span className="sb-role-text text-[12.5px] font-medium leading-none" aria-hidden>
+      <span className="sb-role-text text-[12.5px] font-semibold leading-none" aria-hidden>
         {isPlayer ? t.word.player : t.word.remote}
       </span>
     </span>
