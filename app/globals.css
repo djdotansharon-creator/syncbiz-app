@@ -62,9 +62,12 @@ button:active:not(:disabled) {
 
 /* ─── Global dark scrollbars (SyncBiz) — page, modals, rails, any overflow container ─── */
 :root {
-  --sb-scrollbar-thumb: rgba(100, 116, 139, 0.5);
-  --sb-scrollbar-thumb-hover: rgba(148, 163, 184, 0.72);
-  --sb-scrollbar-track: rgba(2, 6, 23, 0.5);
+  /* 2026-10-27 (owner: father's player on Windows showed always-visible slate-blue scroll bars, one like a blue stripe in the right rail): the thumb is a faint neutral grey and the track
+     transparent. Chrome ignores every ::-webkit-scrollbar rule while `scrollbar-width` / `scrollbar-color` are set (they are, on `*` below), so THIS is the rule that decides how a scroll
+     bar looks on Windows; on a Mac the bars are the system's overlay bars that hide until you scroll. */
+  --sb-scrollbar-thumb: rgba(148, 156, 170, 0.42);
+  --sb-scrollbar-thumb-hover: rgba(180, 188, 200, 0.62);
+  --sb-scrollbar-track: transparent;
 }
 
 * {
