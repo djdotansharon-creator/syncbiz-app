@@ -42,6 +42,25 @@
   (scheduled jingles included) are fire-and-forget: a half-open socket (still OPEN, network silently gone) loses a
   command sent into it, and the ms between a socket close and the next React render can too. Needs a server
   delivery ACK + idempotency key per command — a protocol change; NOT in PR #64; not started without the owner.
+- **🔴 MAIN REVIEW 2026-10-27 (read-only; main `fdaa8ea` = redesign PRs #66–#70 merged → LIVE ON PROD).** No server / desktop /
+  DB / API change; middleware only adds protected routes. Findings (owner decides each; one defect per PR):
+  1. **END OF LIST = SILENCE (P0) — FIXED IN CODE, PR open (owner 2026-10-27):** #67 made LOOP "off" the default → a bank
+     (stream-url) / online list / station list stopped at its end. Owner rule: bank → restart; online list → recommended song, and
+     without one → restart; only an operator's explicit "off" stops. `getPlaybackRepeatMode()` (renderer + MAIN prefs).
+  2. **Heavy graphics are back (P0 for Windows):** the #60 look (104 backdrop-filters) returned; Lite mode only on hardware the
+     boot script guesses is weak. Owner 2026-10-27: **Lite by default on the desktop app and Windows** — next PR.
+  3. "Weekdays" jingle schedules (the new dialog's default) fire ONCE a week (`schedule-storage.ts` lastFiringMs/periodMs) — PROVEN BY TEST.
+  4. Kiosk / display screen: lock is client-only with default PIN "123"; staff can overwrite workspace pads with free text; jingle
+     "Listen" preview and bell preview play through Chromium on a desktop MASTER (over the music); 11-step volume fade over WS can
+     leave the MASTER silent if the socket drops (HYPOTHESIS); PIN reset wipes opening hours.
+  5. F9 (two PLAY_INTERRUPTs for a bell) spread to the display screen pads.
+  6. `PlayerAutoCompact` (scroll-collapse player) is ON — the owner earlier asked to remove it.
+  7. Browser YouTube crossfade engine reworked (fast-skip re-target / reconcile) + a second muted blurred YouTube mirror player —
+     not runtime-tested (YouTube unreachable from the cloud session).
+  8. Static guards red on main because of the redesign text (behaviour checked intact): verify-jingles-ui U9,
+     verify-management-mode M4, verify-control-room-brands P6 — to update deliberately (§18).
+  9. Smaller: role badge may show "Remote" on the station until MAIN reports; queue FLIP reads layout on every render;
+     cover-trim blob URLs never revoked (slow memory growth 24/7); library tile on desktop fires On-Air on tap.
 - **🔴 AUDIT 2026-10-25 (read-only, NOT fixed — owner decides order): F6 + stale CONTROL display + F9.** Owner PROD
   report reproduced on the local app + WS (PROVEN BY RUNTIME, screenshots in the cloud session).
   **F6 — promoted browser MASTER stays silent (browser-only / non-designated rooms; designated rooms never
