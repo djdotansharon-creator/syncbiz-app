@@ -7950,3 +7950,11 @@ html[data-sb-display="white"] .sb-rad-btn-go { background: #1c1c1e; color: #fff;
 .sb-wz-btn.cr-del-btn { background: #ff453a; color: #fff; }
 .sb-wz-btn.cr-del-btn:hover:not(:disabled) { background: #ff5f55; }
 .cr-del-body { margin: 0; font-size: 15px; line-height: 1.6; color: rgba(245, 245, 247, 0.82); }
+
+/* Player / Remote icon in the top bar (owner 2026-10-27): an icon with no frame; the sound waves / signal arcs breathe slowly — opacity only, off for reduced motion. */
+.sb-role-icon[data-role="player"] { color: #30d158; }
+.sb-role-icon[data-role="remote"] { color: #7db8ff; }
+.sb-role-wave { animation: sb-role-breathe 2.6s ease-in-out infinite; }
+.sb-role-wave--2 { animation-delay: 0.35s; }
+@keyframes sb-role-breathe { 0%, 100% { opacity: 0.28; } 45% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sb-role-wave { animation: none; } }
