@@ -38,6 +38,7 @@ import { DesktopUpdatePill } from "@/components/desktop-update-pill";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isShufersalBankModule, isGuestsModule } from "@/lib/center-module-context";
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
+import { DeviceRoleBadge } from "@/components/device-role-badge";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
@@ -1652,6 +1653,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="sb-header-display contents">
                 <DisplayModeSwitch />
               </span>
+              {/* what this screen is — Player or Remote (display only, owner 2026-10-27) */}
+              <DeviceRoleBadge />
               {/* Fullscreen / Control Room toggle */}
               <button
                 type="button"
