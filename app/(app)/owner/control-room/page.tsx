@@ -1,4 +1,5 @@
 import { AllBranchesView } from "@/components/control-room/all-branches-view";
+import { DeviceEnrollmentPanel } from "@/components/control-room/device-enrollment-panel";
 import { ManagementGate } from "@/components/management/management-gate";
 
 /** CONTROL ROOM — step 1: all branches in one place (read-only live view), full width (outside the player workspace
@@ -10,6 +11,8 @@ export default function ControlRoomPage() {
   return (
     <ManagementGate from="/owner/control-room">
       <div className="mgmt-type h-full overflow-y-auto">
+        {/* device approval (owner 2026-10-27): shows nothing unless the server has the feature on */}
+        <DeviceEnrollmentPanel />
         <AllBranchesView />
       </div>
     </ManagementGate>
