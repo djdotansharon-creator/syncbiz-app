@@ -270,7 +270,7 @@ export function EnrollmentGateCard({ gate, loading }: { gate: EnrollmentGateApi;
   const ownerBar = !!st && st.status !== "approved" && st.ownerAllowed === true && !loading && !noStorage;
 
   return (
-    <div className="vono-enr" dir={he ? "rtl" : "ltr"} role="dialog" aria-modal="true" aria-label={t.caption}>
+    <div className="vono-enr" data-chosen={role ?? ""} dir={he ? "rtl" : "ltr"} role="dialog" aria-modal="true" aria-label={t.caption}>
       <div className="vono-enr-stage" data-chosen={role ?? ""}>
         {noStorage ? (
           <p className="vono-enr-sub">{t.noStorage}</p>

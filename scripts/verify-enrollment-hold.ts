@@ -58,5 +58,13 @@ assert("H21 'I'm the owner' is the main admin's only: the route refuses everyone
 
 assert("H22 'Player / Remote details' (owner 2026-10-28): a row in the gear menu opens one panel that only READS — the role, the branch, what it plays / controls, the device, the approval and the account; no socket, no playback, no write", /<DeviceDetailsMenuRow onOpen=\{\(\) => \{ setMainMenuOpen\(false\); setDeviceDetailsOpen\(true\); \}\} \/>/.test(read("components/app-shell.tsx")) && /<DeviceDetailsModal open=\{deviceDetailsOpen\}/.test(read("components/app-shell.tsx")) && !/WebSocket|sendCommand|setMaster|\.play\(|method: "(PUT|PATCH|DELETE)"/.test(details) && (details.match(/method: "POST"/g) ?? []).length === 1 && /enrollment\/status/.test(details));
 
+const lead = /lead=\{\s*<>([\s\S]*?)<\/>\s*\}/.exec(shell)?.[1] ?? "";
+assert("H23 gear menu (owner 2026-10-28): the details row is the FIRST one (a circle with an i; 'Player details' / 'Remote details'), and the lock-screen row is gone from that short list", lead.indexOf("<DeviceDetailsMenuRow") > -1 && lead.indexOf("<DeviceDetailsMenuRow") < lead.indexOf("<DisplayModeMenuRow") && !/KioskLockMenuRow/.test(lead) && /sb-devdet-i/.test(details) && /menuPlayer/.test(details) && /menuRemote/.test(details));
+const schema = read("prisma/schema.prisma");
+const mig = ["20261027161357_device_enrollment", "20261028120000_device_enrollment_requester", "20261028180000_device_enrollment_branch_details"].map((m) => read(`prisma/migrations/${m}/migration.sql`)).join("\n");
+assert("H24 the MERGE does not depend on the migration (2026-10-29): the three migrations only CREATE new tables / ADD columns to the new table, no existing table is altered, WorkspaceEntitlement has no enrollment column, and the store reads its own table", !/ALTER TABLE "(?!DeviceEnrollment"|WorkspaceEnrollmentSetting")/.test(mig.replace(/ADD CONSTRAINT[^;]*;/g, "")) && !/enrollmentEnabled|enrollmentTtlDays/.test(schema) && /model WorkspaceEnrollmentSetting/.test(schema) && /prisma\.workspaceEnrollmentSetting\.findUnique/.test(read("lib/device-enrollment-store.ts")) && !/workspaceEntitlement\.(update|upsert|create)/.test(read("lib/device-enrollment-store.ts")));
+const gateCssTxt = read("components/enrollment-gate.css");
+assert("H25 the request screen has the soft colourful blurred background (radial gradients only, no blur filter) that tints toward the chosen colour", /\.vono-enr \{[^}]*radial-gradient[^}]*\}/.test(gateCssTxt) && !/\.vono-enr \{[^}]*filter:\s*blur/.test(gateCssTxt) && /\.vono-enr\[data-chosen="player"\]::before/.test(gateCssTxt) && /data-chosen=\{role \?\? ""\}/.test(gate));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
