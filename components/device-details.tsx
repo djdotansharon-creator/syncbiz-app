@@ -10,8 +10,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useLocale } from "@/lib/locale-context";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { useStationBranchId } from "@/lib/station-branch";
-import { getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
-import { detectDeviceLabel } from "@/lib/use-enrollment-gate";
+import { detectDeviceLabel, getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
 
 type Approval = { enforced: false } | { enforced: true; status: string; role?: "PLAYER" | "REMOTE"; playerClass?: string | null; branchIds?: string[] };
