@@ -69,11 +69,32 @@ export type RequestInput = {
   durableDeviceId: string;
   role: EnrollmentRole;
   platform: EnrollmentPlatform;
+  /** an EXISTING branch the device picked from the suggestions (a Remote must have one) */
   branchId: string | null;
+  /** a branch name the device typed that matched nothing — only a Player may ask for a branch that does not exist yet */
+  branchName: string;
+  /** only with a typed (new) branch: where it is and which brand it belongs to — the manager creates / connects the branch from them */
+  branchAddress: string;
+  brandName: string;
+  /** who is at the device — so the manager knows who is asking (owner 2026-10-28). Required for a Remote; a Player is a branch computer — its asker is the signed-in account, so these are optional there. */
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
   label: string;
   note: string;
   appVersion: string;
 };
+
+/** a simple, forgiving e-mail shape check (the manager sees it and may write to it; this only stops obvious typos) */
+export function isPlausibleEmail(v: string): boolean {
+  return v.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+}
+
+/** a phone number: digits with an optional leading +, spaces, dashes, brackets — at least 7 digits */
+export function isPlausiblePhone(v: string): boolean {
+  return v.length <= 24 && /^[+]?[0-9 ()-]+$/.test(v) && v.replace(/\D/g, "").length >= 7;
+}
 
 export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -88,11 +109,33 @@ export function validateRequestInput(raw: unknown): Validated<RequestInput> {
   if (!(ENROLLMENT_PLATFORMS as readonly string[]).includes(platformRaw)) return { ok: false, error: "invalid_platform" };
   const platform = platformRaw as EnrollmentPlatform;
   if (!canRequestRole(platform, role as EnrollmentRole)) return { ok: false, error: "role_not_allowed_for_platform" };
+  const firstName = clip(b.firstName, 60);
+  const lastName = clip(b.lastName, 60);
+  const phone = clip(b.phone, 24);
+  const email = clip(b.email, 120).toLowerCase();
+  if (role === "REMOTE") {
+    if (!firstName) return { ok: false, error: "first_name_required" };
+    if (!lastName) return { ok: false, error: "last_name_required" };
+    if (!isPlausiblePhone(phone)) return { ok: false, error: "phone_invalid" };
+    if (!isPlausibleEmail(email)) return { ok: false, error: "email_invalid" };
+  } else {
+    // a Player may leave the person out, but what it does give must be sane
+    if (phone && !isPlausiblePhone(phone)) return { ok: false, error: "phone_invalid" };
+    if (email && !isPlausibleEmail(email)) return { ok: false, error: "email_invalid" };
+  }
   const branchId = typeof b.branchId === "string" && b.branchId.trim() ? b.branchId.trim().slice(0, 128) : null;
-  if (role === "PLAYER" && !branchId) return { ok: false, error: "branch_required_for_player" };
+  // a typed name is only used when nothing was picked; a Remote can only be tied to a branch that exists
+  const branchName = branchId ? "" : clip(b.branchName, 80);
+  const branchAddress = branchId || role !== "PLAYER" ? "" : clip(b.branchAddress, 160);
+  const brandName = branchId || role !== "PLAYER" ? "" : clip(b.brandName, 80);
+  if (role === "REMOTE" && !branchId) return { ok: false, error: "branch_required_for_remote" };
+  if (role === "PLAYER" && !branchId) {
+    if (branchName.length < 2) return { ok: false, error: "branch_required_for_player" };
+    if (branchAddress.length < 3) return { ok: false, error: "branch_address_required" };
+  }
   return {
     ok: true,
-    value: { durableDeviceId: id, role: role as EnrollmentRole, platform, branchId, label: clip(b.label, 80), note: clip(b.note, 300), appVersion: clip(b.appVersion, 40) },
+    value: { durableDeviceId: id, role: role as EnrollmentRole, platform, branchId, branchName, branchAddress, brandName, firstName, lastName, phone, email, label: clip(b.label, 80), note: clip(b.note, 300), appVersion: clip(b.appVersion, 40) },
   };
 }
 

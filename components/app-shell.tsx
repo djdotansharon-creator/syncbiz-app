@@ -39,6 +39,7 @@ import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibra
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { DeviceRoleBadge } from "@/components/device-role-badge";
+import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
@@ -1596,6 +1597,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={tabClass}
                     >
                       {label}
+                      {/* a device is waiting for approval (owner 2026-10-28): red circle with the number; renders nothing unless enrollment is on and this person may decide */}
+                      {item.labelKey === "controlRoom" ? <EnrollmentPendingDot /> : null}
                     </MotionNavLink>
                   );
                 })}

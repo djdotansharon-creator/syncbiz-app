@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * DeviceEnrollmentPanel — Control Room: "Waiting for approval" (docs/DEVICE_ENROLLMENT_DESIGN.md §5.3; owner 2026-10-27). A new computer / phone that signs in to the account asks to be a Player
- * (it plays the music) or a Remote (it only controls); here the manager approves it in one press, or refuses it, and sees how much of the paid Player allocation is used.
- * Renders NOTHING unless the server has the feature available (env flag) — and for an admin only a small "turn on" card until the workspace switches it on. Texts: Hebrew / English.
- * Styles: `.cr-enr*` in components/control-room/device-enrollment.css.
+ * Device approval in the Control Room (docs/DEVICE_ENROLLMENT_DESIGN.md §5.3; owner 2026-10-27 / 2026-10-28). A new computer / phone that signs in to the account asks to be a Player (plays the music) or a Remote
+ * (only controls) — see components/enrollment-gate.tsx. Where the manager sees it, as the owner asked: the FIRST tile of the branch list is "New requests" (a plus, branch-sized; a red circle with the number); opening it
+ * shows every request grouped by branch with the person's details and Approve / Reject; a branch name opens that branch (the map pins it, its screen lists its devices — `BranchDevices` below).
+ * Renders nothing unless the server has the feature on. Texts: Hebrew / English. Styles: `.cr-enr*` in components/control-room/device-enrollment.css.
  */
 
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import "@/components/control-room/device-enrollment.css";
 import { useLocale } from "@/lib/locale-context";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import { claimDeviceId } from "@/lib/device-id";
 import { getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
+import { ENROLLMENT_CHANGED_EVENT, useEnrollmentSummary } from "@/lib/use-enrollment-summary";
 
 type Item = {
   id: string;
@@ -25,6 +27,14 @@ type Item = {
   label: string;
   note: string;
   requestedBranchId: string | null;
+  requestedBranchName: string;
+  requestedBranchAddress: string;
+  requestedBrandName: string;
+  requestedByEmail: string;
+  requesterFirstName: string;
+  requesterLastName: string;
+  requesterPhone: string;
+  requesterEmail: string;
   approvedBranchIds: string[];
   branchNames: Record<string, string>;
   requestedAt: string;
@@ -42,13 +52,18 @@ type Listing = {
 type Settings = { available: boolean; enabled: boolean; ttlDays: number };
 
 const HE = {
-  title: "ממתינים לאישור",
+  title: "בקשות חדשות",
+  tile: "בקשות חדשות",
+  tileNone: "אין בקשות שממתינות",
+  tileSome: (n: number) => (n === 1 ? "בקשה אחת ממתינה" : `${n} בקשות ממתינות`),
+  tileOff: "אישור מכשירים חדשים — כבוי",
   offTitle: "אישור מכשירים חדשים",
   offText: "כשזה דלוק, מחשב או טלפון חדש שנכנס לחשבון מבקש ממך אישור לפני שהוא מנגן או שולט. אתה מחליט אם הוא נגן או שלט רחוק.",
-  offNote: "ההדלקה מאשרת אוטומטית את כל התחנות שכבר פועלות ואת המכשיר הזה, כך שדבר לא נעצר.",
+  offNote: "ההדלקה מאשרת אוטומטית את כל התחנות שכבר פועלות ואת המכשיר הזה. כל דפדפן או טלפון אחר יתבקש לבקש אישור.",
   turnOn: "הדלקה",
   turnOff: "כיבוי",
   confirmOff: "לכבות? המכשירים יחזרו להתנהג כמו קודם.",
+  back: "חזרה לסניפים",
   allocation: "נגנים",
   of: "מתוך",
   none: "אין בקשות שממתינות.",
@@ -57,6 +72,9 @@ const HE = {
   reject: "דחייה",
   revoke: "ביטול",
   devices: "מכשירים מאושרים",
+  branchDevices: "מכשירים בסניף",
+  noDevices: "אין עדיין נגנים או שלטים מאושרים בסניף הזה.",
+  waitingHere: "ממתינים לאישור",
   asks: "מבקש להיות",
   player: "נגן",
   remote: "שלט רחוק",
@@ -69,23 +87,42 @@ const HE = {
   expired: "פג תוקף",
   noScope: "בלי סניף — רק מנהל ראשי מאשר",
   unnamed: "מכשיר ללא שם",
+  newBranch: (n: string) => `סניף חדש: ״${n}״`,
+  newBranchGroup: "סניף שעוד לא קיים",
+  chooseBranch: "בחרו סניף לאישור",
+  chooseBranchHint: "הסניף שהוקלד עוד לא קיים. בחרו סניף קיים (או פתחו אותו קודם עם ״הוספת סניף״).",
+  openBranch: "פתיחת הסניף",
   ttl: "ימים עד שבקשה פגה",
+  allBranches: "כל הסניפים",
+  address: "כתובת",
+  brand: "מותג",
+  fromAccount: "מהחשבון",
+  more: "עוד",
+  expiresAfter: (d: number) => `בקשה שלא טופלה פגה אחרי ${d} ימים`,
+  turnOffMenu: "כיבוי אישור מכשירים",
   errors: {
     allocation_full: "ההקצאה מלאה — אי אפשר לאשר עוד נגן. אפשר לאשר כשלט רחוק.",
+    player_needs_exactly_one_branch: "נגן שייך לסניף אחד — בחרו סניף.",
+    branch_not_found: "הסניף לא נמצא.",
     forbidden: "אין לך הרשאה לאשר את זה.",
     not_pending: "הבקשה כבר טופלה או שפג תוקפה.",
     enrollment_not_available: "האפשרות הזאת עדיין לא פעילה בשרת.",
     other: "משהו השתבש. נסו שוב.",
   } as Record<string, string>,
 };
-const EN = {
-  title: "Waiting for approval",
+const EN: typeof HE = {
+  title: "New requests",
+  tile: "New requests",
+  tileNone: "Nothing is waiting",
+  tileSome: (n: number) => (n === 1 ? "1 request waiting" : `${n} requests waiting`),
+  tileOff: "Approving new devices — off",
   offTitle: "Approve new devices",
   offText: "When this is on, a new computer or phone that signs in to the account asks you before it plays or controls anything. You decide whether it is a Player or a Remote.",
-  offNote: "Turning it on automatically approves every station that already runs and this device, so nothing stops.",
+  offNote: "Turning it on automatically approves every station that already runs and this device. Any other browser or phone will be asked to request approval.",
   turnOn: "Turn on",
   turnOff: "Turn off",
   confirmOff: "Turn it off? Devices go back to behaving as before.",
+  back: "Back to branches",
   allocation: "Players",
   of: "of",
   none: "No requests are waiting.",
@@ -94,6 +131,9 @@ const EN = {
   reject: "Reject",
   revoke: "Revoke",
   devices: "Approved devices",
+  branchDevices: "Devices in this branch",
+  noDevices: "No approved Players or Remotes in this branch yet.",
+  waitingHere: "Waiting for approval",
   asks: "Asks to be",
   player: "Player",
   remote: "Remote",
@@ -106,15 +146,30 @@ const EN = {
   expired: "expired",
   noScope: "No branch — only the main admin can approve",
   unnamed: "Unnamed device",
+  newBranch: (n: string) => `New branch: “${n}”`,
+  newBranchGroup: "A branch that does not exist yet",
+  chooseBranch: "Choose a branch to approve",
+  chooseBranchHint: "The typed branch does not exist yet. Choose an existing branch (or create it first with “Add branch”).",
+  openBranch: "Open the branch",
   ttl: "Days until a request expires",
+  allBranches: "All branches",
+  address: "Address",
+  brand: "Brand",
+  fromAccount: "From the account",
+  more: "More",
+  expiresAfter: (d: number) => `An unhandled request expires after ${d} days`,
+  turnOffMenu: "Turn off device approval",
   errors: {
     allocation_full: "The allocation is full — another Player cannot be approved. You can approve it as a Remote.",
+    player_needs_exactly_one_branch: "A Player belongs to one branch — choose a branch.",
+    branch_not_found: "The branch was not found.",
     forbidden: "You are not allowed to approve this.",
     not_pending: "The request was already handled or has expired.",
     enrollment_not_available: "This is not active on the server yet.",
     other: "Something went wrong. Try again.",
-  } as Record<string, string>,
+  },
 };
+type Dict = typeof HE;
 
 async function getJson<T>(url: string): Promise<{ ok: boolean; status: number; data: T | null }> {
   try {
@@ -135,15 +190,21 @@ async function postJson(url: string, body: unknown): Promise<{ ok: boolean; erro
   }
 }
 
-export function DeviceEnrollmentPanel(): ReactElement | null {
+/** the data and the actions behind the panel AND the branch screen's device list (one place, so both behave the same) */
+function useEnrollmentData() {
   const { locale } = useLocale();
   const he = locale === "he";
-  const t = he ? HE : EN;
+  const t: Dict = he ? HE : EN;
   const [listing, setListing] = useState<Listing | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [confirmOn, setConfirmOn] = useState(false);
+  // a request that typed a branch name which does not exist yet: the approver picks the real branch (the list is read only when such a request is waiting)
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  // what THIS screen is right now: the player of its branch (then it keeps playing after the switch-on) or only a controller — same test as the role icon in the top bar
+  const ctx = useDevicePlayer();
+  const isPlayerNow = !!ctx && ctx.isActive && ctx.isBranchConnected && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
 
   const load = useCallback(async () => {
     const l = await getJson<Listing>("/api/control-room/enrollments");
@@ -164,19 +225,33 @@ export function DeviceEnrollmentPanel(): ReactElement | null {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  const needsBranchList = !!listing?.items.some((i) => i.status === "pending" && !i.requestedBranchId && i.canDecide);
+  useEffect(() => {
+    if (!needsBranchList || branches.length > 0) return;
+    void getJson<Array<{ id?: unknown; name?: unknown }>>("/api/branches").then((r) => {
+      if (r.ok && Array.isArray(r.data)) setBranches(r.data.filter((b) => typeof b.id === "string").map((b) => ({ id: String(b.id), name: typeof b.name === "string" ? b.name : String(b.id) })));
+    });
+  }, [needsBranchList, branches.length]);
+
+  const changed = async () => {
+    await load();
+    window.dispatchEvent(new Event(ENROLLMENT_CHANGED_EVENT)); // the red circle and the tile update at once
+  };
+
   const act = async (id: string, kind: "approve" | "approveRemote" | "reject" | "revoke", item?: Item) => {
     setBusy(id);
     setErr(null);
     let r: { ok: boolean; error?: string };
     if (kind === "approve" || kind === "approveRemote") {
       const role = kind === "approve" ? (item?.requestedRole === "PLAYER" ? "PLAYER" : "REMOTE") : "REMOTE";
-      r = await postJson(`/api/control-room/enrollments/${id}/approve`, { role, branchIds: item?.requestedBranchId ? [item.requestedBranchId] : [] });
+      const branchId = item?.requestedBranchId ?? chosen[id] ?? "";
+      r = await postJson(`/api/control-room/enrollments/${id}/approve`, { role, branchIds: branchId ? [branchId] : [] });
     } else {
       r = await postJson(`/api/control-room/enrollments/${id}/${kind}`, {});
     }
     if (!r.ok) setErr(t.errors[r.error ?? "other"] ?? t.errors.other!);
     setBusy(null);
-    await load();
+    await changed();
   };
 
   const switchOn = async () => {
@@ -188,144 +263,319 @@ export function DeviceEnrollmentPanel(): ReactElement | null {
     } catch {
       ownId = undefined;
     }
-    const r = await postJson("/api/control-room/enrollment-settings", { enabled: true, ownDeviceId: ownId, ownDeviceLabel: he ? "המכשיר של המנהל" : "Admin's device" });
+    const r = await postJson("/api/control-room/enrollment-settings", { enabled: true, ownDeviceId: ownId, ownDeviceLabel: he ? "המכשיר של המנהל" : "Admin's device", ownDeviceRole: isPlayerNow ? "PLAYER" : "REMOTE" });
     if (!r.ok) setErr(t.errors[r.error ?? "other"] ?? t.errors.other!);
-    setConfirmOn(false);
     setBusy(null);
-    await load();
+    await changed();
   };
   const switchOff = async () => {
     if (!window.confirm(t.confirmOff)) return;
     setBusy("settings");
     await postJson("/api/control-room/enrollment-settings", { enabled: false });
     setBusy(null);
-    await load();
+    await changed();
   };
 
-  // not available on this server, or the viewer may not decide anything: no panel at all
-  if (!listing) return null;
-  if (!listing.config.enabled && !(listing.actor.isAdmin && settings?.available)) return null;
+  return { he, t, listing, settings, busy, err, branches, chosen, setChosen, act, switchOn, switchOff };
+}
+type Data = ReturnType<typeof useEnrollmentData>;
 
+function who(it: Item, t: Dict): string {
+  return `${it.requesterFirstName} ${it.requesterLastName}`.trim() || it.requestedByEmail || it.label || t.unnamed;
+}
+
+/** one request waiting for a decision: who, how to reach them, what they ask for, and the buttons */
+function RequestRow({ it, d }: { it: Item; d: Data }): ReactElement {
+  const { t, busy, chosen, setChosen, branches, act } = d;
   const now = Date.now();
-  const minutes = (iso: string) => Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
-  const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 86_400_000));
+  const minutes = Math.max(0, Math.round((now - new Date(it.requestedAt).getTime()) / 60000));
+  const daysLeft = Math.max(0, Math.ceil((new Date(it.expiresAt).getTime() - now) / 86_400_000));
+  const needsPick = !it.requestedBranchId;
+  const blocked = !it.canDecide || busy === it.id || (needsPick && !chosen[it.id]);
+  return (
+    <li className="cr-enr-item" data-role={it.requestedRole === "PLAYER" ? "player" : "remote"}>
+      <span className="cr-enr-ic">{it.requestedRole === "PLAYER" ? <PlayerIcon /> : <RemoteIcon />}</span>
+      <div className="cr-enr-txt">
+        <b><bdi>{who(it, t)}</bdi></b>
+        {it.requesterPhone || it.requesterEmail ? (
+          <small className="cr-enr-contact">
+            {it.requesterPhone ? <a href={`tel:${it.requesterPhone.replace(/[^\d+]/g, "")}`} dir="ltr">{it.requesterPhone}</a> : null}
+            {it.requesterEmail ? <a href={`mailto:${it.requesterEmail}`} dir="ltr">{it.requesterEmail}</a> : null}
+          </small>
+        ) : it.requestedByEmail && who(it, t) !== it.requestedByEmail ? (
+          <small className="cr-enr-contact">
+            {t.fromAccount} <a href={`mailto:${it.requestedByEmail}`} dir="ltr">{it.requestedByEmail}</a>
+          </small>
+        ) : null}
+        {it.requestedBranchAddress || it.requestedBrandName ? (
+          <small dir="auto">
+            {it.requestedBranchAddress ? `${t.address}: ${it.requestedBranchAddress}` : ""}
+            {it.requestedBranchAddress && it.requestedBrandName ? " · " : ""}
+            {it.requestedBrandName ? `${t.brand}: ${it.requestedBrandName}` : ""}
+          </small>
+        ) : null}
+        <small>
+          {t.asks} <em>{it.requestedRole === "PLAYER" ? t.player : t.remote}</em>
+          {it.requestedRole === "PLAYER" && it.playerClass === "browser" ? ` · ${t.browserPlayer}` : ""}
+          {it.label ? ` · ${it.label}` : ""}
+          {` · ${t.ago(minutes)} · ${daysLeft > 0 ? t.expires(daysLeft) : t.expired}`}
+        </small>
+        {it.note ? <small dir="auto" className="cr-enr-quote">“{it.note}”</small> : null}
+        {!it.canDecide ? <small className="cr-enr-muted">{t.noScope}</small> : null}
+        {needsPick && it.canDecide ? (
+          <label className="cr-enr-pick">
+            <span>{t.chooseBranch}</span>
+            <select value={chosen[it.id] ?? ""} onChange={(e) => setChosen((c) => ({ ...c, [it.id]: e.target.value }))}>
+              <option value="">—</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+      <div className="cr-enr-actions">
+        <button type="button" className="cr-enr-btn is-main" disabled={blocked} onClick={() => void act(it.id, "approve", it)}>{t.approve}</button>
+        {it.requestedRole === "PLAYER" ? (
+          <button type="button" className="cr-enr-btn" disabled={blocked} onClick={() => void act(it.id, "approveRemote", it)}>{t.approveRemote}</button>
+        ) : null}
+        <button type="button" className="cr-enr-btn" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "reject")}>{t.reject}</button>
+      </div>
+    </li>
+  );
+}
+
+/** one approved device (quiet): what it is, where, and — except the screen in use — Revoke */
+function ApprovedRow({ it, d }: { it: Item; d: Data }): ReactElement {
+  const { t, busy, act } = d;
   const mine = typeof window === "undefined" ? null : getEnrollmentDeviceId();
-  const roleName = (r: string) => (r === "PLAYER" ? t.player : t.remote);
-  const scope = (it: Item) => {
-    const ids = it.approvedBranchIds.length > 0 ? it.approvedBranchIds : it.requestedBranchId ? [it.requestedBranchId] : [];
-    return ids.length > 0 ? ids.map((i) => it.branchNames[i] ?? i).join(", ") : "";
-  };
+  const scope = it.approvedBranchIds.length > 0 ? it.approvedBranchIds.map((i) => it.branchNames[i] ?? i).join(", ") : t.allBranches;
+  return (
+    <li className="cr-enr-item is-quiet" data-role={it.approvedRole === "PLAYER" ? "player" : "remote"}>
+      <span className="cr-enr-ic">{it.approvedRole === "PLAYER" ? <PlayerIcon /> : <RemoteIcon />}</span>
+      <div className="cr-enr-txt">
+        <b><bdi>{who(it, t)}</bdi></b>
+        <small>
+          {it.approvedRole === "PLAYER" ? t.player : t.remote}
+          {it.approvedRole === "PLAYER" ? ` · ${it.playerClass === "station" ? t.station : t.browserPlayer}` : ""}
+          {scope ? ` · ${scope}` : ""}
+          {it.label && it.label !== who(it, t) ? ` · ${it.label}` : ""}
+          {it.grandfathered ? ` · ${t.existing}` : ""}
+          {it.durableDeviceId === mine ? ` · ${t.thisDevice}` : ""}
+        </small>
+      </div>
+      <div className="cr-enr-actions">
+        {/* never revoke the screen you are using — you would lock yourself out of this very panel */}
+        {it.durableDeviceId === mine ? null : (
+          <button type="button" className="cr-enr-btn" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "revoke")}>{t.revoke}</button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function Meter({ d }: { d: Data }): ReactElement | null {
+  const { t, listing } = d;
+  if (!listing || !listing.config.enabled) return null;
+  const pct = listing.allocation.max > 0 ? Math.min(100, Math.round((listing.allocation.used / listing.allocation.max) * 100)) : 0;
+  return (
+    <div className="cr-enr-meter" title={`${t.allocation} ${listing.allocation.used} ${t.of} ${listing.allocation.max}`}>
+      <span>
+        {t.allocation} <b>{listing.allocation.used}</b> {t.of} <b>{listing.allocation.max}</b>
+      </span>
+      <i className="cr-enr-bar" data-full={listing.allocation.full ? "1" : undefined}>
+        <u style={{ width: `${pct}%` }} />
+      </i>
+    </div>
+  );
+}
+
+/** the screen's one quiet "more" icon (admin only): how long a request lives, and the off switch — kept out of the way so the screen shows requests and nothing else */
+function SettingsMenu({ d }: { d: Data }): ReactElement | null {
+  const { t, listing, busy, switchOff } = d;
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  if (!listing || !listing.config.enabled || !listing.actor.isAdmin) return null;
+  return (
+    <div ref={rootRef} className="cr-pop">
+      <button type="button" className={`cr-bp-icon${open ? " is-on" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={t.more} title={t.more} onClick={() => setOpen((v) => !v)}>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden><circle cx="5.5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="18.5" cy="12" r="1.7" /></svg>
+      </button>
+      {open ? (
+        <div className="cr-pop-menu" role="menu">
+          <p className="cr-enr-menu-note">{t.expiresAfter(listing.config.ttlDays)}</p>
+          <button type="button" role="menuitem" className="cr-pop-opt cr-pop-opt--danger" disabled={busy !== null} onClick={() => { setOpen(false); void switchOff(); }}>{t.turnOffMenu}</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** the "New requests" screen: opens in the list's place (like a branch does); requests grouped by branch, a branch name opens that branch on the map */
+export function EnrollmentRequestsPanel({ onBack, onOpenBranch }: { onBack: () => void; onOpenBranch: (branchId: string) => void }): ReactElement {
+  const d = useEnrollmentData();
+  const { he, t, listing, settings, busy, err, switchOn, switchOff } = d;
+  const [confirmOn, setConfirmOn] = useState(false);
+  const dir = he ? "rtl" : "ltr";
+
+  const head = (
+    <header className="cr-bp-head">
+      <button type="button" onClick={onBack} className="cr-bp-icon cr-bp-back" aria-label={t.back} title={t.back}>
+        <svg className="h-[18px] w-[18px] rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+      </button>
+      <span className="cr-enr-plus" aria-hidden>
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      </span>
+      <div className="cr-bp-name" dir={dir}>
+        <h2 dir="auto">{t.title}</h2>
+        {listing && listing.config.enabled ? <p>{listing.pendingCount > 0 ? t.tileSome(listing.pendingCount) : t.tileNone}</p> : null}
+      </div>
+      <span className="flex-1" />
+      <Meter d={d} />
+      <SettingsMenu d={d} />
+    </header>
+  );
+
+  if (!listing) {
+    return (
+      <div className="cr-bp cr-enrp" dir={dir}>
+        {head}
+      </div>
+    );
+  }
 
   // switched off: a calm card that explains and offers to turn it on (admin only)
   if (!listing.config.enabled) {
     return (
-      <section className="cr-enr" dir={he ? "rtl" : "ltr"}>
-        <h3>{t.offTitle}</h3>
-        <p>{t.offText}</p>
-        {confirmOn ? <p className="cr-enr-note">{t.offNote}</p> : null}
-        <div className="cr-enr-actions">
-          {confirmOn ? (
-            <>
-              <button type="button" className="cr-enr-btn is-main" disabled={busy !== null} onClick={() => void switchOn()}>{t.turnOn}</button>
-              <button type="button" className="cr-enr-btn" onClick={() => setConfirmOn(false)}>×</button>
-            </>
-          ) : (
-            <button type="button" className="cr-enr-btn is-main" onClick={() => setConfirmOn(true)}>{t.turnOn}</button>
-          )}
-        </div>
-        {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
-      </section>
+      <div className="cr-bp cr-enrp" dir={dir}>
+        {head}
+        <section className="cr-enr">
+          <h3>{t.offTitle}</h3>
+          <p>{t.offText}</p>
+          {confirmOn ? <p className="cr-enr-note">{t.offNote}</p> : null}
+          {listing.actor.isAdmin && settings?.available ? (
+            <div className="cr-enr-actions">
+              {confirmOn ? (
+                <>
+                  <button type="button" className="cr-enr-btn is-main" disabled={busy !== null} onClick={() => void switchOn()}>{t.turnOn}</button>
+                  <button type="button" className="cr-enr-btn" onClick={() => setConfirmOn(false)}>×</button>
+                </>
+              ) : (
+                <button type="button" className="cr-enr-btn is-main" onClick={() => setConfirmOn(true)}>{t.turnOn}</button>
+              )}
+            </div>
+          ) : null}
+          {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
+        </section>
+      </div>
     );
   }
 
   const pending = listing.items.filter((i) => i.status === "pending");
-  const approved = listing.items.filter((i) => i.status === "approved");
-  const pct = listing.allocation.max > 0 ? Math.min(100, Math.round((listing.allocation.used / listing.allocation.max) * 100)) : 0;
+  // group the waiting requests by branch: a real branch (its name opens the branch), or a typed name for a branch that does not exist yet
+  const groups: Array<{ key: string; branchId: string | null; name: string; items: Item[] }> = [];
+  for (const it of pending) {
+    const key = it.requestedBranchId ?? `new:${it.requestedBranchName.trim().toLowerCase()}`;
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, branchId: it.requestedBranchId, name: it.requestedBranchId ? it.branchNames[it.requestedBranchId] ?? it.requestedBranchId : it.requestedBranchName ? t.newBranch(it.requestedBranchName) : t.newBranchGroup, items: [] };
+      groups.push(g);
+    }
+    g.items.push(it);
+  }
 
   return (
-    <section className="cr-enr" dir={he ? "rtl" : "ltr"}>
-      <header className="cr-enr-head">
-        <h3>
-          {t.title}
-          {pending.length > 0 ? <span className="cr-enr-badge">{pending.length}</span> : null}
-        </h3>
-        <div className="cr-enr-meter" title={`${t.allocation} ${listing.allocation.used} ${t.of} ${listing.allocation.max}`}>
-          <span>
-            {t.allocation} <b>{listing.allocation.used}</b> {t.of} <b>{listing.allocation.max}</b>
-          </span>
-          <i className="cr-enr-bar" data-full={listing.allocation.full ? "1" : undefined}>
-            <u style={{ width: `${pct}%` }} />
-          </i>
-        </div>
-      </header>
-
+    <div className="cr-bp cr-enrp" dir={dir}>
+      {head}
       {pending.length === 0 ? <p className="cr-enr-empty">{t.none}</p> : null}
-      <ul className="cr-enr-list">
-        {pending.map((it) => (
-          <li key={it.id} className="cr-enr-item" data-role={it.requestedRole === "PLAYER" ? "player" : "remote"}>
-            <span className="cr-enr-ic">{it.requestedRole === "PLAYER" ? <PlayerIcon /> : <RemoteIcon />}</span>
-            <div className="cr-enr-txt">
-              <b dir="auto">{it.label || t.unnamed}</b>
-              <small>
-                {t.asks} <em>{roleName(it.requestedRole)}</em>
-                {it.requestedRole === "PLAYER" && it.playerClass === "browser" ? ` · ${t.browserPlayer}` : ""}
-                {scope(it) ? ` · ${scope(it)}` : ""}
-                {` · ${t.ago(minutes(it.requestedAt))} · ${daysLeft(it.expiresAt) > 0 ? t.expires(daysLeft(it.expiresAt)) : t.expired}`}
-              </small>
-              {it.note ? <small dir="auto" className="cr-enr-quote">“{it.note}”</small> : null}
-              {!it.canDecide ? <small className="cr-enr-muted">{t.noScope}</small> : null}
-            </div>
-            <div className="cr-enr-actions">
-              <button type="button" className="cr-enr-btn is-main" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "approve", it)}>{t.approve}</button>
-              {it.requestedRole === "PLAYER" ? (
-                <button type="button" className="cr-enr-btn" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "approveRemote", it)}>{t.approveRemote}</button>
-              ) : null}
-              <button type="button" className="cr-enr-btn" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "reject")}>{t.reject}</button>
-            </div>
-          </li>
-        ))}
-      </ul>
-      {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
-
-      {approved.length > 0 ? (
-        <details className="cr-enr-approved">
-          <summary>
-            {t.devices} <b>{approved.length}</b>
-          </summary>
+      {groups.map((g) => (
+        <section key={g.key} className="cr-enr-group">
+          <header className="cr-enr-ghead">
+            {g.branchId ? (
+              <button type="button" className="cr-enr-gname" onClick={() => onOpenBranch(g.branchId!)} title={t.openBranch}>
+                <bdi>{g.name}</bdi>
+                <svg className="rtl:rotate-180" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 18 6-6-6-6" /></svg>
+              </button>
+            ) : (
+              <span className="cr-enr-gname is-new"><bdi>{g.name}</bdi></span>
+            )}
+            <span className="cr-enr-badge">{g.items.length}</span>
+          </header>
+          {!g.branchId ? <p className="cr-enr-hint">{t.chooseBranchHint}</p> : null}
           <ul className="cr-enr-list">
-            {approved.map((it) => (
-              <li key={it.id} className="cr-enr-item is-quiet" data-role={it.approvedRole === "PLAYER" ? "player" : "remote"}>
-                <span className="cr-enr-ic">{it.approvedRole === "PLAYER" ? <PlayerIcon /> : <RemoteIcon />}</span>
-                <div className="cr-enr-txt">
-                  <b dir="auto">{it.label || t.unnamed}</b>
-                  <small>
-                    {roleName(it.approvedRole ?? "REMOTE")}
-                    {it.approvedRole === "PLAYER" ? ` · ${it.playerClass === "station" ? t.station : t.browserPlayer}` : ""}
-                    {scope(it) ? ` · ${scope(it)}` : ""}
-                    {it.grandfathered ? ` · ${t.existing}` : ""}
-                    {it.durableDeviceId === mine ? ` · ${t.thisDevice}` : ""}
-                  </small>
-                </div>
-                <div className="cr-enr-actions">
-                  {/* never revoke the screen you are using — you would lock yourself out of this very panel */}
-                  {it.durableDeviceId === mine ? null : (
-                    <button type="button" className="cr-enr-btn" disabled={!it.canDecide || busy === it.id} onClick={() => void act(it.id, "revoke")}>{t.revoke}</button>
-                  )}
-                </div>
-              </li>
+            {g.items.map((it) => (
+              <RequestRow key={it.id} it={it} d={d} />
             ))}
           </ul>
-        </details>
-      ) : null}
+        </section>
+      ))}
+      {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
 
-      {listing.actor.isAdmin ? (
-        <footer className="cr-enr-foot">
-          <span>
-            {t.ttl}: <b>{listing.config.ttlDays}</b>
-          </span>
-          <button type="button" className="cr-enr-link" disabled={busy !== null} onClick={() => void switchOff()}>{t.turnOff}</button>
-        </footer>
+    </div>
+  );
+}
+
+/** inside ONE branch's screen: the Players / Remotes approved for it and the requests waiting for it (renders nothing while the feature is off) */
+export function BranchDevices({ branchId }: { branchId: string }): ReactElement | null {
+  const d = useEnrollmentData();
+  const { t, listing, err } = d;
+  if (!listing || !listing.config.enabled) return null;
+  const forBranch = (it: Item) => (it.status === "approved" ? it.approvedBranchIds : it.requestedBranchId ? [it.requestedBranchId] : []).includes(branchId);
+  const pending = listing.items.filter((i) => i.status === "pending" && forBranch(i));
+  const approved = listing.items.filter((i) => i.status === "approved" && forBranch(i));
+  return (
+    <section className="cr-bp-sec cr-enr-branch">
+      <h3 className="cr-bp-title">{t.branchDevices}</h3>
+      {pending.length === 0 && approved.length === 0 ? <p className="cr-enr-empty">{t.noDevices}</p> : null}
+      {pending.length > 0 ? (
+        <>
+          <p className="cr-enr-sublabel">{t.waitingHere} <b>{pending.length}</b></p>
+          <ul className="cr-enr-list">
+            {pending.map((it) => (
+              <RequestRow key={it.id} it={it} d={d} />
+            ))}
+          </ul>
+        </>
       ) : null}
+      {approved.length > 0 ? (
+        <ul className="cr-enr-list">
+          {approved.map((it) => (
+            <ApprovedRow key={it.id} it={it} d={d} />
+          ))}
+        </ul>
+      ) : null}
+      {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
     </section>
+  );
+}
+
+/** the first tile of the branch list — branch-sized, a plus, the red count; shown to someone who may decide requests (or to the main admin while the feature is still off, to turn it on) */
+export function EnrollmentTile({ selected, onOpen }: { selected: boolean; onOpen: () => void }): ReactElement | null {
+  const { locale } = useLocale();
+  const t: Dict = locale === "he" ? HE : EN;
+  const s = useEnrollmentSummary();
+  const visible = s.loaded && s.available && ((s.enabled && s.canDecide) || (!s.enabled && s.isAdmin));
+  if (!visible) return null;
+  return (
+    <li data-requests-tile className={`cr-row cr-row--requests${selected ? " is-selected" : ""}`} onClick={onOpen} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }} aria-label={t.tile}>
+      <span className="cr-row-logo cr-enr-tile-logo" aria-hidden>
+        <svg viewBox="0 0 24 24" width="55%" height="55%" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+        {s.count > 0 ? <span className="cr-enr-tile-dot">{s.count > 9 ? "9+" : s.count}</span> : null}
+      </span>
+      <span className="cr-row-main">
+        <span className="cr-row-name">{t.tile}</span>
+        <span className="cr-row-sub">
+          <span>{!s.enabled ? t.tileOff : s.count > 0 ? t.tileSome(s.count) : t.tileNone}</span>
+        </span>
+      </span>
+    </li>
   );
 }

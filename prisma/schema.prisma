@@ -584,6 +584,16 @@ model DeviceEnrollment {
   requestIp         String    @default("")
   requestedByUserId String
   requestedBranchId String?
+  /// a branch name the device typed itself (a Player may ask for a branch that does not exist yet) — the manager picks the real branch when approving
+  requestedBranchName String @default("")
+  /// the address and the brand a Player typed for a branch that does not exist yet (the manager creates / connects the branch from them)
+  requestedBranchAddress String @default("")
+  requestedBrandName     String @default("")
+  /// who is at the device (owner 2026-10-28): shown to the manager so they know who is asking
+  requesterFirstName String @default("")
+  requesterLastName  String @default("")
+  requesterPhone     String @default("")
+  requesterEmail     String @default("")
   /// approved scope: the branches this device may play for / control (empty = none)
   approvedBranchIds String[]
   note              String    @default("")

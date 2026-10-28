@@ -121,6 +121,32 @@ async function main() {
   };
   const naturalEnd = () => run(() => A().next({ auditTransportCase: "ended_auto" }));
 
+  // ── O. DEFAULT (owner 2026-10-27): VONO never lines up a song the business did not choose — the list starts again ────
+  // The recommendation service answers in this block, so "nothing lined up" proves the default switch, not a failing service.
+  const listO = playlist("own-three", 3);
+  quiet();
+  await run(() => A().playSource(listO, 2));
+  await settle();
+  const oListLined = autoplayLined();
+  await naturalEnd();
+  await settle();
+  loud();
+  assert("O1 default: LAST song of a customer list -> no recommended song is lined up", oListLined === 0, { lined: oListLined });
+  assert("O2 default: the last song ends -> the list starts again from its first song", A().currentSource?.id === listO.id && A().currentTrackIndex === 0 && A().status === "playing" && autoplayLined() === 0, { id: A().currentSource?.id, idx: A().currentTrackIndex, status: A().status });
+  quiet();
+  await reset();
+  await run(() => A().playSource(single));
+  await settle();
+  const oSingleLined = autoplayLined();
+  await naturalEnd();
+  await settle();
+  loud();
+  assert("O3 default: a single song -> nothing lined up; it ends -> the same song starts again", oSingleLined === 0 && A().currentSource?.id === single.id && A().status === "playing", { lined: oSingleLined, id: A().currentSource?.id, status: A().status });
+  quiet();
+  await reset();
+
+  // ── Everything below (L / S / Q) is the OPT-IN recommendation mode: localStorage syncbiz:autoplayNext = "on" ──────
+  store.set("syncbiz:autoplayNext", "on");
   quiet();
   // ── L. the last song of a list (loop OFF = the default) ───────────────────────────────────────────────────────────
   const list3 = playlist("album-three", 3);
@@ -158,6 +184,7 @@ async function main() {
   loud();
   assert("L6 loop ON, last song: nothing lined up (the list loops)", autoplayLined() === 0, A().playNextQueue.map((s) => s.title));
   store.clear();
+  store.set("syncbiz:autoplayNext", "on");
 
   // a LOCAL playlist through the real provider: its last file ends -> the list starts again from the first file
   const localList: UnifiedSource = (() => {
@@ -202,6 +229,7 @@ async function main() {
     return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
   };
   store.clear();
+  store.set("syncbiz:autoplayNext", "on");
   await run(() => A().playSource(single));
   await settle();
   const lined = A().playNextQueue.map((s) => s.title);
@@ -260,7 +288,8 @@ async function main() {
   };
   await reset();
 
-  // single song with NO recommendation available: with loop off it just ends (no replay)
+  // single song with NO recommendation available (owner 2026-10-27: a store never falls silent — no recommendation → it starts
+  // again; was "it ends" before). Only an operator who CHOSE loop off gets it ending.
   quiet();
   await reset();
   g.fetch = async () => ({ ok: false, status: 503, json: async () => ({}) }) as unknown as Response;
@@ -269,7 +298,62 @@ async function main() {
   await settle();
   await naturalEnd();
   loud();
-  assert("S3 single song, nothing recommended: it ENDS (stopped) — it does not start over", A().status === "stopped", { status: A().status, id: A().currentSource?.id });
+  assert("S3 single song, nothing recommended (default loop): it starts again — never silence", A().status === "playing" && A().currentSource?.id === single.id, { status: A().status, id: A().currentSource?.id });
+  quiet();
+  await reset();
+  store.set("syncbiz-repeat-mode", "off");
+  await run(() => A().playSource(single));
+  await settle();
+  await naturalEnd();
+  loud();
+  assert("S4 single song, the operator CHOSE loop off: it ends (stopped) as asked", A().status === "stopped", { status: A().status });
+  store.clear();
+
+  // ── E. end of a list when NO recommendation is lined up (owner 2026-10-27) ─────────────────────────────────────────
+  // A royalty-free / Shufersal bank (stream-url) never gets a recommendation → the list starts again; same for an online list
+  // whose recommendation did not arrive (a desktop station has no recommender at all). Only the operator's explicit "off" stops.
+  const bank: UnifiedSource = (() => {
+    const pl: Playlist = { id: "bank-three", name: "bank-three", genre: "Bank", type: "stream-url", url: "https://example.test/api/media/b0", thumbnail: "", createdAt: "2026-10-27T00:00:00Z", tracks: [0, 1, 2].map((i) => ({ id: `bk${i}`, name: `bank ${i}`, type: "stream-url" as const, url: `https://example.test/api/media/b${i}` })) };
+    return { id: "bank-three", title: "bank-three", genre: "Bank", cover: null, type: "stream-url", url: pl.url, origin: "playlist", playlist: pl };
+  })();
+  assert("E0 playback follows a continuing loop by default; the LOOP button still shows off", mix.getPlaybackRepeatMode() === "playlist" && mix.getRepeatMode() === "off");
+  quiet();
+  await reset();
+  await run(() => A().playSource(bank, 2));
+  await settle();
+  const bankLined = autoplayLined();
+  await naturalEnd();
+  loud();
+  assert("E1 bank (stream-url), last song ends: nothing recommended, the list starts again from the first song", bankLined === 0 && A().currentSource?.id === bank.id && A().currentTrackIndex === 0 && A().status === "playing", { lined: bankLined, idx: A().currentTrackIndex, status: A().status });
+  quiet();
+  await reset();
+  await run(() => A().playSource(list3, 2));
+  await settle();
+  await naturalEnd();
+  loud();
+  assert("E2 online list, last song ends with NO recommendation lined up: the list starts again (no silence)", A().currentSource?.id === list3.id && A().currentTrackIndex === 0 && A().status === "playing", { id: A().currentSource?.id, idx: A().currentTrackIndex, status: A().status });
+  quiet();
+  await reset();
+  store.set("syncbiz-repeat-mode", "off");
+  await run(() => A().playSource(bank, 2));
+  await settle();
+  await naturalEnd();
+  loud();
+  assert("E3 the operator CHOSE loop off: the bank list stops at its end as asked", A().status === "stopped", { status: A().status });
+  store.clear();
+
+  // ── X. AutoMix pre-load never targets track 1 while a Play Next item (a recommendation) is waiting ──────────────────
+  quiet();
+  await reset();
+  await run(() => A().playSource(list3, 2));
+  await settle();
+  const xNone = A().getNextEmbeddedSource();
+  await run(() => A().addPlayNextSources([{ id: "autoplay-xyz", title: "Recommended", genre: "Autoplay", cover: null, type: "youtube", url: "https://www.youtube.com/watch?v=xyzxyzxyz01", origin: "playlist" } as UnifiedSource]));
+  const xQueued = A().getNextEmbeddedSource();
+  const sQueued = A().getNextStreamUrl();
+  loud();
+  assert("X1 last song, nothing waiting: the AutoMix pre-load targets the first song (the list continues)", xNone?.url === list3.playlist?.tracks?.[0]?.url, xNone);
+  assert("X2 last song with a recommendation waiting: no pre-load into the first song (the recommendation plays next)", xQueued === null && sQueued === null, { xQueued, sQueued });
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

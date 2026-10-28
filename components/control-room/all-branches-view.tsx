@@ -6,6 +6,7 @@ import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { StatusLed, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { NetworkMap } from "@/components/control-room/network-map";
+import { BranchDevices, EnrollmentRequestsPanel, EnrollmentTile } from "@/components/control-room/device-enrollment-panel";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
@@ -110,10 +111,14 @@ export function AllBranchesView() {
   /** owner: add / edit branch form in the right column */
   const [form, setForm] = useState<{ mode: "add" } | { mode: "edit"; id: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** the "New requests" screen (device approval, owner 2026-10-28): opens in the list's place like a branch does; a branch opened from it returns to it */
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [backToRequests, setBackToRequests] = useState(false);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setRequestsOpen(false); setBackToRequests(false); };
+  const openRequests = () => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsOpen(false); setBrandsNew(false); setBackToRequests(false); setRequestsOpen(true); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   /** Organization → Brand → Branch (owner): brands + which brand each branch belongs to */
   const [brandsData, setBrandsData] = useState<BrandsData | null>(null);
@@ -253,7 +258,7 @@ export function AllBranchesView() {
     branches: rows.map((r) => ({ id: r.id, brandId: r.brandId, regionId: r.regionId, name: r.name, branchNumber: r.branchNumber })),
   };
   // a branch is open (its screen replaces the list) — not while Jingles / Brands / Broadcast own the column
-  const detail = !!openId && rows.some((r) => r.id === openId) && !(jinglesOpen && isHQ) && !(brandsOpen && !!brandsData) && !broadcastOpen;
+  const detail = !!openId && rows.some((r) => r.id === openId) && !(jinglesOpen && isHQ) && !(brandsOpen && !!brandsData) && !broadcastOpen && !requestsOpen;
   const clearFilters = () => { setBrandFilters([]); setSearch(""); setRegionFocus(null); setStatusFilter("all"); };
   const toggleStatus = (s: StatusFilter) => setStatusFilter((cur) => (s === "all" || cur === s ? "all" : s));
   const colorOf = (brandId: string | null) => (brandId ? brandById.get(brandId)?.color ?? DEFAULT_BRAND_COLOR : null);
@@ -276,7 +281,7 @@ export function AllBranchesView() {
           <NetworkCode />
           <button
             type="button"
-            onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsNew(false); setBrandsOpen(true); }}
+            onClick={() => { setRequestsOpen(false); setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsNew(false); setBrandsOpen(true); }}
             disabled={!brandsData}
             className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
           >
@@ -284,7 +289,7 @@ export function AllBranchesView() {
           </button>
           <button
             type="button"
-            onClick={() => { setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setJinglesOpen(false); setForm({ mode: "add" }); }}
+            onClick={() => { setRequestsOpen(false); setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setJinglesOpen(false); setForm({ mode: "add" }); }}
             disabled={!dbBranches}
             className="inline-flex items-center gap-1.5 rounded-xl border border-[color:var(--sb-border-strong)] px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40"
           >
@@ -293,7 +298,7 @@ export function AllBranchesView() {
           {isHQ ? (
             <button
               type="button"
-              onClick={() => { setForm(null); setBrandsOpen(false); setBroadcastOpen(false); setJinglesOpen(true); }}
+              onClick={() => { setRequestsOpen(false); setForm(null); setBrandsOpen(false); setBroadcastOpen(false); setJinglesOpen(true); }}
               disabled={!dbBranches}
               aria-pressed={jinglesOpen}
               className={`inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium text-[var(--sb-text)] hover:bg-white/[0.06] disabled:opacity-40 ${jinglesOpen ? "border-[color:var(--sb-accent)]" : "border-[color:var(--sb-border-strong)]"}`}
@@ -304,7 +309,7 @@ export function AllBranchesView() {
           ) : null}
           <button
             type="button"
-            onClick={() => { setOpenId(null); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setBroadcastOpen(true); }}
+            onClick={() => { setRequestsOpen(false); setOpenId(null); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setBroadcastOpen(true); }}
             disabled={!liveKnown || !dbBranches}
             className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40"
           >
@@ -330,7 +335,7 @@ export function AllBranchesView() {
           {/* LEFT: filters, counters and the list / panels */}
           <div className="flex min-h-0 min-w-0 flex-col gap-3">
             {/* while ONE branch is open the brand strip, the counters and the search fold away (they filter the list, which is not on screen) — owner 2026-10-21 */}
-            <div className={`cr-fold${detail ? " is-folded" : ""}`} inert={detail}>
+            <div className={`cr-fold${detail || requestsOpen ? " is-folded" : ""}`} inert={detail || requestsOpen}>
               <div className="cr-fold-in">
               {brandsData && brandsData.brands.length > 1 ? (
                 <BrandStrip
@@ -347,7 +352,7 @@ export function AllBranchesView() {
                     })),
                     // where brands are created: the "+" is the LAST item of the list (owner 2026-10-21) — in the row after the last chip, or at the end of the opened rows; never counted as a brand
                     { id: "__add", plain: true, node: (
-                      <button type="button" className="cr-chip cr-chip--plus shrink-0" onClick={() => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsNew(true); setBrandsOpen(true); }} title={L.t("brand.add")} aria-label={L.t("brand.add")}>
+                      <button type="button" className="cr-chip cr-chip--plus shrink-0" onClick={() => { setRequestsOpen(false); setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsNew(true); setBrandsOpen(true); }} title={L.t("brand.add")} aria-label={L.t("brand.add")}>
                       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
                     </button>
                     ) },
@@ -435,17 +440,26 @@ export function AllBranchesView() {
                 </div>
               );
             }
+            if (requestsOpen) {
+              return (
+                <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                  <EnrollmentRequestsPanel onBack={() => setRequestsOpen(false)} onOpenBranch={(id) => { openBranch(id); setBackToRequests(true); }} />
+                </div>
+              );
+            }
             const open = openId ? rows.find((r) => r.id === openId) : undefined;
             if (open) {
               return (
                 <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
                   <BranchPanel
                     branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation, logoUrl: open.logoUrl || (open.brandId ? brandById.get(open.brandId)?.logoUrl : null) || null, brandName: open.brandId ? brandById.get(open.brandId)?.name ?? null : null, brandColor: open.brandId ? brandById.get(open.brandId)?.color ?? DEFAULT_BRAND_COLOR : null }}
-                    onBack={() => setOpenId(null)}
+                    onBack={() => { setOpenId(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
                     onEdit={() => setForm({ mode: "edit", id: open.id })}
                     onDelete={() => setDeleting({ id: open.id, name: open.name })}
                     sendCommandTo={sendCommandTo}
                   >
+                  {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
+                  <BranchDevices key={`dev-${open.id}`} branchId={open.id} />
                   {/* the branch's jingles: "Branch jingles" + "Available to this branch" (same library, server-filtered) */}
                   <BranchJingles
                     key={open.id}
@@ -461,6 +475,8 @@ export function AllBranchesView() {
             }
             return (
               <ul className="cr-list min-h-0 min-w-0 flex-1 overflow-y-auto p-2.5" data-density={density}>
+                {/* the FIRST tile: new devices asking for approval (owner 2026-10-28) — shown only to someone who may decide, and only while the feature is on */}
+                <EnrollmentTile selected={false} onOpen={openRequests} />
                 {visibleRows.length === 0 ? (
                   <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">
                     {L.t(filtersActive ? "cr.noMatch" : "cr.noBranches")}{" "}
