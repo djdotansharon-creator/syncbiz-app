@@ -1,7 +1,18 @@
--- AlterTable
-ALTER TABLE "WorkspaceEntitlement" ADD COLUMN     "enrollmentEnabled" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "enrollmentTtlDays" INTEGER NOT NULL DEFAULT 7,
-ADD COLUMN     "maxPlayers" INTEGER NOT NULL DEFAULT 1;
+-- Device enrollment: two NEW tables, no change to any existing table (a deploy does not run migrations, so code that knows these tables can reach an environment first without breaking anything).
+
+-- CreateTable
+CREATE TABLE "WorkspaceEnrollmentSetting" (
+    "workspaceId" TEXT NOT NULL,
+    "enabled" BOOLEAN NOT NULL DEFAULT false,
+    "ttlDays" INTEGER NOT NULL DEFAULT 7,
+    "maxPlayers" INTEGER NOT NULL DEFAULT 1,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "WorkspaceEnrollmentSetting_pkey" PRIMARY KEY ("workspaceId")
+);
+
+-- AddForeignKey
+ALTER TABLE "WorkspaceEnrollmentSetting" ADD CONSTRAINT "WorkspaceEnrollmentSetting_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- CreateTable
 CREATE TABLE "DeviceEnrollment" (
@@ -44,6 +55,3 @@ CREATE UNIQUE INDEX "DeviceEnrollment_workspaceId_durableDeviceId_key" ON "Devic
 
 -- AddForeignKey
 ALTER TABLE "DeviceEnrollment" ADD CONSTRAINT "DeviceEnrollment_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- Backfill: the Player allocation starts equal to the branch allocation (nothing is enforced until a workspace switches enrollment on).
-UPDATE "WorkspaceEntitlement" SET "maxPlayers" = "maxBranches";

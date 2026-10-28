@@ -588,6 +588,7 @@ export const HE_PHRASES: Record<string, string> = {
 
   // ── misc ──
   "Play {title}": "השמעת {title}",
+  "{n} songs": "{n} שירים",
   "Previous": "הקודם",
   "More": "עוד",
   "Master": "Master",

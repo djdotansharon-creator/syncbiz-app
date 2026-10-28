@@ -43,7 +43,6 @@ import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
-import { KioskLockMenuRow } from "@/components/kiosk-lock-menu-row";
 import { DeviceDetailsMenuRow, DeviceDetailsModal } from "@/components/device-details";
 import { KioskDisplay } from "@/components/kiosk-display";
 import { KioskLaunchButton } from "@/components/kiosk-launch-button";
@@ -1711,10 +1710,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   dir={LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr"}
                   lead={
                     <>
+                      {/* owner 2026-10-28: "Player details" / "Remote details" — the very first row, a circle with an i; the lock-screen row left this short list */}
+                      <DeviceDetailsMenuRow onOpen={() => { setMainMenuOpen(false); setDeviceDetailsOpen(true); }} />
                       <DisplayModeMenuRow />
                       <FxModeMenuRow />
-                      <KioskLockMenuRow onDone={() => setMainMenuOpen(false)} />
-                      <DeviceDetailsMenuRow onOpen={() => { setMainMenuOpen(false); setDeviceDetailsOpen(true); }} />
                     </>
                   }
                   anchorGlyph={<IconGear />}

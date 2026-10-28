@@ -44,12 +44,12 @@ const OFF: EnrollmentConfig = { enabled: false, ttlDays: DEFAULT_TTL_DAYS, maxPl
 export async function getEnrollmentConfig(workspaceId: string): Promise<EnrollmentConfig> {
   if (!isEnrollmentEnvEnabled()) return OFF;
   try {
-    const ent = await prisma.workspaceEntitlement.findUnique({
+    const row = await prisma.workspaceEnrollmentSetting.findUnique({
       where: { workspaceId },
-      select: { enrollmentEnabled: true, enrollmentTtlDays: true, maxPlayers: true },
+      select: { enabled: true, ttlDays: true, maxPlayers: true },
     });
-    if (!ent || !ent.enrollmentEnabled) return OFF;
-    return { enabled: true, ttlDays: clampTtlDays(ent.enrollmentTtlDays), maxPlayers: ent.maxPlayers };
+    if (!row || !row.enabled) return OFF;
+    return { enabled: true, ttlDays: clampTtlDays(row.ttlDays), maxPlayers: row.maxPlayers };
   } catch (e) {
     console.error("[device-enrollment] config read failed — treating enrollment as OFF", e instanceof Error ? e.message : String(e));
     return OFF;
@@ -398,10 +398,12 @@ export async function enableEnrollment(args: { workspaceId: string; actorUserId:
   const now = args.now ?? new Date();
   const ttl = clampTtlDays(args.ttlDays ?? DEFAULT_TTL_DAYS);
   return prisma.$transaction(async (tx) => {
-    await tx.workspaceEntitlement.upsert({
+    // the allocation starts at the workspace's branch allocation (read only — the entitlement itself is never written)
+    const ent = await tx.workspaceEntitlement.findUnique({ where: { workspaceId: args.workspaceId }, select: { maxBranches: true } });
+    await tx.workspaceEnrollmentSetting.upsert({
       where: { workspaceId: args.workspaceId },
-      create: { workspaceId: args.workspaceId, status: "TRIALING", planCode: "trial", trialEndsAt: new Date(now.getTime() + 30 * 86_400_000), enrollmentEnabled: true, enrollmentTtlDays: ttl },
-      update: { enrollmentEnabled: true, enrollmentTtlDays: ttl },
+      create: { workspaceId: args.workspaceId, enabled: true, ttlDays: ttl, maxPlayers: Math.max(1, ent?.maxBranches ?? 1) },
+      update: { enabled: true, ttlDays: ttl },
     });
     const stations = await tx.stationDevice.findMany({ where: { workspaceId: args.workspaceId }, select: { durableDeviceId: true, branchId: true, platform: true, appVersion: true } });
     let created = 0;
@@ -432,7 +434,7 @@ export async function enableEnrollment(args: { workspaceId: string; actorUserId:
 
 export async function disableEnrollment(args: { workspaceId: string; actorUserId: string; ip?: string }): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    await tx.workspaceEntitlement.updateMany({ where: { workspaceId: args.workspaceId }, data: { enrollmentEnabled: false } });
+    await tx.workspaceEnrollmentSetting.updateMany({ where: { workspaceId: args.workspaceId }, data: { enabled: false } });
     await writeTenantAuditLog(tx, { action: "enrollment.settings", entity: "workspace", actorUserId: args.actorUserId, workspaceId: args.workspaceId, targetUserId: args.workspaceId, ipAddress: args.ip ?? null, metadata: { enabled: false } });
   });
 }
@@ -440,7 +442,7 @@ export async function disableEnrollment(args: { workspaceId: string; actorUserId
 export async function setEnrollmentTtl(args: { workspaceId: string; actorUserId: string; ttlDays: number; ip?: string }): Promise<number> {
   const ttl = clampTtlDays(args.ttlDays);
   await prisma.$transaction(async (tx) => {
-    await tx.workspaceEntitlement.updateMany({ where: { workspaceId: args.workspaceId }, data: { enrollmentTtlDays: ttl } });
+    await tx.workspaceEnrollmentSetting.updateMany({ where: { workspaceId: args.workspaceId }, data: { ttlDays: ttl } });
     await writeTenantAuditLog(tx, { action: "enrollment.settings", entity: "workspace", actorUserId: args.actorUserId, workspaceId: args.workspaceId, targetUserId: args.workspaceId, ipAddress: args.ip ?? null, metadata: { ttlDays: ttl } });
   });
   return ttl;
@@ -450,7 +452,7 @@ export async function setEnrollmentTtl(args: { workspaceId: string; actorUserId:
 export async function setMaxPlayers(args: { workspaceId: string; actorUserId: string; maxPlayers: number; ip?: string }): Promise<number> {
   const n = Math.max(0, Math.min(10_000, Math.floor(args.maxPlayers)));
   await prisma.$transaction(async (tx) => {
-    await tx.workspaceEntitlement.updateMany({ where: { workspaceId: args.workspaceId }, data: { maxPlayers: n } });
+    await tx.workspaceEnrollmentSetting.upsert({ where: { workspaceId: args.workspaceId }, create: { workspaceId: args.workspaceId, enabled: false, maxPlayers: n }, update: { maxPlayers: n } });
     await writeTenantAuditLog(tx, { action: "enrollment.settings", entity: "workspace", actorUserId: args.actorUserId, workspaceId: args.workspaceId, targetUserId: args.workspaceId, ipAddress: args.ip ?? null, metadata: { maxPlayers: n } });
   });
   return n;
