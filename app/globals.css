@@ -100,6 +100,9 @@ button:active:not(:disabled) {
   background: var(--sb-scrollbar-track);
 }
 
+/* the login screen's background (owner 2026-10-28): a soft, slightly light, colourful blurred background — plain radial gradients (no blur filter, nothing heavy for a weak graphics card) */
+.vono-ambient { background: radial-gradient(72vmax 58vmax at 8% 6%, rgba(48, 209, 88, 0.2), transparent 62%), radial-gradient(66vmax 60vmax at 94% 98%, rgba(92, 132, 255, 0.26), transparent 62%), radial-gradient(52vmax 42vmax at 80% 4%, rgba(176, 112, 255, 0.15), transparent 60%), #15151c; }
+
 /* ─── SyncBiz clean design tokens (Apple-inspired) ───
    One restrained accent, hairline borders, soft elevation — no neon glow. */
 :root {
@@ -3244,6 +3247,14 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
 }
 .library-card-platform-line-count {
   color: rgba(255, 255, 255, 0.6);
+}
+/* owner 2026-10-28: the song count has no dot in front of it — it sits at the far side of the line, a little bolder ("12 songs") */
+.library-card-platform-line .library-card-platform-line-count,
+.library-source-card-grid .library-source-card .library-card-platform-line-count {
+  margin-inline-start: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 /* Grid hides the old chrome: corner platform logo, kind-badge text, stats strip,
@@ -7794,10 +7805,13 @@ html[data-sb-display="song"][data-sb-ambient="on"] [data-management="true"] { ba
 .sb-alb-row:focus-visible { outline: none; background: rgba(255, 255, 255, 0.055); }
 .sb-alb-row[data-busy="1"] { animation: sb-alb-pulse 900ms ease-in-out infinite; }
 .sb-alb-n { position: relative; display: flex; align-items: center; justify-content: center; width: 68px; height: 56px; }
-.sb-alb-n b { font-size: 34px; font-weight: 250; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.4); transition: opacity 200ms ease, color 200ms ease; }
-.sb-alb-n svg { position: absolute; width: 30px; height: 30px; color: #fff; opacity: 0; transform: scale(0.85); transition: opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-.sb-alb-row:hover .sb-alb-n b, .sb-alb-row:focus-visible .sb-alb-n b { opacity: 0; }
-.sb-alb-row:hover .sb-alb-n svg, .sb-alb-row:focus-visible .sb-alb-n svg { opacity: 1; transform: none; }
+.sb-alb-n b { font-size: 32px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.55); transition: color 200ms ease; }
+/* owner 2026-10-28: the number stays (bolder); the play icon appears on the song's square (a soft dark veil + a white play) */
+.sb-alb-row:hover .sb-alb-n b, .sb-alb-row:focus-visible .sb-alb-n b { color: rgba(255, 255, 255, 0.92); }
+.sb-alb-art::after { content: ""; position: absolute; inset: 0; z-index: 1; background: rgba(0, 0, 0, 0.42); opacity: 0; transition: opacity 200ms ease; pointer-events: none; }
+.sb-alb-art-play { position: absolute; z-index: 2; inset: 0; margin: auto; width: 26px; height: 26px; color: #fff; opacity: 0; transform: scale(0.85); filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.6)); transition: opacity 200ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1); pointer-events: none; }
+.sb-alb-row:hover .sb-alb-art::after, .sb-alb-row:focus-visible .sb-alb-art::after { opacity: 1; }
+.sb-alb-row:hover .sb-alb-art-play, .sb-alb-row:focus-visible .sb-alb-art-play { opacity: 1; transform: none; }
 .sb-alb-art { position: relative; width: 56px; height: 56px; border-radius: 14px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
 .sb-alb-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
 .sb-alb-art .sb-alb-initial { font-size: 22px; }

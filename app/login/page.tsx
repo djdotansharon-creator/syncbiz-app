@@ -40,12 +40,12 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4">
+    <div className="vono-ambient flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center justify-center">
           <VonoBrand size="lg" />
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-xl">
+        <div className="rounded-3xl bg-white/[0.07] p-8 shadow-2xl backdrop-blur-xl">
           <h1 className="text-lg font-semibold text-slate-50">Log in</h1>
           <p className="mt-1 text-sm text-slate-400">
             Access your control dashboard. VONO only orchestrates playback – it does not store or stream media.
@@ -155,7 +155,7 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      <div className="vono-ambient flex min-h-screen items-center justify-center">
         <p className="text-slate-500">Loading…</p>
       </div>
     }>
