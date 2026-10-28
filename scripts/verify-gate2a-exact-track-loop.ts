@@ -71,8 +71,10 @@ assert("L6 manual NEXT with loop track → next item (unchanged)", !!manual && !
 // ── static pins: the station wires exactly these rules ──
 const dpc = readFileSync(path.join(__dirname, "..", "lib", "device-player-context.tsx"), "utf-8").replace(/\r\n/g, "\n");
 assert("S1 playSourceOrSend keeps trackIndex OPTIONAL for the URL branch (LOCAL: ?? 0)", /\(source: UnifiedSource, trackIndex\?: number\) => \{/.test(dpc) && (dpc.match(/playSource\(source, trackIndex \?\? 0\)/g) ?? []).length === 2);
+// 2026-10-27 (owner, end-of-list): the step follows getPlaybackRepeatMode() — the loop mode playback FOLLOWS (an untouched
+// default LOOP "off" continues the list; only an operator's explicit "off" stops). Same invariant, the accessor renamed.
 assert("S2 stepUrlSession: automatic failure never retries; EOF replays on loop track; manual uses the loop setting",
-  /repeatMode: opts\?\.automatic === "failure" \? \(getRepeatMode\(\) === "off" \? "off" : "playlist"\) : getRepeatMode\(\),\n\s+repeatCurrent: opts\?\.automatic === "eof",/.test(dpc));
+  /repeatMode: opts\?\.automatic === "failure" \? \(getPlaybackRepeatMode\(\) === "off" \? "off" : "playlist"\) : getPlaybackRepeatMode\(\),\n\s+repeatCurrent: opts\?\.automatic === "eof",/.test(dpc));
 assert("S3 EOF + failure call sites use the automatic modes", /stepUrlSessionRef\.current\("next", \{ automatic: "eof" \}\)/.test(dpc) && /stepUrlSessionRef\.current\("next", \{ automatic: "failure", origin: "auto-failure", failures \}\)/.test(dpc));
 
 console.log(`\n${pass} passed, ${fail} failed`);

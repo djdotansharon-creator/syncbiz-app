@@ -22,5 +22,11 @@ assert("S2 the thumb is a faint neutral grey (equal-ish red / green / blue, tran
 assert("S3 no slate-blue scroll bar colour is left in the variables (the old 100,116,139 thumb / 2,6,23 track)", !/100,\s*116,\s*139|2,\s*6,\s*23/.test(root));
 assert("S4 the page-wide rule still hands the colours to every scroller (thin, thumb + track from the variables)", star);
 
+// ── 2026-10-28: the library workspace shows NO scroll bar at all (owner's Windows screenshots: a stripe through the DJ AI card = the centre grid's bar seen through the glass right rail, plus grey bars on the rail lists) ──
+const src = readFileSync(path.join(__dirname, "..", "components", "sources-manager.tsx"), "utf8");
+assert("S5 the library workspace grid (rails + centre) hides every scroll bar inside it — both the standard property and the WebKit pseudo-element", /\.workspace-rail-grid,\s*\.workspace-rail-grid \*\s*\{\s*scrollbar-width:\s*none;/.test(css) && /\.workspace-rail-grid \*::-webkit-scrollbar\s*\{\s*display:\s*none;/.test(css));
+assert("S6 the grid that carries that rule is the one the rails, the centre grid, the playlist list and the DJ AI launcher live in", /className="workspace-rail-grid /.test(src) && /className="sb-glow-scroll /.test(src) && src.indexOf('className="workspace-rail-grid ') < src.indexOf('className="sb-glow-scroll ') && src.indexOf('className="workspace-rail-grid ') < src.indexOf("<DjCreatorAiShell") && src.indexOf('className="sb-glow-scroll ') < src.lastIndexOf("<DjCreatorAiShell"));
+assert("S7 the page, the Control Room and the admin screens are NOT silenced (the hiding rule is scoped to the workspace grid only)", !/(^|\n)\s*(html|body|\*)\s*\{[^}]*scrollbar-width:\s*none/.test(css));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
