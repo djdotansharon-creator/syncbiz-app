@@ -30,5 +30,12 @@ assert("P5 the Hebrew phrase for the count exists", /"\{n\} songs": "\{n\} שי�
 const ambient = /\.vono-ambient \{[^}]*\}/.exec(css)?.[0] ?? "";
 assert("P6 the login screen has the soft colourful blurred background: radial gradients only (no blur filter — nothing heavy for a weak graphics card), lighter than before", /radial-gradient/.test(ambient) && !/filter:\s*blur/.test(ambient) && /className="vono-ambient /.test(login) && !/from-slate-950 via-slate-900/.test(login));
 
+// ── 2026-10-29: the sign-in pages (no blue, white pill buttons) and the clean info icon ──
+const authPages = ["app/login/page.tsx", "app/signup/page.tsx", "app/reset-password/page.tsx"].map((f) => read(f));
+assert("P7 the sign-in pages have no blue left (no sky / cyan classes), no navy slate surfaces and no corrupted class names", authPages.every((t) => !/sky-|cyan-|slate-9|border-slate|white0/.test(t)));
+assert("P8 the primary buttons are white pills with dark text, the inputs are soft pills without a frame, and the links are calm white", authPages.every((t) => !/type="submit"|Create workspace|Send/.test(t) || /rounded-full bg-\[#f5f5f7\]/.test(t)) && /rounded-2xl border-0 bg-white\/\[0\.09\]/.test(authPages[0]!) && /text-white\/85 underline-offset-4 hover:text-white hover:underline/.test(authPages[0]!));
+const infoIcon = read("components/info-icon.tsx");
+assert("P9 the 'i in a circle' is a drawn icon (a ring, a stem and a dot), not a text glyph, in the gear row and on the approvals switch", /<circle cx="12" cy="12" r="9\.2"/.test(infoIcon) && /<InfoIcon size=\{20\} \/>/.test(read("components/device-details.tsx")) && /<InfoIcon size=\{22\} \/>/.test(read("components/control-room/device-enrollment-panel.tsx")) && !/font: italic/.test(css.slice(css.indexOf(".sb-devdet-i {"), css.indexOf(".sb-devdet-i {") + 200)));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

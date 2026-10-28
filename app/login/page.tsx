@@ -46,15 +46,15 @@ function LoginForm() {
           <VonoBrand size="lg" />
         </div>
         <div className="rounded-3xl bg-white/[0.07] p-8 shadow-2xl backdrop-blur-xl">
-          <h1 className="text-lg font-semibold text-slate-50">Log in</h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <h1 className="text-lg font-semibold text-white">Log in</h1>
+          <p className="mt-1 text-sm text-white/60">
             Access your control dashboard. VONO only orchestrates playback – it does not store or stream media.
           </p>
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div>
               <label
                 htmlFor="email"
-                className="block text-xs font-medium text-slate-300"
+                className="block text-xs font-medium text-white/80"
               >
                 Email
               </label>
@@ -65,13 +65,13 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
                 required
-                className="mt-1.5 w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                className="mt-1.5 w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white placeholder:text-white/35 outline-none transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
               />
             </div>
             <div>
               <label
                 htmlFor="password"
-                className="block text-xs font-medium text-slate-300"
+                className="block text-xs font-medium text-white/80"
               >
                 Password
               </label>
@@ -83,12 +83,12 @@ function LoginForm() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   required
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 pr-10 text-sm text-slate-50 placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+                  className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 pr-10 text-sm text-white placeholder:text-white/35 outline-none transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 transition hover:text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-white/45 transition hover:text-white/80 focus:outline-none focus:ring-2 focus:ring-white/30"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   tabIndex={-1}
                 >
@@ -110,16 +110,16 @@ function LoginForm() {
               <p className="text-sm text-rose-400">{error}</p>
             )}
             <div className="flex items-center justify-between text-xs">
-              <label className="flex items-center gap-2 text-slate-400">
+              <label className="flex items-center gap-2 text-white/60">
                 <input
                   type="checkbox"
-                  className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-900 text-sky-500 focus:ring-sky-500/30"
+                  className="h-3.5 w-3.5 rounded border-white/30 bg-white/10 accent-white focus:ring-white/30"
                 />
                 Remember me
               </label>
               <Link
                 href="/reset-password"
-                className="text-sky-400 hover:text-sky-300"
+                className="text-white/85 underline-offset-4 hover:text-white hover:underline"
               >
                 Forgot password?
               </Link>
@@ -127,23 +127,23 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-4 flex w-full items-center justify-center rounded-xl bg-sky-500 py-2.5 text-sm font-medium text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 disabled:opacity-50"
+              className="mt-4 flex w-full items-center justify-center rounded-full bg-[#f5f5f7] py-3 text-sm font-semibold text-[#111] transition hover:bg-white disabled:opacity-50"
             >
               {loading ? "Signing in…" : "Continue to dashboard"}
             </button>
           </form>
-          <p className="mt-6 text-center text-sm text-slate-400">
+          <p className="mt-6 text-center text-sm text-white/60">
             New to VONO?{" "}
             <Link
               href="/signup"
-              className="font-medium text-sky-400 hover:text-sky-300"
+              className="font-medium text-white/85 underline-offset-4 hover:text-white hover:underline"
             >
               Create an account
             </Link>
           </p>
         </div>
         <p className="mt-6 text-center">
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-400">
+          <Link href="/" className="text-xs text-white/45 hover:text-white/60">
             ← Back to home
           </Link>
         </p>
@@ -156,7 +156,7 @@ export default function LoginPage() {
   return (
     <Suspense fallback={
       <div className="vono-ambient flex min-h-screen items-center justify-center">
-        <p className="text-slate-500">Loading…</p>
+        <p className="text-white/45">Loading…</p>
       </div>
     }>
       <LoginForm />

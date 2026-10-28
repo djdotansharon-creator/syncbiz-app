@@ -41,18 +41,18 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4">
-      <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/60 shadow-2xl shadow-black/40 backdrop-blur-xl md:grid-cols-[1.1fr,1fr]">
-        <div className="flex flex-col justify-center bg-slate-950/80 p-8 md:p-10">
+    <div className="flex min-h-screen items-center justify-center vono-ambient px-4">
+      <div className="grid w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl bg-white/[0.06] shadow-2xl shadow-black/40 backdrop-blur-xl md:grid-cols-[1.1fr,1fr]">
+        <div className="flex flex-col justify-center bg-white/[0.04] p-8 md:p-10">
           <div className="space-y-6">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400/90">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/60">
                 Get started
               </p>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight text-slate-50">
+              <h1 className="mt-2 text-xl font-semibold tracking-tight text-white">
                 Create your SyncBiz workspace
               </h1>
-              <p className="mt-1 text-sm text-slate-400">
+              <p className="mt-1 text-sm text-white/60">
                 Add your devices and schedules to get started.
               </p>
             </div>
@@ -70,7 +70,7 @@ export default function SignupPage() {
                     id="first-name"
                     name="first-name"
                     placeholder="Ada"
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/40"
+                    className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none ring-0 transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                   />
                 </div>
                 <div className="space-y-2">
@@ -84,7 +84,7 @@ export default function SignupPage() {
                     id="last-name"
                     name="last-name"
                     placeholder="Lovelace"
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/40"
+                    className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none ring-0 transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                   />
                 </div>
               </div>
@@ -100,7 +100,7 @@ export default function SignupPage() {
                   id="company"
                   name="company"
                   placeholder="Acme Inc."
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/40"
+                  className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none ring-0 transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                 />
               </div>
 
@@ -116,7 +116,7 @@ export default function SignupPage() {
                   name="email"
                   type="email"
                   placeholder="you@company.com"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/40"
+                  className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none ring-0 transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                 />
               </div>
 
@@ -133,12 +133,12 @@ export default function SignupPage() {
                     name="password"
                     type={showPassword ? "text" : "password"}
                     placeholder="Create a strong password"
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 pr-10 text-sm text-slate-50 outline-none ring-0 transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/40"
+                    className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 pr-10 text-sm text-white outline-none ring-0 transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 transition hover:text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500/30"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-white/45 transition hover:text-white/80 focus:outline-none focus:ring-2 focus:ring-white/30"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                     tabIndex={-1}
                   >
@@ -157,24 +157,24 @@ export default function SignupPage() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-2 pt-1 text-xs text-slate-400">
+              <div className="flex items-start gap-2 pt-1 text-xs text-white/60">
                 <input
                   id="terms"
                   type="checkbox"
-                  className="mt-0.5 h-3.5 w-3.5 rounded border-slate-700 bg-slate-900/80 text-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40"
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-white/30 bg-white/10 accent-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                 />
                 <label htmlFor="terms" className="space-x-1">
                   <span>By creating an account you agree to our</span>
                   <button
                     type="button"
-                    className="font-medium text-sky-300 hover:text-sky-200"
+                    className="font-medium text-white/85 underline-offset-4 hover:text-white hover:underline"
                   >
                     Terms
                   </button>
                   <span>and</span>
                   <button
                     type="button"
-                    className="font-medium text-sky-300 hover:text-sky-200"
+                    className="font-medium text-white/85 underline-offset-4 hover:text-white hover:underline"
                   >
                     Privacy Policy
                   </button>
@@ -185,36 +185,36 @@ export default function SignupPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-2 inline-flex w-full items-center justify-center rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-slate-950 shadow-lg shadow-sky-500/30 transition hover:bg-sky-400"
+                className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-[#f5f5f7] px-4 py-3 text-sm font-semibold text-[#111] transition hover:bg-white"
               >
                 {loading ? "Creating..." : "Create workspace"}
               </button>
               {error ? <p className="text-xs text-red-400">{error}</p> : null}
             </form>
 
-          <p className="pt-2 text-center text-xs text-slate-400">
+          <p className="pt-2 text-center text-xs text-white/60">
             Already using SyncBiz?{" "}
             <Link
               href="/login"
-              className="font-medium text-sky-300 hover:text-sky-200"
+              className="font-medium text-white/85 underline-offset-4 hover:text-white hover:underline"
             >
               Log in
             </Link>
           </p>
           <p className="pt-2 text-center">
-            <Link href="/" className="text-xs text-slate-500 hover:text-slate-400">
+            <Link href="/" className="text-xs text-white/45 hover:text-white/60">
               ← Back to home
             </Link>
           </p>
           </div>
         </div>
 
-        <div className="relative hidden flex-col justify-between border-l border-slate-800 bg-gradient-to-br from-sky-500/15 via-cyan-400/5 to-emerald-400/15 p-8 md:flex">
+        <div className="relative hidden flex-col justify-between border-l-0 bg-white/[0.04] p-8 md:flex">
           <div className="space-y-4">
-            <p className="inline-flex items-center rounded-full bg-slate-950/40 px-3 py-1 text-xs font-medium text-sky-200 ring-1 ring-sky-500/40">
+            <p className="inline-flex items-center rounded-full bg-white/[0.08] px-3 py-1 text-xs font-medium text-white/80 ring-1 ring-white/20">
               Built for branch media operations
             </p>
-            <h2 className="max-w-xs text-2xl font-semibold tracking-tight text-slate-50">
+            <h2 className="max-w-xs text-2xl font-semibold tracking-tight text-white">
               Schedule what plays,
               <br />
               control where it plays.
@@ -229,7 +229,7 @@ export default function SignupPage() {
 
           <div className="space-y-3 text-xs">
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-2xl border border-slate-700/80 bg-slate-950/60 p-3">
+              <div className="rounded-2xl bg-white/[0.07] p-3">
                 <p className="text-[11px] font-medium text-slate-100">
                   Time to insight
                 </p>
@@ -237,11 +237,11 @@ export default function SignupPage() {
                   ↓ 47% in the first 30 days
                 </p>
               </div>
-              <div className="rounded-2xl border border-slate-700/80 bg-slate-950/60 p-3">
+              <div className="rounded-2xl bg-white/[0.07] p-3">
                 <p className="text-[11px] font-medium text-slate-100">
                   Manual updates
                 </p>
-                <p className="mt-1 text-[11px] text-sky-300">
+                <p className="mt-1 text-[11px] text-white/70">
                   100K+ events automated / month
                 </p>
               </div>

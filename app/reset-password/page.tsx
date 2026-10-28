@@ -76,12 +76,12 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 p-8 shadow-xl">
-        <h1 className="text-lg font-semibold text-slate-50">
+    <div className="flex min-h-screen items-center justify-center vono-ambient px-4">
+      <div className="w-full max-w-md rounded-3xl bg-white/[0.07] p-8 shadow-2xl backdrop-blur-xl">
+        <h1 className="text-lg font-semibold text-white">
           {isResetMode ? "Set new password" : "Forgot password"}
         </h1>
-        <p className="mt-1 text-sm text-slate-400">
+        <p className="mt-1 text-sm text-white/60">
           {isResetMode
             ? "Enter a new password for your account."
             : "Enter your email and we'll send a reset link."}
@@ -95,12 +95,12 @@ export default function ResetPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
-              className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+              className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
             />
             <button
               type="submit"
               disabled={status === "loading"}
-              className="w-full rounded-xl bg-sky-500 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
+              className="w-full rounded-full bg-[#f5f5f7] py-3 text-sm font-semibold text-[#111] transition hover:bg-white disabled:opacity-50"
             >
               {status === "loading" ? "Sending..." : "Send reset link"}
             </button>
@@ -114,12 +114,12 @@ export default function ResetPasswordPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="New password (min 6 chars)"
-              className="w-full rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-50 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+              className="w-full rounded-2xl border-0 bg-white/[0.09] px-4 py-3 text-sm text-white outline-none transition focus:bg-white/[0.14] focus:ring-2 focus:ring-white/30"
             />
             <button
               type="submit"
               disabled={status === "loading"}
-              className="w-full rounded-xl bg-sky-500 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
+              className="w-full rounded-full bg-[#f5f5f7] py-3 text-sm font-semibold text-[#111] transition hover:bg-white disabled:opacity-50"
             >
               {status === "loading" ? "Updating..." : "Update password"}
             </button>
@@ -132,7 +132,7 @@ export default function ResetPasswordPage() {
             {devOnlyResetUrl ? (
               <a
                 href={devOnlyResetUrl}
-                className="block break-all font-mono text-xs text-sky-300 underline hover:text-sky-200"
+                className="block break-all font-mono text-xs text-white/80 underline hover:text-white"
               >
                 {devOnlyResetUrl}
               </a>
@@ -140,8 +140,8 @@ export default function ResetPasswordPage() {
           </div>
         ) : null}
 
-        <p className="mt-6 text-center text-sm text-slate-400">
-          <Link href="/login" className="font-medium text-sky-400 hover:text-sky-300">
+        <p className="mt-6 text-center text-sm text-white/60">
+          <Link href="/login" className="font-medium text-white/85 underline-offset-4 hover:text-white hover:underline">
             Back to login
           </Link>
         </p>
