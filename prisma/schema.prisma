@@ -298,7 +298,6 @@ model Workspace {
 
   owner               User                   @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   branchActivationCodes BranchActivationCode[]
-  deviceEnrollments     DeviceEnrollment[]
   members             WorkspaceMember[]
   branchAssignments   UserBranchAssignment[]
   branches            Branch[]
@@ -324,6 +323,9 @@ model Workspace {
   /// Business / music identity for recommendations & catalog intelligence (Stage 1).
   /// Default matching context for the workspace; Branch.businessType remains per-branch and is not auto-synced here.
   businessProfile WorkspaceBusinessProfile?
+
+  deviceEnrollments DeviceEnrollment[]
+  enrollmentSetting WorkspaceEnrollmentSetting?
 
   @@index([ownerId])
 }
@@ -564,54 +566,69 @@ model BranchActivationCode {
 
 /// Device enrollment (docs/DEVICE_ENROLLMENT_DESIGN.md, Phase 1): a computer / phone / station that asks to be a PLAYER or a REMOTE of a workspace,
 /// and the manager's decision. One live row per (workspace, durable device id). `durableDeviceId` is the browser profile's stable id
-/// (lib/device-id.ts), the desktop machine id, or a phone id. Dormant until `WorkspaceEntitlement.enrollmentEnabled` and SYNCBIZ_DEVICE_ENROLLMENT=1.
+/// (lib/device-id.ts), the desktop machine id, or a phone id. Dormant until `WorkspaceEnrollmentSetting.enabled` and SYNCBIZ_DEVICE_ENROLLMENT=1.
 model DeviceEnrollment {
-  id                String    @id @default(uuid())
-  workspaceId       String
-  durableDeviceId   String
+  id                     String    @id @default(uuid())
+  workspaceId            String
+  durableDeviceId        String
   /// pending | approved | rejected | revoked | expired   (a pending row past `expiresAt` reads as expired)
-  status            String    @default("pending")
+  status                 String    @default("pending")
   /// browser | desktop | android | ios | streamer
-  platform          String    @default("browser")
+  platform               String    @default("browser")
   /// PLAYER | REMOTE
-  requestedRole     String
-  approvedRole      String?
-  /// station | browser — only for PLAYER (a Browser Player plays while its tab is open; see the design doc D-B1)
-  playerClass       String?
-  label             String    @default("")
-  appVersion        String    @default("")
-  userAgent         String    @default("")
-  requestIp         String    @default("")
-  requestedByUserId String
-  requestedBranchId String?
+  requestedRole          String
+  approvedRole           String?
+  /// station | browser | owner — only for PLAYER (a Browser Player plays while its tab is open, see the design doc D-B1; "owner" = the main admin's own computer, never counted in the allocation)
+  playerClass            String?
+  label                  String    @default("")
+  appVersion             String    @default("")
+  userAgent              String    @default("")
+  requestIp              String    @default("")
+  requestedByUserId      String
+  requestedBranchId      String?
   /// a branch name the device typed itself (a Player may ask for a branch that does not exist yet) — the manager picks the real branch when approving
-  requestedBranchName String @default("")
+  requestedBranchName    String    @default("")
   /// the address and the brand a Player typed for a branch that does not exist yet (the manager creates / connects the branch from them)
-  requestedBranchAddress String @default("")
-  requestedBrandName     String @default("")
+  requestedBranchAddress String    @default("")
+  requestedBrandName     String    @default("")
   /// who is at the device (owner 2026-10-28): shown to the manager so they know who is asking
-  requesterFirstName String @default("")
-  requesterLastName  String @default("")
-  requesterPhone     String @default("")
-  requesterEmail     String @default("")
+  requesterFirstName     String    @default("")
+  requesterLastName      String    @default("")
+  requesterPhone         String    @default("")
+  requesterEmail         String    @default("")
   /// approved scope: the branches this device may play for / control (empty = none)
-  approvedBranchIds String[]
-  note              String    @default("")
-  decisionNote      String    @default("")
-  decidedByUserId   String?
-  decidedAt         DateTime?
+  approvedBranchIds      String[]
+  note                   String    @default("")
+  decisionNote           String    @default("")
+  decidedByUserId        String?
+  decidedAt              DateTime?
   /// true for the rows created when enrollment was switched on (running stations / the enabling admin's own device)
-  grandfathered     Boolean   @default(false)
-  requestedAt       DateTime  @default(now())
-  expiresAt         DateTime
-  lastSeenAt        DateTime?
-  updatedAt         DateTime  @updatedAt
+  grandfathered          Boolean   @default(false)
+  requestedAt            DateTime  @default(now())
+  expiresAt              DateTime
+  lastSeenAt             DateTime?
+  updatedAt              DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, durableDeviceId])
   @@index([workspaceId, status])
   @@index([workspaceId, approvedRole])
+}
+
+/// Device enrollment settings of ONE workspace (docs/DEVICE_ENROLLMENT_DESIGN.md) — a table of its own on purpose: the existing WorkspaceEntitlement model is not touched, so code that knows this table
+/// can reach an environment BEFORE its migration without breaking any existing query (the table is only read when SYNCBIZ_DEVICE_ENROLLMENT=1). No row = off.
+model WorkspaceEnrollmentSetting {
+  workspaceId String   @id
+  /// the switch for THIS workspace (default off = today's behaviour exactly); also needs the env flag SYNCBIZ_DEVICE_ENROLLMENT=1
+  enabled     Boolean  @default(false)
+  /// days an unapproved request stays open before it expires (1–30)
+  ttlDays     Int      @default(7)
+  /// the allocation of PLAYERS (computers that play the music); Remotes and the owner's own computer are not counted. Starts at the workspace's branch allocation.
+  maxPlayers  Int      @default(1)
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never
@@ -1218,13 +1235,6 @@ model WorkspaceEntitlement {
   maxDevices      Int             @default(4)
   maxUsers        Int             @default(5)
   maxPlaylists    Int             @default(20)
-  /// Device enrollment (additive, docs/DEVICE_ENROLLMENT_DESIGN.md): the allocation of PLAYERS (computers that play the music).
-  /// Remotes are NOT counted. Backfilled to maxBranches by the migration. Used only when the workspace has enrollment switched on.
-  maxPlayers      Int             @default(1)
-  /// Device enrollment switch for THIS workspace (default off = today's behaviour exactly). Also needs the env flag SYNCBIZ_DEVICE_ENROLLMENT=1.
-  enrollmentEnabled Boolean       @default(false)
-  /// Days an unapproved request stays open before it expires (1–30).
-  enrollmentTtlDays Int           @default(7)
   notes           String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt

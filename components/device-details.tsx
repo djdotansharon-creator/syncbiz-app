@@ -17,7 +17,8 @@ type Approval = { enforced: false } | { enforced: true; status: string; role?: "
 type Me = { email?: string | null; accountName?: string | null; name?: string | null };
 
 const HE = {
-  menu: "פרטי נגן / שלט",
+  menuPlayer: "פרטי נגן",
+  menuRemote: "פרטי שלט רחוק",
   title: "פרטי המכשיר הזה",
   player: "נגן",
   remote: "שלט רחוק",
@@ -43,7 +44,8 @@ const HE = {
   close: "סגירה",
 };
 const EN: typeof HE = {
-  menu: "Player / Remote details",
+  menuPlayer: "Player details",
+  menuRemote: "Remote details",
   title: "This device",
   player: "Player",
   remote: "Remote",
@@ -69,17 +71,16 @@ const EN: typeof HE = {
   close: "Close",
 };
 
-/** the gear-menu row — it only asks the shell to open the panel (the menu closes itself, so the panel lives in the shell) */
+/** the gear-menu row — the very first one: a circle with an "i", "Player details" for a player and "Remote details" for a remote. It only asks the shell to open the panel (the menu closes itself, so the panel lives in the shell) */
 export function DeviceDetailsMenuRow({ onOpen }: { onOpen: () => void }): ReactElement {
   const { locale } = useLocale();
   const t = locale === "he" ? HE : EN;
+  const ctx = useDevicePlayer();
+  const isPlayer = !!ctx && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
   return (
-    <button type="button" className="sb-kiosk-menu-row" onClick={onOpen}>
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <rect x="3" y="4" width="18" height="12" rx="2" />
-        <path d="M8 20h8M12 16v4" />
-      </svg>
-      <span>{t.menu}</span>
+    <button type="button" className="sb-kiosk-menu-row sb-devdet-row" onClick={onOpen}>
+      <span className="sb-devdet-i" aria-hidden>i</span>
+      <span>{isPlayer ? t.menuPlayer : t.menuRemote}</span>
     </button>
   );
 }

@@ -4,7 +4,7 @@
  *
  * The idea: a computer / phone that signs in to an account is not automatically part of it. When the workspace has enrollment on, an unknown device asks the manager for a role —
  * PLAYER (it plays the music; counted in the paid allocation) or REMOTE (it only controls; never counted, never plays) — and a manager approves it within their reach.
- * Off by default: needs the env flag SYNCBIZ_DEVICE_ENROLLMENT=1 AND the workspace switch (`WorkspaceEntitlement.enrollmentEnabled`); with either off, every device is "legacy" and nothing changes.
+ * Off by default: needs the env flag SYNCBIZ_DEVICE_ENROLLMENT=1 AND the workspace switch (`WorkspaceEnrollmentSetting.enabled`); with either off, every device is "legacy" and nothing changes.
  */
 
 export const ENROLLMENT_STATUSES = ["pending", "approved", "rejected", "revoked", "expired"] as const;
