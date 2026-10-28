@@ -27,7 +27,7 @@ const EN = {
 
 const SVG = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
-function PlayerIcon(): ReactElement {
+export function PlayerIcon(): ReactElement {
   return (
     <svg {...SVG}>
       <path d="M4 9.6h3l4.4-3.7v12.2L7 14.4H4z" fill="currentColor" fillOpacity={0.22} />
@@ -37,7 +37,7 @@ function PlayerIcon(): ReactElement {
   );
 }
 
-function RemoteIcon(): ReactElement {
+export function RemoteIcon(): ReactElement {
   return (
     <svg {...SVG}>
       <rect x="8.3" y="9" width="7.4" height="12" rx="3.2" fill="currentColor" fillOpacity={0.22} />

@@ -40,7 +40,14 @@ export type TenantAuditAction =
   /** Jingles Stage 1 (2026-10-12): an HQ audience change / promote of a jingle (same row, never a copy). */
   | "jingle.audience_change"
   /** Control Room (2026-10-23): a branch was deleted (who / when; entityId = the branch id, metadata = its name / number). */
-  | "branch.delete";
+  | "branch.delete"
+  /** Device enrollment (2026-10-27): a device asked to be a Player / Remote, and the manager's decision (entityId = the DeviceEnrollment id). */
+  | "device.enroll_request"
+  | "device.enroll_approve"
+  | "device.enroll_reject"
+  | "device.enroll_revoke"
+  /** Device enrollment switched on / off or its settings changed for the workspace (entityId = the workspace id). */
+  | "enrollment.settings";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -54,6 +61,11 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.platform_remove",
   "jingle.audience_change",
   "branch.delete",
+  "device.enroll_request",
+  "device.enroll_approve",
+  "device.enroll_reject",
+  "device.enroll_revoke",
+  "enrollment.settings",
 ];
 
 /**
@@ -61,7 +73,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
  * mutation, but keeping this typed lets us add `branch`, `playlist`, etc.
  * later without a schema change.
  */
-export type TenantAuditEntity = "workspace_member" | "jingle" | "branch";
+export type TenantAuditEntity = "workspace_member" | "jingle" | "branch" | "device_enrollment" | "workspace";
 
 export type TenantAuditInput = {
   action: TenantAuditAction;

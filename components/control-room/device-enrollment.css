@@ -1,0 +1,84 @@
+/* Control Room — device enrollment panel (owner 2026-10-27): "Waiting for approval". Calm glass card, one press to approve; the Player / Remote icons are the top bar's. */
+.cr-enr { width: min(980px, calc(100% - 32px)); margin: 18px auto 6px; padding: 20px 22px 16px; border-radius: 24px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09); color: #f5f5f7; }
+.cr-enr h3 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 19px; font-weight: 650; }
+.cr-enr > p { margin: 8px 0 0; font-size: 14.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.62); max-width: 70ch; }
+.cr-enr-note { padding: 10px 14px; border-radius: 14px; background: rgba(125, 184, 255, 0.1); color: #cfe3ff !important; }
+.cr-enr-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.cr-enr-badge { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 8px; border-radius: 999px; background: #ffc857; color: #2b2000; font-size: 13.5px; font-weight: 800; }
+.cr-enr-meter { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: rgba(255, 255, 255, 0.7); }
+.cr-enr-meter b { color: #f5f5f7; font-variant-numeric: tabular-nums; }
+.cr-enr-bar { position: relative; display: block; width: 120px; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.cr-enr-bar u { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 999px; background: #30d158; transition: width 300ms ease; }
+.cr-enr-bar[data-full="1"] u { background: #ffc857; }
+.cr-enr-empty { margin: 14px 0 4px; font-size: 14.5px; color: rgba(255, 255, 255, 0.5); }
+.cr-enr-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.cr-enr-item { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cr-enr-item:first-child { border-top: 0; }
+.cr-enr-ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 14px; background: rgba(255, 255, 255, 0.07); }
+.cr-enr-item[data-role="player"] .cr-enr-ic { color: #30d158; }
+.cr-enr-item[data-role="remote"] .cr-enr-ic { color: #7db8ff; }
+.cr-enr-txt b { display: block; font-size: 15.5px; font-weight: 650; }
+.cr-enr-txt small { display: block; margin-top: 2px; font-size: 13px; line-height: 1.45; color: rgba(255, 255, 255, 0.58); }
+.cr-enr-txt small em { font-style: normal; font-weight: 700; color: #f5f5f7; }
+.cr-enr-quote { color: rgba(255, 255, 255, 0.72) !important; }
+.cr-enr-muted { color: rgba(255, 200, 87, 0.85) !important; }
+.cr-enr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cr-enr-btn { height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #f5f5f7; font: inherit; font-size: 13.5px; font-weight: 650; cursor: pointer; transition: background-color 200ms ease, transform 200ms ease, opacity 200ms ease; }
+.cr-enr-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.17); }
+.cr-enr-btn.is-main { background: #f5f5f7; color: #111; }
+.cr-enr-btn.is-main:hover:not(:disabled) { background: #fff; transform: translateY(-1px); }
+.cr-enr-btn:disabled { opacity: 0.38; cursor: default; }
+.cr-enr-btn:focus-visible, .cr-enr-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cr-enr-err { margin: 10px 0 0; font-size: 14px; font-weight: 600; color: #ff8a80 !important; }
+.cr-enr-approved { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cr-enr-approved summary { cursor: pointer; font-size: 14.5px; font-weight: 650; color: rgba(255, 255, 255, 0.78); list-style-position: inside; }
+.cr-enr-approved summary b { margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); font-size: 12.5px; }
+.cr-enr-item.is-quiet .cr-enr-ic { width: 34px; height: 34px; border-radius: 12px; }
+.cr-enr-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+.cr-enr-foot b { color: rgba(255, 255, 255, 0.85); }
+.cr-enr-link { padding: 4px 8px; border: 0; background: none; color: rgba(255, 255, 255, 0.6); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.cr-enr-link:hover { color: #fff; }
+/* who is asking: phone / e-mail as quiet links; the branch picker for a typed (not yet existing) branch */
+.cr-enr-contact { display: flex !important; flex-wrap: wrap; gap: 4px 16px; }
+.cr-enr-contact a { color: #cfe3ff; text-decoration: none; }
+.cr-enr-contact a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cr-enr-pick { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: rgba(255, 255, 255, 0.7); }
+.cr-enr-pick select { height: 34px; padding: 0 12px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.1); color: #f5f5f7; font: inherit; font-size: 13.5px; color-scheme: dark; }
+@media (max-width: 720px) { .cr-enr-item { grid-template-columns: 40px minmax(0, 1fr); } .cr-enr-item .cr-enr-actions { grid-column: 1 / -1; } }
+
+/* ── the "New requests" tile (first tile of the branch list) and its screen (owner 2026-10-28) ── */
+.cr-row--requests { cursor: pointer; }
+.cr-row--requests .cr-row-name { color: var(--sb-text); }
+.cr-row--requests:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 2px; }
+.cr-enr-tile-logo { position: relative; overflow: visible !important; color: rgba(255, 255, 255, 0.85); background: transparent !important; box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.34); border-style: dashed; border-width: 0; transition: color 200ms ease, box-shadow 200ms ease; }
+.cr-row--requests:hover .cr-enr-tile-logo { color: #fff; box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.6); }
+.cr-enr-tile-dot { position: absolute; top: -5px; inset-inline-end: -5px; display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; border-radius: 999px; background: #ff3b30; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 3px rgba(10, 10, 12, 0.9); }
+.cr-enr-plus { display: grid; place-items: center; flex: none; width: 54px; height: 54px; border-radius: 17px; color: rgba(255, 255, 255, 0.85); box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.34); }
+.cr-enrp .cr-enr { width: 100%; margin: 6px 0 0; }
+.cr-enrp .cr-enr-meter { flex: none; }
+.cr-enr-group { margin-top: 20px; }
+.cr-enr-ghead { display: flex; align-items: center; gap: 10px; padding-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.cr-enr-gname { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; margin-inline-start: -10px; border: 0; border-radius: 12px; background: none; color: #f5f5f7; font: inherit; font-size: 17px; font-weight: 650; cursor: pointer; transition: background-color 200ms ease; }
+button.cr-enr-gname:hover { background: rgba(255, 255, 255, 0.09); }
+button.cr-enr-gname:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cr-enr-gname.is-new { color: #ffd98a; cursor: default; }
+.cr-enr-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: rgba(255, 200, 87, 0.85); }
+.cr-enr-sublabel { margin: 12px 0 0; font-size: 13.5px; font-weight: 650; color: rgba(255, 255, 255, 0.78); }
+.cr-enr-sublabel b { margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; background: #ffc857; color: #2b2000; font-size: 12.5px; font-weight: 800; }
+.cr-enr-branch .cr-enr-list { margin-top: 6px; }
+.cr-enr-branch .cr-enr-item { grid-template-columns: 34px minmax(0, 1fr) auto; }
+.cr-enr-menu-note { margin: 0; padding: 8px 12px 10px; max-width: 240px; font-size: 12.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.55); }
+.cr-pop-opt:disabled { opacity: 0.4; cursor: default; }
+
+/* the on / off switch and its "i" (owner 2026-10-28: a simple switch, the explanation only if you ask) */
+.cr-enr-switchwrap { position: relative; display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.cr-switch { position: relative; width: 48px; height: 29px; padding: 0; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background-color 240ms ease; }
+.cr-switch i { position: absolute; top: 3px; inset-inline-start: 3px; width: 23px; height: 23px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: inset-inline-start 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.cr-switch[data-on="1"] { background: #30d158; }
+.cr-switch[data-on="1"] i { inset-inline-start: 22px; }
+.cr-switch:disabled { opacity: 0.5; cursor: default; }
+.cr-switch:focus-visible, .cr-enr-i:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cr-enr-i { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.7); font: italic 700 13px/1 Georgia, "Times New Roman", serif; cursor: pointer; transition: background-color 200ms ease, color 200ms ease; }
+.cr-enr-i:hover, .cr-enr-i[aria-expanded="true"] { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.cr-enr-infopop { position: absolute; z-index: 30; top: calc(100% + 10px); inset-inline-end: 0; width: 300px; max-width: 80vw; margin: 0; padding: 14px 16px; border-radius: 18px; background: rgba(34, 34, 40, 0.96); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); font-size: 13.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.8); text-align: start; }
+

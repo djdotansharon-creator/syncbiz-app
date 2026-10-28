@@ -39,10 +39,11 @@ import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibra
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { DeviceRoleBadge } from "@/components/device-role-badge";
+import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
-import { KioskLockMenuRow } from "@/components/kiosk-lock-menu-row";
+import { DeviceDetailsMenuRow, DeviceDetailsModal } from "@/components/device-details";
 import { KioskDisplay } from "@/components/kiosk-display";
 import { KioskLaunchButton } from "@/components/kiosk-launch-button";
 import { LeavingNavTab, MotionNavLink, useTabTransitions } from "@/components/top-nav-motion";
@@ -776,6 +777,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // ────────────────────────────────────────────────────────────────────────
   const [inDesktopApp, setInDesktopApp] = useState(false);
   const [mainMenuOpen, setMainMenuOpen] = useState(false);
+  /** gear menu → "Player / Remote details" (owner 2026-10-28) */
+  const [deviceDetailsOpen, setDeviceDetailsOpen] = useState(false);
   const [menuLogoutBusy, setMenuLogoutBusy] = useState(false);
   const mainMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   // Log out from the gear menu. Hard redirect guarantees a clean logged-out reload
@@ -1596,6 +1599,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       className={tabClass}
                     >
                       {label}
+                      {/* a device is waiting for approval (owner 2026-10-28): red circle with the number; renders nothing unless enrollment is on and this person may decide */}
+                      {item.labelKey === "controlRoom" ? <EnrollmentPendingDot /> : null}
                     </MotionNavLink>
                   );
                 })}
@@ -1705,9 +1710,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   dir={LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr"}
                   lead={
                     <>
+                      {/* owner 2026-10-28: "Player details" / "Remote details" — the very first row, a circle with an i; the lock-screen row left this short list */}
+                      <DeviceDetailsMenuRow onOpen={() => { setMainMenuOpen(false); setDeviceDetailsOpen(true); }} />
                       <DisplayModeMenuRow />
                       <FxModeMenuRow />
-                      <KioskLockMenuRow onDone={() => setMainMenuOpen(false)} />
                     </>
                   }
                   anchorGlyph={<IconGear />}
@@ -1746,6 +1752,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   }
                 />
               </div>
+
+              <DeviceDetailsModal open={deviceDetailsOpen} onClose={() => setDeviceDetailsOpen(false)} />
 
               {/* Desktop download + update — pinned at the far right edge of the header.
                   The download button is off the display for now (owner, 2026-10-14) — `.sb-desktop-download` */}
