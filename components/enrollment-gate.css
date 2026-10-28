@@ -1,34 +1,76 @@
-/* The not-yet-approved device's screen (owner 2026-10-27): one calm card over a solid dark page — nothing of the account shows behind it. */
-.vono-enr { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center; padding: 24px; background: #0b0b0d; color: #f5f5f7; overflow-y: auto; }
-.vono-enr-card { width: min(520px, 100%); padding: 34px 30px 30px; border-radius: 28px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 24px 70px rgba(0, 0, 0, 0.5); text-align: center; }
-.vono-enr-card h2 { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 650; }
+/* The not-yet-approved device's screen (owner 2026-10-27 / 2026-10-28): no card and no frames — a solid dark page, two soft squares in the middle; the chosen one rises to the centre and grows a little, the other fades away,
+   and only the details that choice needs come underneath. The main admin also gets a slim "I'm the owner" bar at the bottom. */
+.vono-enr { position: fixed; inset: 0; z-index: 2147483000; display: flex; flex-direction: column; padding: 24px; background: #0b0b0d; color: #f5f5f7; overflow-y: auto; }
+.vono-enr-stage { margin: auto; width: min(580px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; padding-bottom: 72px; }
+.vono-enr-caption { margin: 0 0 28px; font-size: 14.5px; color: rgba(255, 255, 255, 0.42); }
+.vono-enr-h { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 650; }
 .vono-enr-sub { margin: 10px 0 0; font-size: 15.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.62); }
 .vono-enr-small { font-size: 13.5px; color: rgba(255, 255, 255, 0.45); }
-.vono-enr-state { margin: 14px 0 0; padding: 10px 14px; border-radius: 14px; background: rgba(255, 200, 87, 0.12); color: #ffd98a; font-size: 14.5px; font-weight: 600; }
-.vono-enr-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0 8px; }
-.vono-enr-choice button { display: grid; justify-items: center; gap: 4px; padding: 16px 12px 14px; border: 0; border-radius: 20px; background: rgba(255, 255, 255, 0.06); color: #f5f5f7; font: inherit; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); transition: background-color 200ms ease, box-shadow 200ms ease; }
-.vono-enr-choice button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
-.vono-enr-choice button:disabled { opacity: 0.35; cursor: default; }
-.vono-enr-choice button[data-on="1"][data-kind="player"] { box-shadow: inset 0 0 0 2px #30d158; }
-.vono-enr-choice button[data-on="1"][data-kind="remote"] { box-shadow: inset 0 0 0 2px #7db8ff; }
-.vono-enr-choice .ic { display: grid; place-items: center; width: 38px; height: 38px; }
-.vono-enr-choice [data-kind="player"] .ic { color: #30d158; }
-.vono-enr-choice [data-kind="remote"] .ic { color: #7db8ff; }
-.vono-enr-choice b { font-size: 17px; font-weight: 700; }
-.vono-enr-choice small { font-size: 12.5px; line-height: 1.4; color: rgba(255, 255, 255, 0.55); }
-.vono-enr-field { display: grid; gap: 6px; margin-top: 12px; text-align: start; }
-.vono-enr-field span { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.7); }
-.vono-enr-field select, .vono-enr-field input { height: 44px; padding: 0 14px; border: 0; outline: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.09); color: inherit; font: inherit; font-size: 15px; color-scheme: dark; }
-.vono-enr-field select:focus, .vono-enr-field input:focus { background: rgba(255, 255, 255, 0.14); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
-.vono-enr-err { margin: 12px 0 0; font-size: 14px; font-weight: 600; color: #ff8a80; }
-.vono-enr-send { margin-top: 20px; height: 48px; padding: 0 30px; border: 0; border-radius: 999px; background: #f5f5f7; color: #111; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 200ms ease, opacity 200ms ease; }
+.vono-enr-state { margin: 0 0 18px; padding: 10px 16px; border-radius: 16px; background: rgba(255, 200, 87, 0.12); color: #ffd98a; font-size: 14.5px; font-weight: 600; }
+
+/* the two squares */
+.vono-enr-tiles { display: flex; justify-content: center; align-items: stretch; width: 100%; }
+.vono-enr-tile { flex: 0 0 auto; width: 236px; margin-inline: 10px; display: grid; justify-items: center; align-content: center; gap: 8px; padding: 32px 16px 28px; border: 0; border-radius: 32px; background: rgba(255, 255, 255, 0.055); color: inherit; font: inherit; white-space: nowrap; cursor: pointer;
+  transition: width 460ms cubic-bezier(0.22, 1, 0.36, 1), margin 460ms cubic-bezier(0.22, 1, 0.36, 1), padding 460ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease, transform 460ms cubic-bezier(0.22, 1, 0.36, 1), background-color 240ms ease; }
+.vono-enr-tile:hover { background: rgba(255, 255, 255, 0.095); }
+.vono-enr-tile:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 3px; }
+.vono-enr-tile .ic { display: grid; place-items: center; width: 68px; height: 68px; }
+.vono-enr-tile .ic svg { width: 100%; height: 100%; }
+.vono-enr-tile[data-kind="player"] .ic { color: #30d158; }
+.vono-enr-tile[data-kind="remote"] .ic { color: #7db8ff; }
+.vono-enr-tile b { font-size: 21px; font-weight: 700; }
+.vono-enr-tile small { font-size: 13px; color: rgba(255, 255, 255, 0.52); }
+.vono-enr-tile[data-state="on"] { transform: scale(1.08); cursor: default; }
+.vono-enr-tile[data-kind="player"][data-state="on"] { background: rgba(48, 209, 88, 0.13); }
+.vono-enr-tile[data-kind="remote"][data-state="on"] { background: rgba(125, 184, 255, 0.14); }
+.vono-enr-tile[data-state="away"] { width: 0; margin-inline: 0; padding-inline: 0; opacity: 0; transform: scale(0.9); overflow: hidden; pointer-events: none; }
+
+/* what the choice needs */
+.vono-enr-form { width: min(460px, 100%); margin-top: 38px; display: grid; gap: 14px; text-align: start; animation: vono-enr-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes vono-enr-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.vono-enr-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.vono-enr-field { display: grid; gap: 6px; }
+.vono-enr-field span { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.62); }
+.vono-enr-field input { height: 48px; padding: 0 16px; border: 0; outline: 0; border-radius: 18px; background: rgba(255, 255, 255, 0.07); color: inherit; font: inherit; font-size: 15.5px; color-scheme: dark; transition: background-color 200ms ease; }
+.vono-enr-field input::placeholder { color: rgba(255, 255, 255, 0.34); }
+.vono-enr-field input:focus { background: rgba(255, 255, 255, 0.12); }
+.vono-enr-field input:focus-visible { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3); }
+.vono-enr-field input[data-picked="1"] { background: rgba(48, 209, 88, 0.16); }
+.vono-enr-hits { margin: 6px 0 0; padding: 4px; list-style: none; max-height: 236px; overflow-y: auto; overscroll-behavior: contain; border-radius: 18px; background: rgba(255, 255, 255, 0.07); }
+.vono-enr-hits li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 14px; border-radius: 14px; cursor: pointer; transition: background-color 120ms ease; }
+.vono-enr-hits li[data-active="1"], .vono-enr-hits li:hover { background: rgba(255, 255, 255, 0.12); }
+.vono-enr-hits b { font-size: 15px; font-weight: 600; }
+.vono-enr-hits small { font-size: 12.5px; color: rgba(255, 255, 255, 0.5); }
+.vono-enr-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.52); }
+.vono-enr-err { margin: 0; font-size: 14px; font-weight: 600; color: #ff8a80; }
+.vono-enr-send { justify-self: center; margin-top: 8px; height: 50px; padding: 0 34px; border: 0; border-radius: 999px; background: #f5f5f7; color: #111; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 200ms ease, opacity 200ms ease; }
 .vono-enr-send:hover:not(:disabled) { transform: translateY(-1px); }
-.vono-enr-send:disabled { opacity: 0.4; cursor: default; }
-.vono-enr-send:focus-visible, .vono-enr-choice button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vono-enr-send:disabled { opacity: 0.35; cursor: default; }
+.vono-enr-send:focus-visible, .vono-enr-link:focus-visible, .vono-enr-owner:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vono-enr-link { justify-self: center; padding: 4px 10px; border: 0; background: none; color: rgba(255, 255, 255, 0.5); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.vono-enr-link:hover { color: #fff; }
+
+/* waiting */
 .vono-enr-dots { margin: 18px 0 4px; }
 .vono-enr-dots i { display: inline-block; width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: #ffc857; animation: vono-enr-b 1.3s infinite ease-in-out; }
 .vono-enr-dots i:nth-child(2) { animation-delay: 0.2s; }
 .vono-enr-dots i:nth-child(3) { animation-delay: 0.4s; }
 @keyframes vono-enr-b { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .vono-enr-dots i { animation: none; } }
-@media (max-width: 480px) { .vono-enr-choice { grid-template-columns: 1fr; } }
+
+/* "I'm the owner" — a slim bar at the bottom, only for the account's main admin */
+.vono-enr-ownerwrap { position: fixed; inset-inline: 0; bottom: 20px; display: grid; justify-items: center; gap: 8px; padding-inline: 16px; pointer-events: none; }
+.vono-enr-owner { pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: min(580px, 100%); height: 50px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.88); font: inherit; font-size: 14.5px; font-weight: 650; cursor: pointer; transition: background-color 220ms ease, opacity 200ms ease; }
+.vono-enr-owner:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.vono-enr-owner:disabled { opacity: 0.5; cursor: default; }
+.vono-enr-owner svg { color: #ffc857; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vono-enr-dots i { animation: none; }
+  .vono-enr-tile, .vono-enr-form { transition: none; animation: none; }
+}
+@media (max-width: 560px) {
+  .vono-enr-tile { width: 164px; padding-inline: 10px; }
+  .vono-enr-tile b { font-size: 18px; }
+  .vono-enr-tile small { font-size: 12px; white-space: normal; text-align: center; }
+  .vono-enr-row { grid-template-columns: 1fr; }
+}
