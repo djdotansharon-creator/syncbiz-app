@@ -72,7 +72,8 @@ export async function touchEnrollmentSeen(id: string): Promise<void> {
 }
 
 async function countApprovedPlayers(tx: Prisma.TransactionClient | typeof prisma, workspaceId: string, exceptId?: string): Promise<number> {
-  return tx.deviceEnrollment.count({ where: { workspaceId, status: "approved", approvedRole: "PLAYER", ...(exceptId ? { id: { not: exceptId } } : {}) } });
+  // the owner's own computer plays like any player but is a gift — it never takes a seat of the paid allocation (owner 2026-10-28)
+  return tx.deviceEnrollment.count({ where: { workspaceId, status: "approved", approvedRole: "PLAYER", OR: [{ playerClass: null }, { playerClass: { not: "owner" } }], ...(exceptId ? { id: { not: exceptId } } : {}) } });
 }
 
 export async function getAllocation(workspaceId: string, cfg?: EnrollmentConfig): Promise<Allocation> {
@@ -172,33 +173,36 @@ export async function searchBranchesForEnrollment(workspaceId: string, query: st
   return any === 0 && "default".includes(q.toLowerCase()) ? [{ id: "default", name: "Default", city: "" }] : [];
 }
 
+/** The owner's own computer (owner 2026-10-28): the normal interface with every control, able to play like a player, for every branch (no narrowing) — and a gift: it never takes a Player seat (`playerClass: "owner"`). */
+function ownerDeviceData(userId: string, now: Date, ttlDays: number, grandfathered = false) {
+  return {
+    status: "approved",
+    requestedRole: "PLAYER",
+    approvedRole: "PLAYER",
+    playerClass: "owner",
+    requestedByUserId: userId,
+    requestedBranchId: null as string | null,
+    approvedBranchIds: [] as string[],
+    note: "",
+    decisionNote: "owner",
+    decidedByUserId: userId,
+    decidedAt: now,
+    grandfathered,
+    requestedAt: now,
+    expiresAt: computeExpiresAt(now, ttlDays),
+    lastSeenAt: now,
+  };
+}
+
 /** The workspace ADMIN approves THIS device himself — "I'm the owner" (owner 2026-10-28): the one who approves everyone else does not wait for someone else to approve his new computer.
- *  A control device for every branch: a REMOTE with no branch narrowing, never counted in the Player allocation. The route checks that the caller is an admin; the audit log records it as a self-approval. */
+ *  See `ownerDeviceData`. The route checks that the caller is an admin; the audit log records it as a self-approval. */
 export async function approveOwnDevice(args: { workspaceId: string; userId: string; durableDeviceId: string; platform: EnrollmentPlatform; label: string; ip?: string; now?: Date }): Promise<EnrollmentRow> {
   const now = args.now ?? new Date();
   const cfg = await getEnrollmentConfig(args.workspaceId);
   if (!cfg.enabled) throw new EnrollmentError("enrollment_disabled", 409);
   const existing = await getEnrollmentByDevice(args.workspaceId, args.durableDeviceId);
   if (existing && effectiveStatus(existing, now) === "approved") return existing;
-  const data = {
-    status: "approved",
-    platform: args.platform,
-    requestedRole: "REMOTE",
-    approvedRole: "REMOTE",
-    playerClass: null,
-    label: args.label,
-    requestedByUserId: args.userId,
-    requestedBranchId: null,
-    approvedBranchIds: [] as string[],
-    note: "",
-    decisionNote: "owner",
-    decidedByUserId: args.userId,
-    decidedAt: now,
-    grandfathered: false,
-    requestedAt: now,
-    expiresAt: computeExpiresAt(now, cfg.ttlDays),
-    lastSeenAt: now,
-  };
+  const data = { ...ownerDeviceData(args.userId, now, cfg.ttlDays), platform: args.platform, label: args.label };
   return prisma.$transaction(async (tx) => {
     const row = await tx.deviceEnrollment.upsert({
       where: { workspaceId_durableDeviceId: { workspaceId: args.workspaceId, durableDeviceId: args.durableDeviceId } },
@@ -212,7 +216,7 @@ export async function approveOwnDevice(args: { workspaceId: string; userId: stri
       workspaceId: args.workspaceId,
       targetUserId: row.id,
       ipAddress: args.ip || null,
-      metadata: { durableDeviceId: args.durableDeviceId, role: "REMOTE", branchIds: [], self: true, owner: true },
+      metadata: { durableDeviceId: args.durableDeviceId, role: "PLAYER", playerClass: "owner", branchIds: [], self: true, owner: true },
     });
     return row;
   });
@@ -306,7 +310,7 @@ export async function listEnrollments(args: { workspaceId: string; actor: Actor;
       canDecide: actorCanDecide(args.actor, ids),
     };
   });
-  const allocation = allocationState(config.maxPlayers, rows.filter((r) => r.status === "approved" && r.approvedRole === "PLAYER").length);
+  const allocation = allocationState(config.maxPlayers, rows.filter((r) => r.status === "approved" && r.approvedRole === "PLAYER" && r.playerClass !== "owner").length);
   return { items, pendingCount: items.filter((i) => i.status === "pending").length, allocation, config };
 }
 
@@ -389,16 +393,15 @@ export const revokeEnrollment = (a: { workspaceId: string; actor: Actor; id: str
  * Switch enrollment on for a workspace. Nothing already running goes dark: every existing StationDevice becomes an approved, grandfathered PLAYER of its branch, and the
  * enabling admin's own device (when given) becomes an approved, grandfathered REMOTE so the admin is never locked out of the screen that approves the others.
  */
-export async function enableEnrollment(args: { workspaceId: string; actorUserId: string; ttlDays?: number; ownDeviceId?: string | null; ownDeviceLabel?: string; /** what the admin's own screen is right now: the player of the branch (PLAYER) or only a controller (REMOTE, the default) */ ownDeviceRole?: "PLAYER" | "REMOTE"; ip?: string; now?: Date }): Promise<{ grandfatheredStations: number }> {
+export async function enableEnrollment(args: { workspaceId: string; actorUserId: string; ttlDays?: number; ownDeviceId?: string | null; ownDeviceLabel?: string; ip?: string; now?: Date }): Promise<{ grandfatheredStations: number }> {
   if (!isEnrollmentEnvEnabled()) throw new EnrollmentError("enrollment_not_available", 409, "The environment flag SYNCBIZ_DEVICE_ENROLLMENT is not set on this server.");
   const now = args.now ?? new Date();
   const ttl = clampTtlDays(args.ttlDays ?? DEFAULT_TTL_DAYS);
   return prisma.$transaction(async (tx) => {
-    const ent = await tx.workspaceEntitlement.upsert({
+    await tx.workspaceEntitlement.upsert({
       where: { workspaceId: args.workspaceId },
       create: { workspaceId: args.workspaceId, status: "TRIALING", planCode: "trial", trialEndsAt: new Date(now.getTime() + 30 * 86_400_000), enrollmentEnabled: true, enrollmentTtlDays: ttl },
       update: { enrollmentEnabled: true, enrollmentTtlDays: ttl },
-      select: { maxPlayers: true },
     });
     const stations = await tx.stationDevice.findMany({ where: { workspaceId: args.workspaceId }, select: { durableDeviceId: true, branchId: true, platform: true, appVersion: true } });
     let created = 0;
@@ -412,14 +415,12 @@ export async function enableEnrollment(args: { workspaceId: string; actorUserId:
     }
     const own = (args.ownDeviceId ?? "").trim();
     if (own) {
-      // the admin who switches it on is never locked out of the screen that approves the others: an existing approved row is kept, anything else (pending / rejected / revoked / expired) becomes approved —
-      // as the PLAYER it is right now (a browser that plays the branch's music keeps playing; it takes one seat of the paid allocation, and only if one is free), otherwise as a Remote. Not narrowed to a branch (as today).
+      // the admin who switches it on is never locked out of the screen that approves the others: an existing approved row is kept, anything else (pending / rejected / revoked / expired) becomes approved as the
+      // OWNER'S computer — the normal interface with every control, able to play, for every branch, and never counted as a Player of the paid allocation.
       const mine = await tx.deviceEnrollment.findUnique({ where: { workspaceId_durableDeviceId: { workspaceId: args.workspaceId, durableDeviceId: own } }, select: { id: true, status: true } });
-      const seatFree = args.ownDeviceRole === "PLAYER" && (await countApprovedPlayers(tx, args.workspaceId)) < ent.maxPlayers;
-      const role = seatFree ? "PLAYER" : "REMOTE";
-      const base = { status: "approved", requestedRole: role, approvedRole: role, playerClass: role === "PLAYER" ? "browser" : null, approvedBranchIds: [] as string[], decidedByUserId: args.actorUserId, decidedAt: now, grandfathered: true, expiresAt: computeExpiresAt(now, ttl) };
+      const base = ownerDeviceData(args.actorUserId, now, ttl, true);
       if (!mine) {
-        await tx.deviceEnrollment.create({ data: { workspaceId: args.workspaceId, durableDeviceId: own, platform: "browser", label: (args.ownDeviceLabel ?? "Admin's device").slice(0, 80), requestedByUserId: args.actorUserId, requestedAt: now, ...base } });
+        await tx.deviceEnrollment.create({ data: { workspaceId: args.workspaceId, durableDeviceId: own, platform: "browser", label: (args.ownDeviceLabel ?? "Admin's device").slice(0, 80), ...base } });
       } else if (mine.status !== "approved") {
         await tx.deviceEnrollment.update({ where: { id: mine.id }, data: base });
       }

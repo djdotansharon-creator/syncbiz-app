@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import "@/components/control-room/device-enrollment.css";
 import { useLocale } from "@/lib/locale-context";
-import { useDevicePlayer } from "@/lib/device-player-context";
 import { claimDeviceId } from "@/lib/device-id";
 import { getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
@@ -49,7 +48,6 @@ type Listing = {
   config: { enabled: boolean; ttlDays: number };
   actor: { isAdmin: boolean; isManager: boolean };
 };
-type Settings = { available: boolean; enabled: boolean; ttlDays: number };
 
 const HE = {
   title: "בקשות חדשות",
@@ -57,12 +55,9 @@ const HE = {
   tileNone: "אין בקשות שממתינות",
   tileSome: (n: number) => (n === 1 ? "בקשה אחת ממתינה" : `${n} בקשות ממתינות`),
   tileOff: "אישור מכשירים חדשים — כבוי",
-  offTitle: "אישור מכשירים חדשים",
-  offText: "כשזה דלוק, מחשב או טלפון חדש שנכנס לחשבון מבקש ממך אישור לפני שהוא מנגן או שולט. אתה מחליט אם הוא נגן או שלט רחוק.",
-  offNote: "ההדלקה מאשרת אוטומטית את כל התחנות שכבר פועלות ואת המכשיר הזה. כל דפדפן או טלפון אחר יתבקש לבקש אישור.",
-  turnOn: "הדלקה",
-  turnOff: "כיבוי",
-  confirmOff: "לכבות? המכשירים יחזרו להתנהג כמו קודם.",
+  switchLabel: "אישור מכשירים חדשים",
+  infoLabel: "הסבר",
+  info: (d: number) => `כשזה דלוק, מחשב או טלפון חדש שנכנס לחשבון מבקש אישור לפני שהוא מנגן או שולט. התחנות שכבר פועלות והמחשב הזה מאושרים אוטומטית; כל מכשיר אחר יבקש. בקשה שלא טופלה פגה אחרי ${d} ימים. כשזה כבוי, הכול כמו קודם.`,
   back: "חזרה לסניפים",
   allocation: "נגנים",
   of: "מתוך",
@@ -97,9 +92,7 @@ const HE = {
   address: "כתובת",
   brand: "מותג",
   fromAccount: "מהחשבון",
-  more: "עוד",
-  expiresAfter: (d: number) => `בקשה שלא טופלה פגה אחרי ${d} ימים`,
-  turnOffMenu: "כיבוי אישור מכשירים",
+  ownerDevice: "המחשב של הבעלים",
   errors: {
     allocation_full: "ההקצאה מלאה — אי אפשר לאשר עוד נגן. אפשר לאשר כשלט רחוק.",
     player_needs_exactly_one_branch: "נגן שייך לסניף אחד — בחרו סניף.",
@@ -116,12 +109,9 @@ const EN: typeof HE = {
   tileNone: "Nothing is waiting",
   tileSome: (n: number) => (n === 1 ? "1 request waiting" : `${n} requests waiting`),
   tileOff: "Approving new devices — off",
-  offTitle: "Approve new devices",
-  offText: "When this is on, a new computer or phone that signs in to the account asks you before it plays or controls anything. You decide whether it is a Player or a Remote.",
-  offNote: "Turning it on automatically approves every station that already runs and this device. Any other browser or phone will be asked to request approval.",
-  turnOn: "Turn on",
-  turnOff: "Turn off",
-  confirmOff: "Turn it off? Devices go back to behaving as before.",
+  switchLabel: "Approve new devices",
+  infoLabel: "Explain",
+  info: (d: number) => `When this is on, a new computer or phone that signs in to the account asks for approval before it plays or controls anything. The stations that already run and this computer are approved automatically; any other device asks. An unhandled request expires after ${d} days. When it is off, everything is as before.`,
   back: "Back to branches",
   allocation: "Players",
   of: "of",
@@ -156,9 +146,7 @@ const EN: typeof HE = {
   address: "Address",
   brand: "Brand",
   fromAccount: "From the account",
-  more: "More",
-  expiresAfter: (d: number) => `An unhandled request expires after ${d} days`,
-  turnOffMenu: "Turn off device approval",
+  ownerDevice: "The owner's computer",
   errors: {
     allocation_full: "The allocation is full — another Player cannot be approved. You can approve it as a Remote.",
     player_needs_exactly_one_branch: "A Player belongs to one branch — choose a branch.",
@@ -196,24 +184,16 @@ function useEnrollmentData() {
   const he = locale === "he";
   const t: Dict = he ? HE : EN;
   const [listing, setListing] = useState<Listing | null>(null);
-  const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // a request that typed a branch name which does not exist yet: the approver picks the real branch (the list is read only when such a request is waiting)
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
   const [chosen, setChosen] = useState<Record<string, string>>({});
-  // what THIS screen is right now: the player of its branch (then it keeps playing after the switch-on) or only a controller — same test as the role icon in the top bar
-  const ctx = useDevicePlayer();
-  const isPlayerNow = !!ctx && ctx.isActive && ctx.isBranchConnected && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
 
   const load = useCallback(async () => {
     const l = await getJson<Listing>("/api/control-room/enrollments");
     if (l.ok && l.data) {
       setListing(l.data);
-      if (l.data.actor.isAdmin) {
-        const s = await getJson<Settings>("/api/control-room/enrollment-settings");
-        if (s.ok && s.data) setSettings(s.data);
-      }
     } else {
       setListing(null);
     }
@@ -263,20 +243,19 @@ function useEnrollmentData() {
     } catch {
       ownId = undefined;
     }
-    const r = await postJson("/api/control-room/enrollment-settings", { enabled: true, ownDeviceId: ownId, ownDeviceLabel: he ? "המכשיר של המנהל" : "Admin's device", ownDeviceRole: isPlayerNow ? "PLAYER" : "REMOTE" });
+    const r = await postJson("/api/control-room/enrollment-settings", { enabled: true, ownDeviceId: ownId, ownDeviceLabel: he ? "המכשיר של המנהל" : "Admin's device" });
     if (!r.ok) setErr(t.errors[r.error ?? "other"] ?? t.errors.other!);
     setBusy(null);
     await changed();
   };
   const switchOff = async () => {
-    if (!window.confirm(t.confirmOff)) return;
     setBusy("settings");
     await postJson("/api/control-room/enrollment-settings", { enabled: false });
     setBusy(null);
     await changed();
   };
 
-  return { he, t, listing, settings, busy, err, branches, chosen, setChosen, act, switchOn, switchOff };
+  return { he, t, listing, busy, err, branches, chosen, setChosen, act, switchOn, switchOff };
 }
 type Data = ReturnType<typeof useEnrollmentData>;
 
@@ -349,6 +328,7 @@ function RequestRow({ it, d }: { it: Item; d: Data }): ReactElement {
 function ApprovedRow({ it, d }: { it: Item; d: Data }): ReactElement {
   const { t, busy, act } = d;
   const mine = typeof window === "undefined" ? null : getEnrollmentDeviceId();
+  const isOwner = it.playerClass === "owner";
   const scope = it.approvedBranchIds.length > 0 ? it.approvedBranchIds.map((i) => it.branchNames[i] ?? i).join(", ") : t.allBranches;
   return (
     <li className="cr-enr-item is-quiet" data-role={it.approvedRole === "PLAYER" ? "player" : "remote"}>
@@ -356,8 +336,8 @@ function ApprovedRow({ it, d }: { it: Item; d: Data }): ReactElement {
       <div className="cr-enr-txt">
         <b><bdi>{who(it, t)}</bdi></b>
         <small>
-          {it.approvedRole === "PLAYER" ? t.player : t.remote}
-          {it.approvedRole === "PLAYER" ? ` · ${it.playerClass === "station" ? t.station : t.browserPlayer}` : ""}
+          {isOwner ? t.ownerDevice : it.approvedRole === "PLAYER" ? t.player : t.remote}
+          {!isOwner && it.approvedRole === "PLAYER" ? ` · ${it.playerClass === "station" ? t.station : t.browserPlayer}` : ""}
           {scope ? ` · ${scope}` : ""}
           {it.label && it.label !== who(it, t) ? ` · ${it.label}` : ""}
           {it.grandfathered ? ` · ${t.existing}` : ""}
@@ -390,31 +370,28 @@ function Meter({ d }: { d: Data }): ReactElement | null {
   );
 }
 
-/** the screen's one quiet "more" icon (admin only): how long a request lives, and the off switch — kept out of the way so the screen shows requests and nothing else */
-function SettingsMenu({ d }: { d: Data }): ReactElement | null {
-  const { t, listing, busy, switchOff } = d;
-  const [open, setOpen] = useState(false);
+/** device approval on / off (admin only) — just a switch; the explanation is behind a small "i" (owner 2026-10-28: "a simple switch and that's it") */
+function SwitchControl({ d }: { d: Data }): ReactElement | null {
+  const { t, listing, busy, switchOn, switchOff } = d;
+  const [info, setInfo] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    if (!info) return;
+    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setInfo(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setInfo(false); };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-  if (!listing || !listing.config.enabled || !listing.actor.isAdmin) return null;
+  }, [info]);
+  if (!listing || !listing.actor.isAdmin) return null;
+  const on = listing.config.enabled;
   return (
-    <div ref={rootRef} className="cr-pop">
-      <button type="button" className={`cr-bp-icon${open ? " is-on" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={t.more} title={t.more} onClick={() => setOpen((v) => !v)}>
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden><circle cx="5.5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="18.5" cy="12" r="1.7" /></svg>
+    <div ref={rootRef} className="cr-enr-switchwrap">
+      <button type="button" role="switch" aria-checked={on} aria-label={t.switchLabel} className="cr-switch" data-on={on ? "1" : undefined} disabled={busy !== null} onClick={() => void (on ? switchOff() : switchOn())}>
+        <i aria-hidden />
       </button>
-      {open ? (
-        <div className="cr-pop-menu" role="menu">
-          <p className="cr-enr-menu-note">{t.expiresAfter(listing.config.ttlDays)}</p>
-          <button type="button" role="menuitem" className="cr-pop-opt cr-pop-opt--danger" disabled={busy !== null} onClick={() => { setOpen(false); void switchOff(); }}>{t.turnOffMenu}</button>
-        </div>
-      ) : null}
+      <button type="button" className="cr-enr-i" aria-label={t.infoLabel} aria-expanded={info} onClick={() => setInfo((v) => !v)}>i</button>
+      {info ? <p className="cr-enr-infopop" role="note">{t.info(listing.config.ttlDays)}</p> : null}
     </div>
   );
 }
@@ -422,8 +399,7 @@ function SettingsMenu({ d }: { d: Data }): ReactElement | null {
 /** the "New requests" screen: opens in the list's place (like a branch does); requests grouped by branch, a branch name opens that branch on the map */
 export function EnrollmentRequestsPanel({ onBack, onOpenBranch }: { onBack: () => void; onOpenBranch: (branchId: string) => void }): ReactElement {
   const d = useEnrollmentData();
-  const { he, t, listing, settings, busy, err, switchOn, switchOff } = d;
-  const [confirmOn, setConfirmOn] = useState(false);
+  const { he, t, listing, err } = d;
   const dir = he ? "rtl" : "ltr";
 
   const head = (
@@ -440,7 +416,7 @@ export function EnrollmentRequestsPanel({ onBack, onOpenBranch }: { onBack: () =
       </div>
       <span className="flex-1" />
       <Meter d={d} />
-      <SettingsMenu d={d} />
+      <SwitchControl d={d} />
     </header>
   );
 
@@ -452,29 +428,12 @@ export function EnrollmentRequestsPanel({ onBack, onOpenBranch }: { onBack: () =
     );
   }
 
-  // switched off: a calm card that explains and offers to turn it on (admin only)
+  // switched off: just the header with the switch (the explanation is behind the "i")
   if (!listing.config.enabled) {
     return (
       <div className="cr-bp cr-enrp" dir={dir}>
         {head}
-        <section className="cr-enr">
-          <h3>{t.offTitle}</h3>
-          <p>{t.offText}</p>
-          {confirmOn ? <p className="cr-enr-note">{t.offNote}</p> : null}
-          {listing.actor.isAdmin && settings?.available ? (
-            <div className="cr-enr-actions">
-              {confirmOn ? (
-                <>
-                  <button type="button" className="cr-enr-btn is-main" disabled={busy !== null} onClick={() => void switchOn()}>{t.turnOn}</button>
-                  <button type="button" className="cr-enr-btn" onClick={() => setConfirmOn(false)}>×</button>
-                </>
-              ) : (
-                <button type="button" className="cr-enr-btn is-main" onClick={() => setConfirmOn(true)}>{t.turnOn}</button>
-              )}
-            </div>
-          ) : null}
-          {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
-        </section>
+        {err ? <p className="cr-enr-err" role="alert">{err}</p> : null}
       </div>
     );
   }

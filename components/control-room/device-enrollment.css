@@ -70,3 +70,15 @@ button.cr-enr-gname:focus-visible { outline: 2px solid #fff; outline-offset: 2px
 .cr-enr-menu-note { margin: 0; padding: 8px 12px 10px; max-width: 240px; font-size: 12.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.55); }
 .cr-pop-opt:disabled { opacity: 0.4; cursor: default; }
 
+/* the on / off switch and its "i" (owner 2026-10-28: a simple switch, the explanation only if you ask) */
+.cr-enr-switchwrap { position: relative; display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.cr-switch { position: relative; width: 48px; height: 29px; padding: 0; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.2); cursor: pointer; transition: background-color 240ms ease; }
+.cr-switch i { position: absolute; top: 3px; inset-inline-start: 3px; width: 23px; height: 23px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: inset-inline-start 240ms cubic-bezier(0.22, 1, 0.36, 1); }
+.cr-switch[data-on="1"] { background: #30d158; }
+.cr-switch[data-on="1"] i { inset-inline-start: 22px; }
+.cr-switch:disabled { opacity: 0.5; cursor: default; }
+.cr-switch:focus-visible, .cr-enr-i:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cr-enr-i { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.7); font: italic 700 13px/1 Georgia, "Times New Roman", serif; cursor: pointer; transition: background-color 200ms ease, color 200ms ease; }
+.cr-enr-i:hover, .cr-enr-i[aria-expanded="true"] { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.cr-enr-infopop { position: absolute; z-index: 30; top: calc(100% + 10px); inset-inline-end: 0; width: 300px; max-width: 80vw; margin: 0; padding: 14px 16px; border-radius: 18px; background: rgba(34, 34, 40, 0.96); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); font-size: 13.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.8); text-align: start; }
+
