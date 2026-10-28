@@ -32,3 +32,11 @@ export function wsTokenUrl(): string {
   const id = getEnrollmentDeviceId();
   return id ? `/api/auth/ws-token?deviceId=${encodeURIComponent(id)}` : "/api/auth/ws-token";
 }
+
+/** a short, human name for this device ("Chrome on Windows") — shown to the manager in a request and in the device details */
+export function detectDeviceLabel(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} on ${os}` : browser;
+}
