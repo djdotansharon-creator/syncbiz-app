@@ -172,7 +172,9 @@ function isBrowserBranchControlsOnlyRoute(pathname: string): boolean {
   // Operator/admin categories reachable from the top-nav gear menu — the IRON
   // RULE covers ALL top-nav routes, so they keep the socket (AudioPlayer lives at
   // the app-shell level, so music continues as long as the socket survives).
-  for (const r of ["/dashboard", "/owner", "/logs", "/architecture"]) {
+  // Jingles and the lock-screen design joined the top bar after this rule was written (owner 2026-10-29: on those two pages a Remote lost the song's blurred background — the socket closed, so the mirrored
+  // state was gone — and a browser player dropped out of the branch). They are top-nav routes like the others, so they keep the socket too.
+  for (const r of ["/dashboard", "/owner", "/logs", "/architecture", "/jingles", "/display-design"]) {
     if (pathname === r || pathname.startsWith(`${r}/`)) return true;
   }
   return false;
