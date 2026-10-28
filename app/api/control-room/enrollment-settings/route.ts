@@ -6,8 +6,8 @@ import { isEnrollmentEnvEnabled } from "@/lib/device-enrollment";
 /**
  * Control Room — enrollment settings of THIS workspace (docs/DEVICE_ENROLLMENT_DESIGN.md §3). Admin only.
  *  GET  → { available (the server's env flag), enabled, ttlDays, allocation }
- *  POST { enabled?, ttlDays?, ownDeviceId?, ownDeviceLabel?, ownDeviceRole?, maxPlayers? }
- *    enabled:true  → switches it on and approves what already runs (every existing station + the admin's own device) so nothing goes dark
+ *  POST { enabled?, ttlDays?, ownDeviceId?, ownDeviceLabel?, maxPlayers? }
+ *    enabled:true  → switches it on and approves what already runs (every existing station + the admin's own device) so nothing goes dark (the admin's own computer becomes the owner's computer: every control, able to play, no Player seat)
  *    maxPlayers    → the paid Player allocation — platform SUPER_ADMIN only
  */
 export async function GET() {
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { caller } = auth;
   if (!caller.actor.isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  let body: { enabled?: unknown; ttlDays?: unknown; ownDeviceId?: unknown; ownDeviceLabel?: unknown; ownDeviceRole?: unknown; maxPlayers?: unknown };
+  let body: { enabled?: unknown; ttlDays?: unknown; ownDeviceId?: unknown; ownDeviceLabel?: unknown; maxPlayers?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
         ttlDays: typeof body.ttlDays === "number" ? body.ttlDays : undefined,
         ownDeviceId: own.length >= 8 && own.length <= 128 ? own : null,
         ownDeviceLabel: typeof body.ownDeviceLabel === "string" ? body.ownDeviceLabel : undefined,
-        ownDeviceRole: body.ownDeviceRole === "PLAYER" ? "PLAYER" : "REMOTE",
         ip,
       });
     } else if (body.enabled === false) {

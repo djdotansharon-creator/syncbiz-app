@@ -69,12 +69,12 @@ async function main() {
     const cfg = await store.getEnrollmentConfig(ws.id);
     assert("D3 switching it on approves every existing station and the admin's own device (grandfathered), 7-day expiry by default", on.grandfatheredStations === 2 && cfg.enabled && cfg.ttlDays === 7);
     const list0 = await store.listEnrollments({ workspaceId: ws.id, actor: admin });
-    assert("D4 the list shows 3 approved devices; 2 players are counted (the admin's remote is not)", list0.items.length === 3 && list0.items.every((i) => i.status === "approved" && i.grandfathered) && list0.allocation.used === 2);
+    assert("D4 the list shows 3 approved devices; 2 players are counted (the owner's own computer is not)", list0.items.length === 3 && list0.items.every((i) => i.status === "approved" && i.grandfathered) && list0.allocation.used === 2);
     assert("D5 switching it on twice changes nothing (idempotent)", (await store.enableEnrollment({ workspaceId: ws.id, actorUserId: owner.id, ownDeviceId: devices.admin })).grandfatheredStations === 0 && (await store.listEnrollments({ workspaceId: ws.id, actor: admin })).items.length === 3);
     // the admin's own device, if it had been revoked, comes back when enrollment is switched on again (the admin is never locked out)
     await prisma.deviceEnrollment.updateMany({ where: { workspaceId: ws.id, durableDeviceId: devices.admin }, data: { status: "revoked", approvedRole: null } });
     await store.enableEnrollment({ workspaceId: ws.id, actorUserId: owner.id, ownDeviceId: devices.admin });
-    assert("D5b a revoked admin device is approved again when enrollment is switched on (no lock-out)", (await store.getEnrollmentByDevice(ws.id, devices.admin))?.status === "approved" && (await store.getEnrollmentByDevice(ws.id, devices.admin))?.approvedRole === "REMOTE");
+    assert("D5b a revoked admin device is approved again, as the owner\'s computer, when enrollment is switched on (no lock-out)", (await store.getEnrollmentByDevice(ws.id, devices.admin))?.status === "approved" && (await store.getEnrollmentByDevice(ws.id, devices.admin))?.approvedRole === "PLAYER" && (await store.getEnrollmentByDevice(ws.id, devices.admin))?.playerClass === "owner");
     await store.setMaxPlayers({ workspaceId: ws.id, actorUserId: owner.id, maxPlayers: 3 });
 
     // ── a remote asks, a manager decides ──
@@ -126,17 +126,18 @@ async function main() {
       await prisma.auditLog.deleteMany({ where: { workspaceId: ws2.id } });
       await prisma.workspace.delete({ where: { id: ws2.id } }).catch(() => undefined);
     }
-    // ── the admin's own screen keeps the role it has when approvals are switched on (owner 2026-10-28: "why am I a remote? my computer is the player") ──
+    // ── the owner's own computer: the normal interface, able to play, and a gift — never a Player seat (owner 2026-10-28) ──
     const ws3 = await prisma.workspace.create({ data: { name: `Enroll test3 ${tag}`, slug: `enroll-test3-${tag}`, ownerId: owner.id } });
     try {
       const own3 = mk("web-admin3");
-      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3, ownDeviceRole: "PLAYER" });
+      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3 });
       const r3 = await store.getEnrollmentByDevice(ws3.id, own3);
-      assert("D35 the admin's own screen, when it is the player at switch-on, stays a PLAYER (browser class, not narrowed to one branch) and takes one seat", r3?.approvedRole === "PLAYER" && r3?.playerClass === "browser" && r3?.approvedBranchIds.length === 0 && r3?.grandfathered === true && (await store.getAllocation(ws3.id)).used === 1);
+      assert("D35 the admin's own computer at switch-on becomes the owner's computer: a PLAYER of class owner (it plays as usual), not narrowed to a branch, and it takes NO seat", r3?.approvedRole === "PLAYER" && r3?.playerClass === "owner" && r3?.approvedBranchIds.length === 0 && r3?.grandfathered === true && (await store.getAllocation(ws3.id)).used === 0);
       const own3b = mk("web-admin3b");
-      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3b, ownDeviceRole: "PLAYER" });
-      const r3b = await store.getEnrollmentByDevice(ws3.id, own3b);
-      assert("D36 with no free seat the admin's screen becomes a Remote (never over the paid allocation); a screen that is not the player is a Remote too", r3b?.approvedRole === "REMOTE" && r3b?.playerClass === null && (await store.getAllocation(ws3.id)).used === 1);
+      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3b });
+      const player3 = await store.submitRequest({ workspaceId: ws3.id, userId: staff.userId, input: input(mk("web-seat3"), "PLAYER", "browser", "default"), ip: "", userAgent: "" });
+      const approved3 = await store.approveEnrollment({ workspaceId: ws3.id, actor: admin, id: player3.id, input: { role: "PLAYER", branchIds: ["default"], mode: "standby", note: "" } });
+      assert("D36 two owner computers do not use the seat: the one real Player still fits, and only it is counted", approved3.approvedRole === "PLAYER" && (await store.getAllocation(ws3.id)).used === 1 && (await store.listEnrollments({ workspaceId: ws3.id, actor: admin })).allocation.used === 1);
     } finally {
       await prisma.auditLog.deleteMany({ where: { workspaceId: ws3.id } });
       await prisma.workspace.delete({ where: { id: ws3.id } }).catch(() => undefined);
@@ -169,10 +170,10 @@ async function main() {
     const ownDev = mk("web-owner-new");
     const usedBefore = (await store.getAllocation(ws.id)).used;
     const ownRow = await store.approveOwnDevice({ workspaceId: ws.id, userId: owner.id, durableDeviceId: ownDev, platform: "browser", label: "Owner · Chrome on Mac" });
-    assert("D38 the owner's new device is approved at once as a control device for EVERY branch (Remote, no narrowing) and takes no Player seat", ownRow.status === "approved" && ownRow.approvedRole === "REMOTE" && ownRow.approvedBranchIds.length === 0 && ownRow.playerClass === null && (await store.getAllocation(ws.id)).used === usedBefore);
+    assert("D38 the owner's new device is approved at once as the owner's computer for EVERY branch — a PLAYER of class owner (the normal interface, it can play), no branch narrowing, and it takes no seat", ownRow.status === "approved" && ownRow.approvedRole === "PLAYER" && ownRow.playerClass === "owner" && ownRow.approvedBranchIds.length === 0 && ownRow.grandfathered === false && (await store.getAllocation(ws.id)).used === usedBefore);
     assert("D39 it is recorded in the audit log as a self-approval, and asking again changes nothing", (await prisma.auditLog.count({ where: { workspaceId: ws.id, action: "device.enroll_approve", entityId: ownRow.id } })) === 1 && (await store.approveOwnDevice({ workspaceId: ws.id, userId: owner.id, durableDeviceId: ownDev, platform: "browser", label: "x" })).id === ownRow.id);
     const mgrWho = rules.enrollmentClaimFor(ownRow, new Date());
-    assert("D40 its token claim is REMOTE (the WS server forces CONTROL), with no branch narrowing", mgrWho === "REMOTE" && rules.restrictBranches(["b1", "b2"], ownRow.approvedBranchIds).length === 2);
+    assert("D40 its token claim is PLAYER (the WS server does not force CONTROL on it — it plays as usual), with no branch narrowing", mgrWho === "PLAYER" && rules.restrictBranches(["b1", "b2"], ownRow.approvedBranchIds).length === 2);
 
     // ── audit + switching off ──
     const actions = (await prisma.auditLog.findMany({ where: { workspaceId: ws.id }, select: { action: true } })).map((a) => a.action);

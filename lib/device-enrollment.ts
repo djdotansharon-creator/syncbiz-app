@@ -16,8 +16,8 @@ export type EnrollmentRole = (typeof ENROLLMENT_ROLES)[number];
 export const ENROLLMENT_PLATFORMS = ["browser", "desktop", "android", "ios", "streamer"] as const;
 export type EnrollmentPlatform = (typeof ENROLLMENT_PLATFORMS)[number];
 
-/** a station is the desktop app / streamer; a browser player plays only while its tab is open (design doc D-B1) */
-export type PlayerClass = "station" | "browser";
+/** a station is the desktop app / streamer; a browser player plays only while its tab is open (design doc D-B1); "owner" is the main admin's own computer — it plays like any player but is a gift: it is never counted in the paid allocation (owner 2026-10-28) */
+export type PlayerClass = "station" | "browser" | "owner";
 
 export const DEFAULT_TTL_DAYS = 7;
 export const MIN_TTL_DAYS = 1;
@@ -228,7 +228,7 @@ export function toPublicStatus(row: StatusRow | null, now: Date): PublicStatus {
   if (!row) return { enforced: true, status: "unknown" };
   const status = effectiveStatus(row, now);
   if (status === "approved" && (row.approvedRole === "PLAYER" || row.approvedRole === "REMOTE")) {
-    return { enforced: true, status: "approved", role: row.approvedRole, playerClass: row.playerClass === "station" || row.playerClass === "browser" ? row.playerClass : null, branchIds: [...row.approvedBranchIds] };
+    return { enforced: true, status: "approved", role: row.approvedRole, playerClass: row.playerClass === "station" || row.playerClass === "browser" || row.playerClass === "owner" ? row.playerClass : null, branchIds: [...row.approvedBranchIds] };
   }
   if (status === "approved") return { enforced: true, status: "unknown" };
   return { enforced: true, status, requestedAt: row.requestedAt.toISOString(), expiresAt: row.expiresAt.toISOString(), ...(row.decisionNote ? { decisionNote: row.decisionNote } : {}) };
