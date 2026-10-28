@@ -27,6 +27,7 @@ const panel = read("components/control-room/device-enrollment-panel.tsx");
 const gateCss = read("components/enrollment-gate.css");
 const ownerRoute = read("app/api/devices/enrollment/owner/route.ts");
 const statusRoute = read("app/api/devices/enrollment/status/route.ts");
+const details = read("components/device-details.tsx");
 const countRoute = read("app/api/control-room/enrollments/pending-count/route.ts");
 const branchRoute = read("app/api/devices/enrollment/branches/route.ts");
 const shell = read("components/app-shell.tsx");
@@ -54,6 +55,8 @@ assert("H18 the owner's computer (switch-on's own device and the 'I'm the owner'
 assert("H19 the request screen has no card, no frames and no squares behind the icons (owner 2026-10-28): two big icons with just their names, no explanations; the chosen one glides to the middle and grows, the other fades away", !/vono-enr-card/.test(gate + gateCss) && !/<small>\{t\.(player|remote)Hint\}/.test(gate) && !/Hint:/.test(gate.slice(gate.indexOf("const HE"), gate.indexOf("type Hit"))) && /\.vono-enr-tile \{[^}]*background: none/.test(gateCss) && /\.vono-enr-tile\[data-state="on"\] \.ic \{ transform: scale\(1\.22\)/.test(gateCss) && /\.vono-enr-tile\[data-state="away"\] \{ width: 0;/.test(gateCss) && !/box-shadow: inset 0 0 0 \dpx/.test(gateCss));
 assert("H20 the details follow the choice: a Player gets only the branch (+ address and brand for a NEW one) and sends no person; a Remote gives who he is and the existing branch it controls", /role === "REMOTE" \? \(\s*<>/.test(gate) && /firstName: role === "REMOTE" \? first\.trim\(\) : ""/.test(gate) && /branchAddress: picked \|\| role !== "PLAYER" \? "" : address\.trim\(\)/.test(gate) && /\{newBranch \? \(/.test(gate));
 assert("H21 'I'm the owner' is the main admin's only: the route refuses everyone else (403), the status call tells ONLY an admin it exists, the bar shows only then, and the device is the owner's computer (normal interface, can play, no seat)", /if \(!caller\.actor\.isAdmin\) return NextResponse\.json\(\{ error: "Forbidden" \}, \{ status: 403 \}\)/.test(ownerRoute) && /caller\.caller\.actor\.isAdmin\) return NextResponse\.json\(\{ \.\.\.pub, ownerAllowed: true \}/.test(statusRoute) && /st\.ownerAllowed === true/.test(gate) && /approveOwnDevice/.test(ownerRoute) && /playerClass: "owner"/.test(read("lib/device-enrollment-store.ts")));
+
+assert("H22 'Player / Remote details' (owner 2026-10-28): a row in the gear menu opens one panel that only READS — the role, the branch, what it plays / controls, the device, the approval and the account; no socket, no playback, no write", /<DeviceDetailsMenuRow onOpen=\{\(\) => \{ setMainMenuOpen\(false\); setDeviceDetailsOpen\(true\); \}\} \/>/.test(read("components/app-shell.tsx")) && /<DeviceDetailsModal open=\{deviceDetailsOpen\}/.test(read("components/app-shell.tsx")) && !/WebSocket|sendCommand|setMaster|\.play\(|method: "(PUT|PATCH|DELETE)"/.test(details) && (details.match(/method: "POST"/g) ?? []).length === 1 && /enrollment\/status/.test(details));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

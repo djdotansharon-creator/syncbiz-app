@@ -8,7 +8,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
+import { detectDeviceLabel, getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
+
+export { detectDeviceLabel };
 
 export type EnrollmentClientStatus =
   | { enforced: false; status: "disabled" }
@@ -75,14 +77,6 @@ export function detectPlatform(): "browser" | "ios" | "android" {
   if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
   if (/Android/i.test(ua)) return "android";
   return "browser";
-}
-
-/** a short, human name for this device ("Chrome on Windows") — the manager sees it in the request */
-export function detectDeviceLabel(): string {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
-  const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
-  return os ? `${browser} on ${os}` : browser;
 }
 
 export function useEnrollmentGate(): EnrollmentGateApi {
