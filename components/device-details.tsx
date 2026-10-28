@@ -12,6 +12,7 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 import { useStationBranchId } from "@/lib/station-branch";
 import { detectDeviceLabel, getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
+import { InfoIcon } from "@/components/info-icon";
 
 type Approval = { enforced: false } | { enforced: true; status: string; role?: "PLAYER" | "REMOTE"; playerClass?: string | null; branchIds?: string[] };
 type Me = { email?: string | null; accountName?: string | null; name?: string | null };
@@ -79,7 +80,7 @@ export function DeviceDetailsMenuRow({ onOpen }: { onOpen: () => void }): ReactE
   const isPlayer = !!ctx && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
   return (
     <button type="button" className="sb-kiosk-menu-row sb-devdet-row" onClick={onOpen}>
-      <span className="sb-devdet-i" aria-hidden>i</span>
+      <span className="sb-devdet-i" aria-hidden><InfoIcon size={20} /></span>
       <span>{isPlayer ? t.menuPlayer : t.menuRemote}</span>
     </button>
   );

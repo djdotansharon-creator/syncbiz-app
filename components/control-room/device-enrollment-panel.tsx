@@ -13,6 +13,7 @@ import { useLocale } from "@/lib/locale-context";
 import { claimDeviceId } from "@/lib/device-id";
 import { getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
+import { InfoIcon } from "@/components/info-icon";
 import { ENROLLMENT_CHANGED_EVENT, useEnrollmentSummary } from "@/lib/use-enrollment-summary";
 
 type Item = {
@@ -390,7 +391,7 @@ function SwitchControl({ d }: { d: Data }): ReactElement | null {
       <button type="button" role="switch" aria-checked={on} aria-label={t.switchLabel} className="cr-switch" data-on={on ? "1" : undefined} disabled={busy !== null} onClick={() => void (on ? switchOff() : switchOn())}>
         <i aria-hidden />
       </button>
-      <button type="button" className="cr-enr-i" aria-label={t.infoLabel} aria-expanded={info} onClick={() => setInfo((v) => !v)}>i</button>
+      <button type="button" className="cr-enr-i" aria-label={t.infoLabel} aria-expanded={info} onClick={() => setInfo((v) => !v)}><InfoIcon size={22} /></button>
       {info ? <p className="cr-enr-infopop" role="note">{t.info(listing.config.ttlDays)}</p> : null}
     </div>
   );
