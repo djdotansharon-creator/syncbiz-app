@@ -8,26 +8,37 @@
 .vono-enr-small { font-size: 13.5px; color: rgba(255, 255, 255, 0.45); }
 .vono-enr-state { margin: 0 0 18px; padding: 10px 16px; border-radius: 16px; background: rgba(255, 200, 87, 0.12); color: #ffd98a; font-size: 14.5px; font-weight: 600; }
 
-/* the two squares */
-.vono-enr-tiles { display: flex; justify-content: center; align-items: stretch; width: 100%; }
-.vono-enr-tile { flex: 0 0 auto; width: 236px; margin-inline: 10px; display: grid; justify-items: center; align-content: center; gap: 8px; padding: 32px 16px 28px; border: 0; border-radius: 32px; background: rgba(255, 255, 255, 0.055); color: inherit; font: inherit; white-space: nowrap; cursor: pointer;
-  transition: width 460ms cubic-bezier(0.22, 1, 0.36, 1), margin 460ms cubic-bezier(0.22, 1, 0.36, 1), padding 460ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease, transform 460ms cubic-bezier(0.22, 1, 0.36, 1), background-color 240ms ease; }
-.vono-enr-tile:hover { background: rgba(255, 255, 255, 0.095); }
-.vono-enr-tile:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 3px; }
-.vono-enr-tile .ic { display: grid; place-items: center; width: 68px; height: 68px; }
-.vono-enr-tile .ic svg { width: 100%; height: 100%; }
+/* the two icons — nothing behind them, no squares, no frames, no explanations */
+.vono-enr-tiles { display: flex; justify-content: center; align-items: flex-start; width: 100%; }
+.vono-enr-tile { flex: 0 0 auto; width: 250px; margin-inline: 14px; display: grid; justify-items: center; align-content: start; gap: 18px; padding: 8px 0; border: 0; border-radius: 28px; background: none; color: inherit; font: inherit; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: width 560ms cubic-bezier(0.22, 1, 0.36, 1), margin 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 340ms ease, transform 620ms cubic-bezier(0.22, 1, 0.36, 1); }
+.vono-enr-tile:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.55); outline-offset: 6px; }
+.vono-enr-tile .ic { display: grid; place-items: center; width: 132px; height: 132px; transition: transform 620ms cubic-bezier(0.22, 1, 0.36, 1), filter 300ms ease; }
+.vono-enr-tile .ic svg { width: 100%; height: 100%; stroke-width: 1.45; }
 .vono-enr-tile[data-kind="player"] .ic { color: #30d158; }
 .vono-enr-tile[data-kind="remote"] .ic { color: #7db8ff; }
-.vono-enr-tile b { font-size: 21px; font-weight: 700; }
-.vono-enr-tile small { font-size: 13px; color: rgba(255, 255, 255, 0.52); }
-.vono-enr-tile[data-state="on"] { transform: scale(1.08); cursor: default; }
-.vono-enr-tile[data-kind="player"][data-state="on"] { background: rgba(48, 209, 88, 0.13); }
-.vono-enr-tile[data-kind="remote"][data-state="on"] { background: rgba(125, 184, 255, 0.14); }
-.vono-enr-tile[data-state="away"] { width: 0; margin-inline: 0; padding-inline: 0; opacity: 0; transform: scale(0.9); overflow: hidden; pointer-events: none; }
+.vono-enr-tile b { font-size: 22px; font-weight: 700; letter-spacing: 0.01em; opacity: 0.88; transition: opacity 240ms ease; }
+.vono-enr-tile:hover .ic { transform: scale(1.06); }
+.vono-enr-tile:hover b { opacity: 1; }
+.vono-enr-tile[data-kind="player"]:hover .ic { filter: drop-shadow(0 0 22px rgba(48, 209, 88, 0.35)); }
+.vono-enr-tile[data-kind="remote"]:hover .ic { filter: drop-shadow(0 0 22px rgba(125, 184, 255, 0.35)); }
+/* chosen: the other one fades away, this one glides to the middle and grows */
+.vono-enr-tile[data-state="on"] { cursor: default; }
+.vono-enr-tile[data-state="on"] .ic { transform: scale(1.22); }
+.vono-enr-tile[data-state="on"]:hover .ic { transform: scale(1.22); filter: none; }
+.vono-enr-tile[data-state="on"] b { opacity: 1; }
+.vono-enr-tile[data-state="away"] { width: 0; margin-inline: 0; opacity: 0; transform: scale(0.85); overflow: hidden; pointer-events: none; }
 
-/* what the choice needs */
-.vono-enr-form { width: min(460px, 100%); margin-top: 38px; display: grid; gap: 14px; text-align: start; animation: vono-enr-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-@keyframes vono-enr-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+/* what the choice needs: opens piece by piece */
+.vono-enr-form { width: min(460px, 100%); margin-top: 46px; display: grid; gap: 14px; text-align: start; }
+.vono-enr-form > * { animation: vono-enr-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.vono-enr-form > :nth-child(1) { animation-delay: 140ms; }
+.vono-enr-form > :nth-child(2) { animation-delay: 230ms; }
+.vono-enr-form > :nth-child(3) { animation-delay: 320ms; }
+.vono-enr-form > :nth-child(4) { animation-delay: 410ms; }
+.vono-enr-form > :nth-child(5) { animation-delay: 500ms; }
+.vono-enr-form > :nth-child(n + 6) { animation-delay: 560ms; }
+@keyframes vono-enr-in { from { opacity: 0; transform: translateY(22px) scale(0.985); } to { opacity: 1; transform: none; } }
 .vono-enr-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .vono-enr-field { display: grid; gap: 6px; }
 .vono-enr-field span { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.62); }
@@ -66,11 +77,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .vono-enr-dots i { animation: none; }
-  .vono-enr-tile, .vono-enr-form { transition: none; animation: none; }
+  .vono-enr-tile, .vono-enr-tile .ic, .vono-enr-form > * { transition: none; animation: none; }
 }
 @media (max-width: 560px) {
-  .vono-enr-tile { width: 164px; padding-inline: 10px; }
-  .vono-enr-tile b { font-size: 18px; }
-  .vono-enr-tile small { font-size: 12px; white-space: normal; text-align: center; }
+  .vono-enr-tile { width: 150px; margin-inline: 6px; }
+  .vono-enr-tile .ic { width: 104px; height: 104px; }
+  .vono-enr-tile b { font-size: 19px; }
   .vono-enr-row { grid-template-columns: 1fr; }
 }

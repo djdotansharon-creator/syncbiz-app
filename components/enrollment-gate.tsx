@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * EnrollmentGateCard — what a NOT-yet-approved device sees (docs/DEVICE_ENROLLMENT_DESIGN.md §5.2; owner 2026-10-27 / 2026-10-28). No frame, no card: two soft squares in the middle — Player and Remote (a phone only
- * has Remote). Choosing one lifts it to the centre and makes it a little bigger, the other fades away, and underneath come only the details that choice needs:
+ * EnrollmentGateCard — what a NOT-yet-approved device sees (docs/DEVICE_ENROLLMENT_DESIGN.md §5.2; owner 2026-10-27 / 2026-10-28). No card, no frames, no squares behind anything: two BIG icons in the middle —
+ * Player and Remote, just the icon and its name (a phone only has Remote). Choosing one: the other fades away, the chosen icon glides to the centre and grows, and underneath only what the choice needs opens, piece by piece:
  *   · Player  → the branch (type a name → matching branches appear; a name that matches nothing is a NEW branch → its address and brand), nothing about the person (the signed-in account is the asker);
  *   · Remote  → who the person is (first / last name, phone, e-mail) and the existing branch it controls.
- * The account's main admin also gets a slim "I'm the owner" bar at the bottom: his own new computer is approved at once (a control device for every branch) — he approves everyone else, he does not wait for someone to approve him.
- * The server gives the device no connection token until it is approved, and the app behind this screen is not even loaded (components/enrollment-hold.tsx). Styles: components/enrollment-gate.css.
+ * The account's main admin also gets a slim "I'm the owner" bar at the bottom: his own new computer is approved at once (the normal interface, every branch, able to play, never a Player seat) — he approves
+ * everyone else, he does not wait for someone to approve him. The server gives the device no connection token until it is approved, and the app behind this screen is not even loaded (components/enrollment-hold.tsx).
+ * Styles: components/enrollment-gate.css.
  */
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
@@ -21,9 +22,7 @@ const HE = {
   connecting: "מתחבר…",
   noStorage: "הדפדפן הזה לא שומר נתונים (חלון פרטי?). פתחו את VONO בחלון רגיל.",
   player: "נגן",
-  playerHint: "מנגן את המוזיקה בסניף",
   remote: "שלט רחוק",
-  remoteHint: "שולט מרחוק בסניף",
   change: "החלפה",
   firstName: "שם פרטי",
   lastName: "שם משפחה",
@@ -66,9 +65,7 @@ const EN: typeof HE = {
   connecting: "Connecting…",
   noStorage: "This browser does not keep data (a private window?). Open VONO in a normal window.",
   player: "Player",
-  playerHint: "Plays the music in the branch",
   remote: "Remote",
-  remoteHint: "Controls a branch from afar",
   change: "Change",
   firstName: "First name",
   lastName: "Last name",
@@ -290,16 +287,14 @@ export function EnrollmentGateCard({ gate, loading }: { gate: EnrollmentGateApi;
             ) : null}
             <div className="vono-enr-tiles" role="radiogroup">
               {phone ? null : (
-                <button type="button" role="radio" aria-checked={role === "PLAYER"} className="vono-enr-tile" data-kind="player" data-state={role === "PLAYER" ? "on" : role ? "away" : "idle"} onClick={() => setChosen((c) => (c === "PLAYER" ? null : "PLAYER"))} tabIndex={role === "REMOTE" ? -1 : 0}>
+                <button type="button" role="radio" aria-checked={role === "PLAYER"} aria-label={t.player} className="vono-enr-tile" data-kind="player" data-state={role === "PLAYER" ? "on" : role ? "away" : "idle"} onClick={() => setChosen((c) => (c === "PLAYER" ? null : "PLAYER"))} tabIndex={role === "REMOTE" ? -1 : 0}>
                   <span className="ic"><PlayerIcon /></span>
                   <b>{t.player}</b>
-                  <small>{t.playerHint}</small>
                 </button>
               )}
-              <button type="button" role="radio" aria-checked={role === "REMOTE"} className="vono-enr-tile" data-kind="remote" data-state={role === "REMOTE" ? "on" : role ? "away" : "idle"} onClick={() => !phone && setChosen((c) => (c === "REMOTE" ? null : "REMOTE"))} tabIndex={role === "PLAYER" ? -1 : 0}>
+              <button type="button" role="radio" aria-checked={role === "REMOTE"} aria-label={t.remote} className="vono-enr-tile" data-kind="remote" data-state={role === "REMOTE" ? "on" : role ? "away" : "idle"} onClick={() => !phone && setChosen((c) => (c === "REMOTE" ? null : "REMOTE"))} tabIndex={role === "PLAYER" ? -1 : 0}>
                 <span className="ic"><RemoteIcon /></span>
                 <b>{t.remote}</b>
-                <small>{t.remoteHint}</small>
               </button>
             </div>
             {role ? (
