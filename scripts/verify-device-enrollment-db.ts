@@ -53,7 +53,9 @@ async function main() {
   const mgr1 = { userId: mgrUser.id, isAdmin: false, isManager: true, branchIds: [b1.id] };
   const staff = { userId: staffUser.id, isAdmin: false, isManager: false, branchIds: [b1.id] };
   const devices = { dana: mk("web-dana"), yossi: mk("ios-yossi"), shop: mk("web-shop"), extra: mk("web-extra"), admin: mk("web-admin") };
-  const input = (id: string, role: "PLAYER" | "REMOTE", platform: "browser" | "ios", branchId: string | null = null) => ({ durableDeviceId: id, role, platform, branchId, label: id, note: "", appVersion: "" });
+  const input = (id: string, role: "PLAYER" | "REMOTE", platform: "browser" | "ios", branchId: string | null = null, branchName = "") => ({
+    durableDeviceId: id, role, platform, branchId, branchName, branchAddress: "", brandName: "", firstName: "Dana", lastName: "Cohen", phone: "050-1234567", email: "dana@example.test", label: id, note: "", appVersion: "",
+  });
 
   try {
     // ── off ──
@@ -124,15 +126,61 @@ async function main() {
       await prisma.auditLog.deleteMany({ where: { workspaceId: ws2.id } });
       await prisma.workspace.delete({ where: { id: ws2.id } }).catch(() => undefined);
     }
+    // ── the admin's own screen keeps the role it has when approvals are switched on (owner 2026-10-28: "why am I a remote? my computer is the player") ──
+    const ws3 = await prisma.workspace.create({ data: { name: `Enroll test3 ${tag}`, slug: `enroll-test3-${tag}`, ownerId: owner.id } });
+    try {
+      const own3 = mk("web-admin3");
+      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3, ownDeviceRole: "PLAYER" });
+      const r3 = await store.getEnrollmentByDevice(ws3.id, own3);
+      assert("D35 the admin's own screen, when it is the player at switch-on, stays a PLAYER (browser class, not narrowed to one branch) and takes one seat", r3?.approvedRole === "PLAYER" && r3?.playerClass === "browser" && r3?.approvedBranchIds.length === 0 && r3?.grandfathered === true && (await store.getAllocation(ws3.id)).used === 1);
+      const own3b = mk("web-admin3b");
+      await store.enableEnrollment({ workspaceId: ws3.id, actorUserId: owner.id, ownDeviceId: own3b, ownDeviceRole: "PLAYER" });
+      const r3b = await store.getEnrollmentByDevice(ws3.id, own3b);
+      assert("D36 with no free seat the admin's screen becomes a Remote (never over the paid allocation); a screen that is not the player is a Remote too", r3b?.approvedRole === "REMOTE" && r3b?.playerClass === null && (await store.getAllocation(ws3.id)).used === 1);
+    } finally {
+      await prisma.auditLog.deleteMany({ where: { workspaceId: ws3.id } });
+      await prisma.workspace.delete({ where: { id: ws3.id } }).catch(() => undefined);
+    }
     for (let i = 0; i < 19; i++) await store.submitRequest({ workspaceId: ws.id, userId: spamUser.id, input: input(mk(`web-spam${i}`), "REMOTE", "browser"), ip: "", userAgent: "" });
     await store.submitRequest({ workspaceId: ws.id, userId: spamUser.id, input: input(mk("web-spam19"), "REMOTE", "browser"), ip: "", userAgent: "" }).catch(() => undefined);
     assert("D24 one user cannot flood the list: at most 20 open requests", (await throws(() => store.submitRequest({ workspaceId: ws.id, userId: spamUser.id, input: input(mk("web-spam-over"), "REMOTE", "browser"), ip: "", userAgent: "" }))) === "too_many_pending_requests");
+
+    // ── who is asking, the typed branch, the suggestions, the red-circle count (owner 2026-10-28) ──
+    const who = await store.submitRequest({ workspaceId: ws.id, userId: staff.userId, input: { ...input(mk("web-who"), "REMOTE", "browser", b1.id), firstName: "Noa", lastName: "Levi", phone: "+972 54-765-4321", email: "noa@example.test" }, ip: "", userAgent: "" });
+    const whoItem = (await store.listEnrollments({ workspaceId: ws.id, actor: mgr1 })).items.find((i) => i.id === who.id);
+    assert("D27 the request carries who is asking, and the manager of that branch sees it", !!whoItem && whoItem.requesterFirstName === "Noa" && whoItem.requesterLastName === "Levi" && whoItem.requesterPhone === "+972 54-765-4321" && whoItem.requesterEmail === "noa@example.test");
+    const whoAgain = await store.submitRequest({ workspaceId: ws.id, userId: staff.userId, input: { ...input(who.durableDeviceId, "REMOTE", "browser", b1.id), firstName: "Noa", lastName: "Levi-Cohen", phone: "+972 54-765-4321", email: "noa@example.test" }, ip: "", userAgent: "" });
+    assert("D28 asking again (still pending) updates the details", whoAgain.id === who.id && whoAgain.requesterLastName === "Levi-Cohen");
+    const typed = await store.submitRequest({ workspaceId: ws.id, userId: staff.userId, input: { ...input(mk("web-typed"), "PLAYER", "browser", null, "Brand New Branch"), branchAddress: "12 Herzl St, Haifa", brandName: "Shufersal Deal", firstName: "", lastName: "", phone: "", email: "" }, ip: "", userAgent: "" });
+    assert("D29 a Player may ask for a branch that does not exist yet: the typed name, address and brand are kept, no branch id — and it needs no person's details", typed.requestedBranchId === null && typed.requestedBranchName === "Brand New Branch" && typed.requestedBranchAddress === "12 Herzl St, Haifa" && typed.requestedBrandName === "Shufersal Deal" && typed.requesterFirstName === "");
+    assert("D30 …the main admin sees it, a branch manager does not (it is not in any branch), and it cannot be approved without choosing a real branch", (await store.listEnrollments({ workspaceId: ws.id, actor: admin })).items.some((i) => i.id === typed.id && i.requestedBranchName === "Brand New Branch") && !(await store.listEnrollments({ workspaceId: ws.id, actor: mgr1 })).items.some((i) => i.id === typed.id) && (await throws(() => store.approveEnrollment({ workspaceId: ws.id, actor: admin, id: typed.id, input: { role: "PLAYER", branchIds: [], mode: "standby", note: "" } }))) === "player_needs_exactly_one_branch");
+    const hits = await store.searchBranchesForEnrollment(ws.id, "branch");
+    assert("D31 typing 'branch' suggests both branches, typing 'two' only Branch Two, nothing before the first letter, nothing for a name that matches none", hits.length === 2 && (await store.searchBranchesForEnrollment(ws.id, "two")).map((x) => x.name).join() === "Branch Two" && (await store.searchBranchesForEnrollment(ws.id, "")).length === 0 && (await store.searchBranchesForEnrollment(ws.id, "   ")).length === 0 && (await store.searchBranchesForEnrollment(ws.id, "zzzz")).length === 0);
+    assert("D32 a suggestion carries only id, name and city — nothing else of the company", hits.every((h) => Object.keys(h).sort().join() === "city,id,name"));
+    const cAdmin = await store.countPendingForActor({ workspaceId: ws.id, actor: admin });
+    const cMgr = await store.countPendingForActor({ workspaceId: ws.id, actor: mgr1 });
+    const lAdmin = await store.listEnrollments({ workspaceId: ws.id, actor: admin });
+    const lMgr = await store.listEnrollments({ workspaceId: ws.id, actor: mgr1 });
+    assert("D33 the red-circle count equals what each person can decide: the admin all pending, the branch manager only their branch's, staff none", cAdmin.enabled && cAdmin.count === lAdmin.pendingCount && cAdmin.count > cMgr.count && cMgr.count === lMgr.pendingCount && cMgr.count >= 1 && (await store.countPendingForActor({ workspaceId: ws.id, actor: staff })).count === 0);
+
+    // ── "I'm the owner": the admin approves his own new device at once (owner 2026-10-28) ──
+    const typedItem = (await store.listEnrollments({ workspaceId: ws.id, actor: admin })).items.find((i) => i.id === typed.id);
+    assert("D37 the approver sees the new branch's address and brand, and the signed-in account's e-mail when the Player gave no person", !!typedItem && typedItem.requestedBranchAddress === "12 Herzl St, Haifa" && typedItem.requestedBrandName === "Shufersal Deal" && typedItem.requestedByEmail === `enroll-staff-${tag}@example.test`);
+    const ownDev = mk("web-owner-new");
+    const usedBefore = (await store.getAllocation(ws.id)).used;
+    const ownRow = await store.approveOwnDevice({ workspaceId: ws.id, userId: owner.id, durableDeviceId: ownDev, platform: "browser", label: "Owner · Chrome on Mac" });
+    assert("D38 the owner's new device is approved at once as a control device for EVERY branch (Remote, no narrowing) and takes no Player seat", ownRow.status === "approved" && ownRow.approvedRole === "REMOTE" && ownRow.approvedBranchIds.length === 0 && ownRow.playerClass === null && (await store.getAllocation(ws.id)).used === usedBefore);
+    assert("D39 it is recorded in the audit log as a self-approval, and asking again changes nothing", (await prisma.auditLog.count({ where: { workspaceId: ws.id, action: "device.enroll_approve", entityId: ownRow.id } })) === 1 && (await store.approveOwnDevice({ workspaceId: ws.id, userId: owner.id, durableDeviceId: ownDev, platform: "browser", label: "x" })).id === ownRow.id);
+    const mgrWho = rules.enrollmentClaimFor(ownRow, new Date());
+    assert("D40 its token claim is REMOTE (the WS server forces CONTROL), with no branch narrowing", mgrWho === "REMOTE" && rules.restrictBranches(["b1", "b2"], ownRow.approvedBranchIds).length === 2);
 
     // ── audit + switching off ──
     const actions = (await prisma.auditLog.findMany({ where: { workspaceId: ws.id }, select: { action: true } })).map((a) => a.action);
     assert("D25 every request, approval, rejection, revocation and settings change is in the audit log", ["device.enroll_request", "device.enroll_approve", "device.enroll_reject", "device.enroll_revoke", "enrollment.settings"].every((a) => actions.includes(a)));
     await store.disableEnrollment({ workspaceId: ws.id, actorUserId: owner.id });
     assert("D26 switching it off returns the workspace to today's behaviour (config off; the rows stay for the next time)", (await store.getEnrollmentConfig(ws.id)).enabled === false && (await prisma.deviceEnrollment.count({ where: { workspaceId: ws.id } })) > 0);
+    assert("D41 with approvals switched off the owner's self-approval is refused (nothing to approve)", (await throws(() => store.approveOwnDevice({ workspaceId: ws.id, userId: owner.id, durableDeviceId: mk("web-owner-off"), platform: "browser", label: "" }))) === "enrollment_disabled");
+    assert("D34 switched off: no suggestions, a count of zero, and the table is not read", (await store.searchBranchesForEnrollment(ws.id, "branch")).length === 0 && (await store.countPendingForActor({ workspaceId: ws.id, actor: admin })).count === 0 && (await store.countPendingForActor({ workspaceId: ws.id, actor: admin })).enabled === false);
   } finally {
     await prisma.auditLog.deleteMany({ where: { workspaceId: ws.id } });
     await prisma.stationDevice.deleteMany({ where: { workspaceId: ws.id } });

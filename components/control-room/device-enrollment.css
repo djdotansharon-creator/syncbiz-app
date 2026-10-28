@@ -38,4 +38,35 @@
 .cr-enr-foot b { color: rgba(255, 255, 255, 0.85); }
 .cr-enr-link { padding: 4px 8px; border: 0; background: none; color: rgba(255, 255, 255, 0.6); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .cr-enr-link:hover { color: #fff; }
+/* who is asking: phone / e-mail as quiet links; the branch picker for a typed (not yet existing) branch */
+.cr-enr-contact { display: flex !important; flex-wrap: wrap; gap: 4px 16px; }
+.cr-enr-contact a { color: #cfe3ff; text-decoration: none; }
+.cr-enr-contact a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cr-enr-pick { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; color: rgba(255, 255, 255, 0.7); }
+.cr-enr-pick select { height: 34px; padding: 0 12px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, 0.1); color: #f5f5f7; font: inherit; font-size: 13.5px; color-scheme: dark; }
 @media (max-width: 720px) { .cr-enr-item { grid-template-columns: 40px minmax(0, 1fr); } .cr-enr-item .cr-enr-actions { grid-column: 1 / -1; } }
+
+/* ── the "New requests" tile (first tile of the branch list) and its screen (owner 2026-10-28) ── */
+.cr-row--requests { cursor: pointer; }
+.cr-row--requests .cr-row-name { color: var(--sb-text); }
+.cr-row--requests:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.7); outline-offset: 2px; }
+.cr-enr-tile-logo { position: relative; overflow: visible !important; color: rgba(255, 255, 255, 0.85); background: transparent !important; box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.34); border-style: dashed; border-width: 0; transition: color 200ms ease, box-shadow 200ms ease; }
+.cr-row--requests:hover .cr-enr-tile-logo { color: #fff; box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.6); }
+.cr-enr-tile-dot { position: absolute; top: -5px; inset-inline-end: -5px; display: inline-grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; border-radius: 999px; background: #ff3b30; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 3px rgba(10, 10, 12, 0.9); }
+.cr-enr-plus { display: grid; place-items: center; flex: none; width: 54px; height: 54px; border-radius: 17px; color: rgba(255, 255, 255, 0.85); box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.34); }
+.cr-enrp .cr-enr { width: 100%; margin: 6px 0 0; }
+.cr-enrp .cr-enr-meter { flex: none; }
+.cr-enr-group { margin-top: 20px; }
+.cr-enr-ghead { display: flex; align-items: center; gap: 10px; padding-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.cr-enr-gname { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; margin-inline-start: -10px; border: 0; border-radius: 12px; background: none; color: #f5f5f7; font: inherit; font-size: 17px; font-weight: 650; cursor: pointer; transition: background-color 200ms ease; }
+button.cr-enr-gname:hover { background: rgba(255, 255, 255, 0.09); }
+button.cr-enr-gname:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.cr-enr-gname.is-new { color: #ffd98a; cursor: default; }
+.cr-enr-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: rgba(255, 200, 87, 0.85); }
+.cr-enr-sublabel { margin: 12px 0 0; font-size: 13.5px; font-weight: 650; color: rgba(255, 255, 255, 0.78); }
+.cr-enr-sublabel b { margin-inline-start: 6px; padding: 1px 8px; border-radius: 999px; background: #ffc857; color: #2b2000; font-size: 12.5px; font-weight: 800; }
+.cr-enr-branch .cr-enr-list { margin-top: 6px; }
+.cr-enr-branch .cr-enr-item { grid-template-columns: 34px minmax(0, 1fr) auto; }
+.cr-enr-menu-note { margin: 0; padding: 8px 12px 10px; max-width: 240px; font-size: 12.5px; line-height: 1.45; color: rgba(255, 255, 255, 0.55); }
+.cr-pop-opt:disabled { opacity: 0.4; cursor: default; }
+

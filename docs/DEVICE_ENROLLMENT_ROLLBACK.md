@@ -12,7 +12,7 @@ Everything about device enrollment is **dormant by default**. Nothing changes fo
 
 ## Safe order to ship (each step needs the owner's explicit yes)
 1. Merge **PR-A** (database model, rules, API, Control Room panel). With no env flag it does nothing and does not touch the new table — **it is safe even before the migration is applied**.
-2. Apply the migration to **TEST** first, then **PROD** (the repo's guard: `npm run db:migrate:deploy` is local-only; for PROD it needs the deliberate `SYNCBIZ_ALLOW_PROD_DB=1 DATABASE_URL=<prod> npx prisma migrate deploy`). The migration only **adds** a table and three columns with defaults; it changes nothing that exists.
+2. Apply the migrations (two: `20261027161357_device_enrollment`, `20261028120000_device_enrollment_requester`) to **TEST** first, then **PROD** (the repo's guard: `npm run db:migrate:deploy` is local-only; for PROD it needs the deliberate `SYNCBIZ_ALLOW_PROD_DB=1 DATABASE_URL=<prod> npx prisma migrate deploy`). The migrations only **add** a table, three columns on `WorkspaceEntitlement` and five text columns on the new table, all with defaults; they change nothing that exists.
 3. Set `SYNCBIZ_DEVICE_ENROLLMENT=1` on **TEST** and try it with two real computers and a phone.
 4. Merge **PR-B** (the device gate, the signed role in the token, the WS server rule that an approved Remote is never MASTER). With the flag off it is inert; the existing WS regression tests are green. Run the Lenovo regression list from the pilot baseline before PROD.
 5. Only then set the flag on PROD, and switch a workspace on from its Control Room. Switching on **approves every existing station and the admin's own device automatically**, so nothing goes dark.
@@ -24,7 +24,7 @@ ALTER TABLE "WorkspaceEntitlement"
   DROP COLUMN IF EXISTS "enrollmentEnabled",
   DROP COLUMN IF EXISTS "enrollmentTtlDays",
   DROP COLUMN IF EXISTS "maxPlayers";
-DELETE FROM "_prisma_migrations" WHERE migration_name = '20261027161357_device_enrollment';
+DELETE FROM "_prisma_migrations" WHERE migration_name IN ('20261027161357_device_enrollment', '20261028120000_device_enrollment_requester');
 ```
 
 ## Local database (this Mac)
@@ -39,3 +39,5 @@ The admin who switches enrollment on is approved automatically, and the panel ne
 - A desktop token issued before switch-on keeps working for its life (7–30 days). Replacing "absent claim = legacy" with a server-side grandfathered list is design §6 and is not part of v1.
 - "Replace the current player" is not offered through enrollment yet (use *Replace main station* in the branch's activation panel); a second Player is a standby.
 - Extra tabs of an approved profile share its approval; the existing lease still decides which tab plays.
+- The hold (the app is not loaded until approved) is a client-side boundary plus the token gate: a not-yet-approved device cannot play or control, but the data routes still answer to the signed-in session. The revocable device credential (design Phase 4a) closes it.
+- A Player's typed NEW branch must be created first in the branches screen; approval needs a real branch (creating it on approval is a later step).

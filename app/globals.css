@@ -7969,3 +7969,6 @@ html[data-sb-display="white"] .sb-rad-btn-go { background: #1c1c1e; color: #fff;
 .workspace-rail-grid,
 .workspace-rail-grid * { scrollbar-width: none; -ms-overflow-style: none; }
 .workspace-rail-grid *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* the red circle on the Control Room tab: a device is waiting for approval (owner 2026-10-28) */
+.sb-enr-dot { position: absolute; top: -6px; inset-inline-end: -6px; display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: #ff3b30; color: #fff; font-size: 10.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px rgba(10, 10, 12, 0.85); pointer-events: none; }
