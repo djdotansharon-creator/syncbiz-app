@@ -181,12 +181,13 @@ export function AlbumWorkspacePanel({ album, onClose }: { album: CenterModuleAlb
                 <button type="button" className="sb-alb-row" data-busy={busy === tr.id ? "1" : undefined} onClick={() => void playTrack(tr)} title={tr.name}>
                   <span className="sb-alb-n">
                     <b>{tr.n}</b>
-                    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" aria-hidden>
-                      <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
-                    </svg>
                   </span>
                   <span className="sb-alb-art">
                     {tr.cover ? <img src={tr.cover} alt="" loading="lazy" draggable={false} /> : <span className="sb-alb-initial">{tr.name.charAt(0)}</span>}
+                    {/* owner 2026-10-28: the play icon sits ON the song's square, the number stays where it is */}
+                    <svg className="sb-alb-art-play" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" aria-hidden>
+                      <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
+                    </svg>
                   </span>
                   <span className="sb-alb-info">
                     <span className="sb-alb-name">

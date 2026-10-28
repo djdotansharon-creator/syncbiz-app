@@ -691,21 +691,7 @@ export function SourceCard({
                 <TrackMediaPlaceholder chip={provenanceChip} className="h-full w-full" showCornerBadge={false} format={localFormat} />
               </div>
             ) : null}
-            {/* Playlist marker — quiet icon, bottom-right of the art (grid design) */}
-            {kindBadge === "LIST" ? (
-              <span
-                className="library-card-playlist-glyph pointer-events-none absolute bottom-2 right-2 z-[2] flex h-6 w-6 items-center justify-center rounded-md bg-black/55 text-white/90 backdrop-blur-sm"
-                title={tr("Playlist")}
-                aria-label={tr("Playlist")}
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <line x1="3" y1="6" x2="13" y2="6" />
-                  <line x1="3" y1="12" x2="13" y2="12" />
-                  <line x1="3" y1="18" x2="9" y2="18" />
-                  <path d="M17 6v8.5a2.5 2.5 0 1 1-2-2.45" />
-                </svg>
-              </span>
-            ) : null}
+            {/* owner 2026-10-28: the little square with a playlist / album icon at the corner of the art is gone */}
             {durationSec > 0 && (kindBadge === "SET" || kindBadge === "LIST" || kindBadge === "RADIO") ? (
               <span
                 className={`library-pill-overlay library-pill-overlay-soft absolute bottom-2 right-2 rounded-md px-2 py-0.5 font-medium tabular-nums shadow-lg backdrop-blur-md ${
@@ -757,7 +743,7 @@ export function SourceCard({
                 <PlatformLogoBadge platform={p} />
               </span>
               <span>{pName}</span>
-              {itemCount != null ? <span className="library-card-platform-line-count">· {itemCount} item</span> : null}
+              {itemCount != null ? <span className="library-card-platform-line-count">{tr("{n} songs", { n: itemCount })}</span> : null}
             </p>
           );
         })()}
