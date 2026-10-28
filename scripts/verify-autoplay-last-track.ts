@@ -353,7 +353,8 @@ async function main() {
   const sQueued = A().getNextStreamUrl();
   loud();
   assert("X1 last song, nothing waiting: the AutoMix pre-load targets the first song (the list continues)", xNone?.url === list3.playlist?.tracks?.[0]?.url, xNone);
-  assert("X2 last song with a recommendation waiting: no pre-load into the first song (the recommendation plays next)", xQueued === null && sQueued === null, { xQueued, sQueued });
+  // 2026-10-28 (Play Next priority): the pre-load is now the waiting Play Next song itself — still never the list's first song.
+  assert("X2 last song with a recommendation waiting: no pre-load into the first song (the recommendation plays next)", xQueued?.videoId === "xyzxyzxyz01" && sQueued === null && xQueued?.url !== list3.playlist?.tracks?.[0]?.url, { xQueued, sQueued });
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);
