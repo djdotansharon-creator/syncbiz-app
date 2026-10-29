@@ -39,8 +39,9 @@ import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibra
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { DeviceRoleBadge } from "@/components/device-role-badge";
-import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
-import { ControlBar, ControlRoomIcon } from "@/components/control-screen/control-bar";
+import { ControlBar, SettingsIcon } from "@/components/control-screen/control-bar";
+import { ControlBackIcon } from "@/components/control-screen/control-back-icon";
+import { AnyPendingDot } from "@/components/control-screen/pending-dots";
 import { isControlScreenPath } from "@/lib/control-screen";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
@@ -808,13 +809,14 @@ export function AppShell({ children }: { children: ReactNode }) {
      owner 2026-10-20: Settings is always at the far end of the bar (opposite Library); Dashboard + Access Control are NOT top-bar tabs — they live inside
      the Control Room (its own tabs), so they never show up here, pinned or not. owner 2026-10-22: no Remote Controller anywhere in this interface; Settings
      is not a tab any more — "More settings" in the gear menu opens it.
-     owner 2026-10-29: in a BROWSER the control screen is reached by the icon in the player's corner (and a Remote opens on it), so the "Control Room" tab stays only in the desktop app (the station's way in until the gear tab). */
+     owner 2026-10-29: in a BROWSER the control screen is reached by the icon in the player's corner (and a Remote opens on it).
+     owner 2026-10-30: on the PLAYER computer (the desktop app) this entry is ONE extra tab with a GEAR icon (for everyone, not only managers) that opens Settings / the control screen behind the access code. */
   const topNavItems = (() => {
     const NAV_ORDER = ["library", "schedules", "radio", "jingles", "display-design", "controlRoom", "owner", "logs", "architecture", "remote", "settings"] as const;
     return navItems
       .filter((item) => item.labelKey !== "dashboard" && item.labelKey !== "access-control")
       .filter((item) => !HIDDEN_NAV_KEYS.has(item.labelKey))
-      .filter((item) => (item.labelKey === "controlRoom" ? canManage && isDesktopApp : pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey))))
+      .filter((item) => (item.labelKey === "controlRoom" ? isDesktopApp : pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey))))
       .sort((a, b) => {
         const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
         const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
@@ -1578,7 +1580,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   // Dashboard / Access Control are reached from the tabs inside the management pages
                   // owner 2026-10-20: clicking "Control Room" used to light up "Owner" for a moment (its href /owner is a prefix of /owner/control-room) and only then
                   // moved back — the highlight follows the clicked destination (navActivePath), and Owner never matches the Control Room path
-                  const inMgmt = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/.test(navActivePath);
+                  const inMgmt = /^\/(dashboard|access-control|owner\/control-room|settings)(\/|$)/.test(navActivePath);
+                  const isGearTab = item.labelKey === "controlRoom";
                   const isActive =
                     item.labelKey === "controlRoom"
                       ? inMgmt
@@ -1589,11 +1592,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                           : navActivePath.startsWith(item.href);
                   const label = item.labelKey === "controlRoom" ? mgmt(locale).t("nav.controlRoom") : (labels[item.labelKey] as Record<string, string> | undefined)?.[locale] ?? labels[item.labelKey]?.en ?? item.labelKey;
                   const tabClass = "relative px-3.5 pb-[6px] pt-[4px] text-[13px] font-medium text-slate-50/90 transition-colors duration-150 hover:text-slate-50 focus:outline-none";
+                  const tabContent = isGearTab ? <span className="sb-gear-tab" title={tr("Settings")}><SettingsIcon size={18} /></span> : label;
                   // a tab the operator just switched OFF stays for its exit animation as a non-clickable ghost (components/top-nav-motion.tsx)
                   if (phase === "leave") {
                     return (
                       <LeavingNavTab key={item.href} className={tabClass}>
-                        {label}
+                        {tabContent}
                       </LeavingNavTab>
                     );
                   }
@@ -1601,14 +1605,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <MotionNavLink
                       key={item.href}
                       phase={phase}
-                      href={item.href}
+                      href={isGearTab ? "/settings" : item.href}
                       data-active={isActive ? "true" : "false"}
+                      aria-label={isGearTab ? tr("Settings") : undefined}
                       onClick={() => setNavPending({ href: item.href, fromPath: pathname })}
                       className={tabClass}
                     >
-                      {label}
-                      {/* a device is waiting for approval (owner 2026-10-28): red circle with the number; renders nothing unless enrollment is on and this person may decide */}
-                      {item.labelKey === "controlRoom" ? <EnrollmentPendingDot /> : null}
+                      {tabContent}
+                      {/* something waits for approval (owner 2026-10-28 devices, 2026-10-30 people): red circle with the number; renders nothing unless the feature is on and this person may decide */}
+                      {isGearTab ? <AnyPendingDot /> : null}
                     </MotionNavLink>
                   );
                 })}
@@ -1770,11 +1775,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               <DesktopUpdatePill />
               {/* the way back to the control screen (owner 2026-10-29): the END-most corner of the bar — exactly where the control screen's "Player" button is (right in English, left in Hebrew). Browser managers only; the desktop station uses the gear. */}
-              {canManage && !isDesktopApp && !isManagementRoute ? (
-                <Link href="/owner/control-room" title={mgmt(locale).t("nav.controlRoom")} aria-label={mgmt(locale).t("nav.controlRoom")} className="sb-ctl-back">
-                  <ControlRoomIcon size={22} />
-                </Link>
-              ) : null}
+              {canManage && !isDesktopApp && !isManagementRoute ? <ControlBackIcon /> : null}
             </div>
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}

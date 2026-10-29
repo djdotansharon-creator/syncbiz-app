@@ -28,3 +28,7 @@ html[data-sb-display] [data-control-screen="true"] .app-sources-theme-scope { ba
 
 /* the pill tabs inside each page (Control Room · Dashboard · Access Control · Display) are replaced by the button row above — only they are hidden; the desktop "Lock" button beside them stays */
 [data-control-screen="true"] .cr-tabs-row .cr-tabs { display: none !important; }
+
+/* the red circle sits on the icon's corner (reuses .sb-enr-dot); on the player's way-back icon too */
+.sb-ctl-ico { position: relative; display: inline-flex; }
+.sb-ctl-back { position: relative; }
