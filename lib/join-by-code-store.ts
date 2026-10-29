@@ -13,6 +13,8 @@ import { attemptKeys, blockedFor, recordFailure, recordSuccess } from "@/lib/aut
 import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
 import { enforceCanAddWorkspaceMember } from "@/lib/entitlement-limits";
 import { inviteExistingUserToWorkspace } from "@/lib/user-store";
+import { isRolesEnvEnabled, tenantRoleForRole } from "@/lib/roles";
+import { assignMemberRole, getRoleInWorkspace } from "@/lib/roles-store";
 import { writeTenantAuditLog } from "@/lib/admin/tenant-audit";
 import {
   MAX_ACTIVE_CODES,
@@ -152,6 +154,8 @@ export async function decideJoinRequest(params: {
   actorUserId: string;
   decision: "approve" | "reject";
   role?: unknown;
+  /** with roles on (SYNCBIZ_ROLES=1): the role the owner defined — it decides the platform role and the switches; without it `role` (Manager / Member) is used as before */
+  roleId?: unknown;
   ip?: string | null;
 }): Promise<{ ok: true; email: string }> {
   const row = await prisma.workspaceJoinRequest.findFirst({ where: { id: params.requestId, workspaceId: params.workspaceId } });
@@ -165,7 +169,9 @@ export async function decideJoinRequest(params: {
     return { ok: true, email: row.email };
   }
 
-  const role: JoinRole | null = parseJoinRole(params.role);
+  const roleRow = typeof params.roleId === "string" && params.roleId && isRolesEnvEnabled() ? await getRoleInWorkspace(params.workspaceId, params.roleId) : null;
+  if (typeof params.roleId === "string" && params.roleId && isRolesEnvEnabled() && !roleRow) throw new JoinError("role_not_found", 400);
+  const role: JoinRole | null = roleRow ? (roleRow.openControlRoom ? "MANAGER" : "MEMBER") : parseJoinRole(params.role);
   if (!role) throw new JoinError("role_required", 400);
   // check the seat BEFORE making an account, so a full workspace leaves nothing behind
   await enforceCanAddWorkspaceMember(params.workspaceId);
@@ -188,12 +194,13 @@ export async function decideJoinRequest(params: {
     emitEvent(EVENT_TYPES.USER_CREATED, { userId: user.id, email: row.email });
   }
   try {
-    await inviteExistingUserToWorkspace({ email: row.email, tenantId: params.workspaceId, tenantRole: tenantRoleForJoinRole(role), branchAssignments: [] });
+    await inviteExistingUserToWorkspace({ email: row.email, tenantId: params.workspaceId, tenantRole: roleRow ? tenantRoleForRole(roleRow) : tenantRoleForJoinRole(role), branchAssignments: [] });
   } catch (e) {
     if (created) await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined); // leave nothing half-made
     throw e;
   }
-  await prisma.workspaceJoinRequest.update({ where: { id: row.id }, data: { status: "approved", approvedRole: role, userId: user.id, decidedByUserId: params.actorUserId, decidedAt: now, passwordHash: null } });
-  await writeTenantAuditLog(prisma, { action: "join.approve", actorUserId: params.actorUserId, workspaceId: params.workspaceId, targetUserId: user.id, ipAddress: params.ip ?? null, metadata: { email: row.email, role, newAccount: created } });
+  if (roleRow) await assignMemberRole(params.workspaceId, user.id, roleRow.id);
+  await prisma.workspaceJoinRequest.update({ where: { id: row.id }, data: { status: "approved", approvedRole: roleRow ? roleRow.name : role, userId: user.id, decidedByUserId: params.actorUserId, decidedAt: now, passwordHash: null } });
+  await writeTenantAuditLog(prisma, { action: "join.approve", actorUserId: params.actorUserId, workspaceId: params.workspaceId, targetUserId: user.id, ipAddress: params.ip ?? null, metadata: { email: row.email, role: roleRow ? roleRow.name : role, newAccount: created } });
   return { ok: true, email: row.email };
 }

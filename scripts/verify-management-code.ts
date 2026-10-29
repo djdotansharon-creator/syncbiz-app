@@ -20,7 +20,7 @@ assert("M3 123 matches (spaces around it do not matter); anything else does not"
 assert("M4 with an own code set, 123 no longer matches", matchesManagementCode("4821", { SYNCBIZ_MANAGEMENT_CODE: "4821" }) && !matchesManagementCode("123", { SYNCBIZ_MANAGEMENT_CODE: "4821" }));
 
 const route = read("app/api/auth/management-unlock/route.ts");
-assert("M5 the unlock route takes the code from ANY signed-in person (role still decides what they see), or a manager's own password, behind the same rate limiter", /matchesManagementCode\(entered\) \|\| \(a\.canManage && \(await validateCredentialsAsync\(a\.email, entered\)\)\)/.test(route) && /attemptKeys\("mgmt-unlock"/.test(route) && /recordFailure/.test(route) && !/Only a manager can unlock/.test(route));
+assert("M5 the unlock route takes the code from ANY signed-in person (role still decides what they see), or a manager's own password, behind the same rate limiter", /matchesManagementCode\(entered\)/.test(route) && /codeOk \|\| \(a\.canManage && \(await validateCredentialsAsync\(a\.email, entered\)\)\)/.test(route) && /attemptKeys\("mgmt-unlock"/.test(route) && /recordFailure/.test(route) && !/Only a manager can unlock/.test(route));
 const gate = read("components/management/management-gate.tsx");
 assert("M6 Settings is gated only by the station lock (desktop app) — a browser goes straight in, and it is NOT manager-only", /export async function SettingsGate/.test(gate) && /if \(!s\.unlocked\) return <ManagementLockScreen \/>/.test(gate) && !/canManage/.test(gate.slice(gate.indexOf("export async function SettingsGate"))));
 const settings = read("app/(app)/settings/page.tsx");

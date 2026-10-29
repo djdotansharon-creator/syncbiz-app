@@ -51,7 +51,12 @@ export type TenantAuditAction =
   /** Join by code (2026-10-29): an admin made a one-time code, and the decision on a person's request to join (target = the person). */
   | "join.code_create"
   | "join.approve"
-  | "join.reject";
+  | "join.reject"
+  /** Roles (2026-10-29): the owner made / changed / deleted a role, or chose his own access code for Settings on the player computer. */
+  | "role.create"
+  | "role.update"
+  | "role.delete"
+  | "role.access_code_set";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -73,6 +78,10 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "join.code_create",
   "join.approve",
   "join.reject",
+  "role.create",
+  "role.update",
+  "role.delete",
+  "role.access_code_set",
 ];
 
 /**

@@ -9,6 +9,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateCredentialsAsync } from "@/lib/auth";
 import { matchesManagementCode } from "@/lib/management-code";
+import { isRolesEnvEnabled } from "@/lib/roles";
+import { checkWorkspaceAccessCode } from "@/lib/roles-store";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { getManagementAccess } from "@/lib/management-access";
 import { MGMT_UNLOCK_COOKIE, createUnlockValue, unlockCookieOptions } from "@/lib/management-unlock";
 import { attemptKeys, blockedFor, recordFailure, recordSuccess } from "@/lib/auth-rate-limit";
@@ -31,7 +34,18 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { code?: unknown; password?: unknown };
   const entered = typeof body.code === "string" ? body.code : typeof body.password === "string" ? body.password : "";
   // the station code opens the lock for anyone signed in (role still decides what they may see); a manager may also use their own password
-  const ok = entered !== "" && (matchesManagementCode(entered) || (a.canManage && (await validateCredentialsAsync(a.email, entered))));
+  // the OWNER'S OWN code (SYNCBIZ_ROLES=1 and he chose one) replaces the default 123 for his business; a failing read falls back to the default, never locks anyone out
+  let ownerCode: boolean | null = null;
+  if (isRolesEnvEnabled()) {
+    try {
+      const u = await getCurrentUserFromCookies();
+      if (u?.tenantId) ownerCode = await checkWorkspaceAccessCode(u.tenantId, entered);
+    } catch (e) {
+      console.error("[management-unlock] owner code read failed — using the default code", e instanceof Error ? e.message : String(e));
+    }
+  }
+  const codeOk = ownerCode === null ? matchesManagementCode(entered) : ownerCode;
+  const ok = entered !== "" && (codeOk || (a.canManage && (await validateCredentialsAsync(a.email, entered))));
   if (!ok) {
     keys.forEach((k) => recordFailure(k));
     return NextResponse.json({ error: "Wrong code." }, { status: 401 });

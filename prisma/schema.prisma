@@ -328,6 +328,9 @@ model Workspace {
   enrollmentSetting WorkspaceEnrollmentSetting?
   joinCodes         WorkspaceJoinCode[]
   joinRequests      WorkspaceJoinRequest[]
+  roles             WorkspaceRole[]
+  memberRoles       WorkspaceMemberRole[]
+  accessCodeRow     WorkspaceAccessCode?
 
   @@index([ownerId])
 }
@@ -674,6 +677,49 @@ model WorkspaceJoinRequest {
 
   @@index([workspaceId, status])
   @@index([email])
+}
+
+/// Roles the business OWNER defines (docs/ROLES_DESIGN.md), each with switches. Dormant unless SYNCBIZ_ROLES=1 (the tables are never queried with the flag off).
+/// `openControlRoom` decides the platform role the person gets (true = MANAGER: the Control Room / Dashboard pages that already check it; false = MEMBER). `allowComputer` = may sign in from a computer (not a phone).
+model WorkspaceRole {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  name            String
+  openControlRoom Boolean  @default(false)
+  allowComputer   Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members   WorkspaceMemberRole[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, sortOrder])
+}
+
+/// Which role a person has in a business (only people given a role are affected by the switches; everyone else behaves exactly as before).
+model WorkspaceMemberRole {
+  workspaceId String
+  userId      String
+  roleId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role      WorkspaceRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([workspaceId, userId])
+  @@index([roleId])
+}
+
+/// The access code the OWNER chose for Settings on the player computer (salted sha256; no row = the default 123 / SYNCBIZ_MANAGEMENT_CODE). Dormant unless SYNCBIZ_ROLES=1.
+model WorkspaceAccessCode {
+  workspaceId String   @id
+  codeHash    String
+  codeSalt    String
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 /// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never
