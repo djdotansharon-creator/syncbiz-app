@@ -30,6 +30,7 @@ export async function GET(req: Request) {
     if (enrollment.kind === "blocked") return NextResponse.json({ error: "enrollment_required", status: enrollment.status }, { status: 403 });
     if (enrollment.kind === "approved") {
       claims.enrollmentRole = enrollment.role;
+      if (enrollment.owner) claims.enrollmentOwner = true; // the owner's own computer: never auto-elected / auto-promoted (server/index.ts)
       claims.authorizedBranches = restrictBranches(authorizedBranches, enrollment.branchIds);
     }
     const token = createWsToken(user.id, claims);
