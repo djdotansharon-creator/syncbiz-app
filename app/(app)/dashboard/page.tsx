@@ -73,7 +73,7 @@ async function DashboardContent() {
 
   return (
     // Management Mode: full screen, outside the player workspace rails — this page scrolls on its own (like Control Room)
-    <div dir={L.dir} className="mgmt-type h-full space-y-8 overflow-y-auto pb-6">
+    <div dir={L.dir} className="mgmt-type h-full space-y-8 overflow-y-auto px-4 pb-8 pt-2 sm:px-6">
       <ManagementTabs />
       <div>
         <h1 className="text-xl font-semibold text-slate-50">{t.dashboard}</h1>
@@ -102,7 +102,7 @@ async function DashboardContent() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <h2 className="text-lg font-semibold text-slate-50">{t.deviceHealthSummary}</h2>
+          <h2 className="text-[15px] font-semibold text-slate-50">{t.deviceHealthSummary}</h2>
           <p className="mt-1 text-xs text-slate-500">{t.statusOfConnectedAgents}</p>
           {devices.length === 0 ? (
             <p className="mt-4 text-sm text-slate-500">{t.noDevicesYet}</p>
@@ -113,7 +113,7 @@ async function DashboardContent() {
                   key={d.id}
                   className="flex items-center justify-between rounded-lg border border-slate-800/60 bg-slate-900/40 px-3 py-2 text-sm"
                 >
-                  <Link href={`/devices/${d.id}`} className="font-medium text-slate-200 hover:text-sky-300" dir="auto">
+                  <Link href={`/devices/${d.id}`} className="font-medium text-slate-200 hover:text-white" dir="auto">
                     {d.name}
                   </Link>
                   <div className="flex items-center gap-2">
@@ -135,7 +135,7 @@ async function DashboardContent() {
         </div>
 
         <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
-          <h2 className="text-lg font-semibold text-slate-50">{t.recentActivity}</h2>
+          <h2 className="text-[15px] font-semibold text-slate-50">{t.recentActivity}</h2>
           <p className="mt-1 text-xs text-slate-500">{t.playbackAndControlEvents}</p>
           {recentLogs.length === 0 ? (
             <p className="mt-4 text-sm text-slate-500">{t.noRecentActivity}</p>
@@ -148,7 +148,7 @@ async function DashboardContent() {
                     ? "bg-rose-500/10 text-rose-200 border-rose-500/30"
                     : log.level === "warning"
                       ? "bg-amber-500/10 text-amber-200 border-amber-500/30"
-                      : "bg-sky-500/10 text-sky-200 border-sky-500/30";
+                      : "bg-white/5 text-slate-300 border-white/10";
                 return (
                   <div
                     key={log.id}
@@ -178,7 +178,7 @@ async function DashboardContent() {
           )}
           <Link
             href="/logs"
-            className="mt-4 inline-block text-sm text-sky-400 hover:text-sky-300"
+            className="mt-4 inline-flex rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-white/[0.16]"
           >
             {t.logs} {L.dir === "rtl" ? "←" : "→"}
           </Link>

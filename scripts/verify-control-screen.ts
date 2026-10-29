@@ -57,5 +57,15 @@ assert("C21 automatic entry by role: only a person WITH a role that opens the Co
 const pendingApi = read("app/api/join/pending-count/route.ts");
 assert("C22 the join count answers {enabled:false,count:0} before any database or session call when the feature is off, and only a workspace admin gets a real number", pendingApi.indexOf("isJoinEnvEnabled()") < pendingApi.indexOf("requireWorkspaceAdmin()") && /enabled: false, count: 0/.test(pendingApi));
 
+// ── 2026-10-30 (owner): "organize the design of the whole control area in OUR design line" — the control skin ──
+const skin = read("components/control-screen/control-skin.css");
+const selectors = [...skin.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(^|\})\s*([^{}]+)\{/g)].map((m) => m[2].trim()).filter(Boolean);
+const scoped = (sel: string) => sel.split(/,(?![^(]*\))/).every((part) => /^(\[data-control-screen="true"\] \.mgmt-type|html\[data-sb-control\])/.test(part.trim()));
+assert("C23 the skin touches ONLY the control screen: every selector starts under [data-control-screen] .mgmt-type or html[data-sb-control] (the player and every other screen are untouched)", selectors.length > 10 && selectors.every(scoped), selectors.filter((x) => !scoped(x)));
+assert("C24 the line: cards lose their border (soft glass), buttons are soft pills, the main action is a solid WHITE pill (never blue), a destructive one the danger red, fields are filled and borderless, windows that open on a click are glass", /border-color: transparent !important;\s*background: linear-gradient/.test(skin) && /border-radius: 999px !important/.test(skin) && /background: rgba\(255, 255, 255, 0\.94\) !important;\s*color: #0a0a0a/.test(skin) && /background: #ff453a !important/.test(skin) && /border: 0 !important;\s*background: rgba\(255, 255, 255, 0\.07\)/.test(skin) && /backdrop-filter: blur\(48px\)/.test(skin) && !/#0a84ff;/.test(skin.replace(/\[class\*="bg-\[#0a84ff\]"\]/g, "")));
+assert("C25 the windows that open on a click (portals) are reached through a mark on the document, set when the control bar mounts and removed when it goes", /setAttribute\("data-sb-control", "1"\)/.test(bar) && /removeAttribute\("data-sb-control"\)/.test(bar) && /import "\.\/control-skin\.css"/.test(bar));
+const dash = read("app/(app)/dashboard/page.tsx");
+assert("C26 the Dashboard has no blue links and its page has side padding like the other screens", !/text-sky-/.test(dash) && /px-4 pb-8 pt-2 sm:px-6/.test(dash));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
