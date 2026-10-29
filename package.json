@@ -6,7 +6,7 @@
     "dev": "next dev --webpack",
     "dev:ws": "cd server && npm run dev",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:ws\"",
-    "build": "next build",
+    "build": "next build || next build || next build",
     "build:electron-web": "node desktop/scripts/build-electron-web.cjs",
     "desktop:shell": "npm run build:electron-web && npm run build --prefix desktop && node desktop/scripts/run-electron-with-staged-web.cjs",
     "start": "next start",
