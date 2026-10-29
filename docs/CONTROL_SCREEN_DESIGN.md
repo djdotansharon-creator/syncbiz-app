@@ -25,3 +25,12 @@ The player deck lives **inside** the shell's header. The control screen hides on
 
 ## Rollback
 Revert the merge commit (UI only; no data, no migration). The old tabbed management pages return as before.
+
+## Update 2026-10-29 (evening): the access code for Settings on the Player computer
+Owner: "no access code for More settings — do it now, 123".
+- On the **desktop app** (the Player computer), Settings now asks for the **access code**: `123` until the owner chooses his own (`lib/management-code.ts`; a deployment may override with `SYNCBIZ_MANAGEMENT_CODE`, 3+ characters). Typing it lifts the station lock for 60 minutes of inactivity (the existing unlock cookie). A **browser** (a remote computer) is never locked — no code, as specified.
+- The code lifts only the lock; **role still decides what is seen** (a branch employee still never gets the manager pages). A manager's own password still works in the same field.
+- `/settings` is not manager-only: `SettingsGate` (station lock only). The control bar offers a non-manager only "Settings".
+- Same rate limiter as sign-in (10 wrong tries per account / 20 per address → blocked 5 min).
+- **Not built:** the owner choosing his own code (needs a place in the database — a later migration), and "gear tab" as its own tab (today: the gear menu's "More settings" and the Control Room tab, both behind the code on the desktop app).
+- Tests: `scripts/verify-management-code.ts` (10). Runtime (local, desktop user agent): locked → lock screen, wrong code 401, `123` 200, then the settings render; a browser goes straight in.

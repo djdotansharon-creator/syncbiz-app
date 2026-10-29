@@ -23,7 +23,7 @@ const shell = read("components/app-shell.tsx");
 const css = read("components/control-screen/control-screen.css");
 const bar = read("components/control-screen/control-bar.tsx");
 
-assert("C3 the shell draws the control bar only on control paths, ABOVE the (kept) header, and marks the root data-control-screen", /isControlScreen \? <ControlBar \/> : null\}\s*<header/.test(shell) && /data-control-screen=\{isControlScreen \? "true" : undefined\}/.test(shell));
+assert("C3 the shell draws the control bar only on control paths, ABOVE the (kept) header, and marks the root data-control-screen", /isControlScreen \? <ControlBar[^>]*\/> : null\}\s*<header/.test(shell) && /data-control-screen=\{isControlScreen \? "true" : undefined\}/.test(shell));
 assert("C4 PLAYBACK SAFETY: the player\'s top-bar row is hidden by CSS only (display:none on .sources-app-header-row1) — never the whole header, which holds the player deck, and never unmounted", /header \.sources-app-header-row1 \{ display: none !important; \}/.test(css) && !/header\.sticky \{[^}]*display: none/.test(css) && !/isControlScreen \? null/.test(shell));
 assert("C5 the deck stays hidden exactly as in management mode (control routes are management routes)", /const isManagementRoute = isControlScreen \|\|/.test(shell));
 assert("C6 plain black: the control root and its theme scope are #000", /\[data-control-screen="true"\][^{]*\{ background: #000 !important; \}/.test(css.replace(/\n/g, " ")));

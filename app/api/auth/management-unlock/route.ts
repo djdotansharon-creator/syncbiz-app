@@ -1,13 +1,14 @@
 /**
  * MANAGEMENT LOCK API (owner 2026-10-13, security hotfix) — desktop station only.
  *   GET    → { desktop, canManage, unlocked, expiresAt }            (status for the UI)
- *   POST   { password } → manager re-auth → signed unlock cookie     (rate-limited: 5 / account, 20 / address, 15 min)
+ *   POST   { code } → the station access code (123 until the owner sets his own) — any signed-in person — OR a manager's own password → signed unlock cookie (rate-limited: 10 / account, 20 / address, 15 min)
  *   PUT    → "touch": the user is active → extend the unlock 15 min (only while it is still valid; polling never calls it)
  *   DELETE → lock now (clears the unlock)
  * A browser (not the desktop app) never needs this: management is open to a signed-in manager there.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { validateCredentialsAsync } from "@/lib/auth";
+import { matchesManagementCode } from "@/lib/management-code";
 import { getManagementAccess } from "@/lib/management-access";
 import { MGMT_UNLOCK_COOKIE, createUnlockValue, unlockCookieOptions } from "@/lib/management-unlock";
 import { attemptKeys, blockedFor, recordFailure, recordSuccess } from "@/lib/auth-rate-limit";
@@ -22,17 +23,18 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const a = await getManagementAccess();
   if (!a.signedIn || !a.email) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  if (!a.canManage) return NextResponse.json({ error: "Only a manager can unlock management." }, { status: 403 });
   const keys = attemptKeys("mgmt-unlock", a.email, req.headers);
   const wait = blockedFor(keys);
   if (wait > 0) {
     return NextResponse.json({ error: "Too many attempts. Try again later.", retryAfterSec: Math.ceil(wait / 1000) }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait / 1000)) } });
   }
-  const body = (await req.json().catch(() => ({}))) as { password?: unknown };
-  const password = typeof body.password === "string" ? body.password : "";
-  if (!password || !(await validateCredentialsAsync(a.email, password))) {
+  const body = (await req.json().catch(() => ({}))) as { code?: unknown; password?: unknown };
+  const entered = typeof body.code === "string" ? body.code : typeof body.password === "string" ? body.password : "";
+  // the station code opens the lock for anyone signed in (role still decides what they may see); a manager may also use their own password
+  const ok = entered !== "" && (matchesManagementCode(entered) || (a.canManage && (await validateCredentialsAsync(a.email, entered))));
+  if (!ok) {
     keys.forEach((k) => recordFailure(k));
-    return NextResponse.json({ error: "Wrong password." }, { status: 401 });
+    return NextResponse.json({ error: "Wrong code." }, { status: 401 });
   }
   keys.forEach((k) => recordSuccess(k));
   const { value, exp } = await createUnlockValue(a.email);
