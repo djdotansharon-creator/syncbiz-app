@@ -3,6 +3,7 @@ import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { parseSearchIntent } from "@/lib/search-intent";
 import { searchYouTubeWithApi } from "@/lib/youtube-api-search";
 import { searchYouTubeWithYtDlp, searchYouTubePlaylists } from "@/lib/yt-dlp-search";
+import { searchYouTubeByPage } from "@/lib/youtube-page-search";
 import { rankMusicFirst, rankRadioMusicFirst } from "@/lib/music-search-relevance";
 
 type SearchResult = {
@@ -76,8 +77,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. yt-dlp (no API key). The npm package "youtube-search-without-api-key" used to sit before this step; npm REMOVED it from the registry on 2026-10-29
-    //    (only a 0.0.1-security placeholder is left), which made every Railway `npm install` fail with a 404 — so the dependency is gone and yt-dlp is the key-less search.
+    // 2. YouTube's own results page, read directly (no API key): one request, about a second. This is what the npm package "youtube-search-without-api-key" did; npm removed that package on 2026-10-29
+    //    (every Railway install failed), and yt-dlp alone was far too slow for a typed search — so the same idea now lives in lib/youtube-page-search.ts, with no dependency.
+    if (results.length === 0) {
+      const pageResults = await searchYouTubeByPage(parsed.query, RESULT_LIMIT);
+      for (const r of pageResults) {
+        results.push({ title: r.title, url: r.url, cover: r.cover, type: "youtube", viewCount: r.viewCount, durationSeconds: r.durationSeconds });
+      }
+    }
+
+    // 3. yt-dlp last resort (the page could not be read)
     if (results.length === 0) {
       try {
         const ytDlpResults = await searchYouTubeWithYtDlp(parsed.query, RESULT_LIMIT);
