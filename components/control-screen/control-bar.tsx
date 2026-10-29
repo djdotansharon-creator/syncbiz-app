@@ -78,7 +78,7 @@ export function PlayerIcon({ size = 22 }: { size?: number }) {
   );
 }
 
-export function ControlBar() {
+export function ControlBar({ canManage = true }: { canManage?: boolean }) {
   const L = useMgmt();
   const tr = useTr();
   const pathname = usePathname() ?? "";
@@ -87,13 +87,15 @@ export function ControlBar() {
   if (pending && pending.from !== pathname) setPending(null);
   const current = pending && pending.from === pathname ? pending.href : pathname;
 
-  const items: Item[] = [
+  const all: Item[] = [
     { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon /> },
     { href: "/dashboard", label: L.t("nav.dashboard"), icon: <DashboardIcon /> },
     { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon /> },
     { href: "/access-control/display", label: L.t("nav.display"), icon: <DisplayIcon /> },
     { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> },
   ];
+  // the manager pages bounce a branch employee back to the player — so they are not offered (Settings is for everyone)
+  const items = canManage ? all : all.filter((it) => it.href === "/settings");
 
   return (
     <div className="sb-ctl-bar" dir={L.dir} role="banner">

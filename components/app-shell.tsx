@@ -1519,7 +1519,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope lg:h-screen lg:overflow-hidden" : ""}`}
         {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
       >
-        {isControlScreen ? <ControlBar /> : null}
+        {isControlScreen ? <ControlBar canManage={canManage} /> : null}
         <header
           className={`sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md${
             isMediaThemeRoute ? " sources-app-header" : ""

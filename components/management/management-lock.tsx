@@ -11,13 +11,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useTr } from "@/lib/i18n/use-tr";
 
 const IDLE_MS = 60 * 60 * 1000; // owner 2026-10-15: lock after one hour without activity
 const TOUCH_EVERY_MS = 60 * 1000;
 
 export function ManagementLockScreen() {
   const router = useRouter();
-  const [password, setPassword] = useState("");
+  const tr = useTr();
+  const [password, setPassword] = useState(""); // the access code (a manager may also type their own password)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,18 +32,18 @@ export function ManagementLockScreen() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ code: password }),
       });
       const d = (await res.json().catch(() => ({}))) as { error?: string; retryAfterSec?: number };
       if (!res.ok) {
-        setError(res.status === 429 ? `Too many attempts. Try again in ${Math.ceil((d.retryAfterSec ?? 900) / 60)} min.` : d.error ?? "Could not unlock.");
+        setError(res.status === 429 ? tr("Too many attempts. Try again in {n} min.", { n: Math.ceil((d.retryAfterSec ?? 900) / 60) }) : res.status === 401 ? tr("Wrong code.") : tr("Could not unlock."));
         setPassword("");
         return;
       }
       setPassword("");
       router.refresh();
     } catch {
-      setError("Could not reach the server.");
+      setError(tr("Could not reach the server."));
     } finally {
       setBusy(false);
     }
@@ -55,15 +57,16 @@ export function ManagementLockScreen() {
       >
         <div className="flex items-center gap-2 text-white/60">
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="4" y="11" width="16" height="10" rx="1" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-          <span className="text-[11px] font-medium uppercase tracking-[0.14em]">Management locked</span>
+          <span className="text-[11px] font-medium uppercase tracking-[0.14em]">{tr("Locked")}</span>
         </div>
-        <h1 className="mt-3 text-xl font-semibold">Manager sign-in required</h1>
-        <p className="mt-1 text-sm text-white/60">This is a station computer. Enter your manager password to open management.</p>
+        <h1 className="mt-3 text-xl font-semibold">{tr("Enter the access code")}</h1>
+        <p className="mt-1 text-sm text-white/60">{tr("This is the player computer. Enter the code to open settings and management.")}</p>
         <label className="mt-5 block">
-          <span className="text-xs text-white/50">Password</span>
+          <span className="text-xs text-white/50">{tr("Code")}</span>
           <input
             type="password"
-            autoComplete="current-password"
+            autoComplete="off"
+            inputMode="numeric"
             autoFocus
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -73,9 +76,9 @@ export function ManagementLockScreen() {
         </label>
         {error ? <p className="mt-3 text-sm text-amber-300" role="alert">{error}</p> : null}
         <div className="mt-6 flex items-center justify-between gap-3">
-          <Link href="/sources" className="text-sm text-white/60 hover:text-white">← Back to Player</Link>
+          <Link href="/sources" className="text-sm text-white/60 hover:text-white">← {tr("Back to Player")}</Link>
           <button type="submit" disabled={!password || busy} className="rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-black transition-transform active:scale-95 disabled:opacity-40">
-            {busy ? "Checking…" : "Unlock"}
+            {busy ? tr("Checking…") : tr("Open")}
           </button>
         </div>
       </form>

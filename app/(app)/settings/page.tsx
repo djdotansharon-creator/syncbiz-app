@@ -14,6 +14,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getLocale } from "@/lib/locale-server";
 import { trFor } from "@/lib/i18n/phrases";
+import { SettingsGate } from "@/components/management/management-gate";
 
 function PlaceholderCard({
   title,
@@ -57,7 +58,7 @@ function PlanTile({ label, price, best, bestLabel = "Best" }: { label: string; p
   );
 }
 
-export default async function SettingsPage() {
+async function SettingsContent() {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/settings");
 
@@ -230,5 +231,14 @@ export default async function SettingsPage() {
         <ClearPlaybackCacheButton />
       </section>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  // on the player computer (desktop app) the access code comes first; a browser goes straight in
+  return (
+    <SettingsGate from="/settings">
+      <SettingsContent />
+    </SettingsGate>
   );
 }

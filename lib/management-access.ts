@@ -52,3 +52,16 @@ export async function isManagementLockedForRequest(): Promise<boolean> {
 export function managementLockedResponse(): NextResponse {
   return NextResponse.json({ error: "Management is locked on this station. Unlock it with a manager password.", locked: true }, { status: 423 });
 }
+
+/**
+ * The station lock for pages that are NOT manager-only (Settings): signed in? on the desktop app? unlocked? — role is deliberately not part of it.
+ * A browser is never locked. (owner 2026-10-29: the code opens More settings on the player computer for whoever the owner gave it to.)
+ */
+export async function getStationLockState(): Promise<{ signedIn: boolean; desktop: boolean; unlocked: boolean }> {
+  const user = await getCurrentUserFromCookies();
+  const desktop = isDesktopAppUa((await headers()).get("user-agent"));
+  if (!user) return { signedIn: false, desktop, unlocked: false };
+  if (!desktop) return { signedIn: true, desktop: false, unlocked: true };
+  const exp = await verifyUnlockValue((await cookies()).get(MGMT_UNLOCK_COOKIE)?.value, user.email);
+  return { signedIn: true, desktop: true, unlocked: exp !== null };
+}

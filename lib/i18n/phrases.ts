@@ -657,6 +657,15 @@ export const HE_PHRASES: Record<string, string> = {
   "There are already 10 unused codes. Wait for one to expire.": "כבר יש 10 קודים שלא נוצלו. המתינו שאחד יפוג.",
   // ── control screen (2026-10-29) ──
   "Player": "נגן",
+  // ── station access code (2026-10-29) ──
+  "Enter the access code": "הקלידו את קוד הגישה",
+  "This is the player computer. Enter the code to open settings and management.": "זה מחשב הנגן. הקלידו את הקוד כדי לפתוח הגדרות וניהול.",
+  "Code": "קוד",
+  "Checking…": "בודק…",
+  "Back to Player": "חזרה לנגן",
+  "Wrong code.": "קוד שגוי.",
+  "Could not unlock.": "לא ניתן לפתוח.",
+  "Too many attempts. Try again in {n} min.": "יותר מדי ניסיונות. נסו שוב בעוד {n} דקות.",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };
