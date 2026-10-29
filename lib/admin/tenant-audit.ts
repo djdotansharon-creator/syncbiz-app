@@ -47,7 +47,11 @@ export type TenantAuditAction =
   | "device.enroll_reject"
   | "device.enroll_revoke"
   /** Device enrollment switched on / off or its settings changed for the workspace (entityId = the workspace id). */
-  | "enrollment.settings";
+  | "enrollment.settings"
+  /** Join by code (2026-10-29): an admin made a one-time code, and the decision on a person's request to join (target = the person). */
+  | "join.code_create"
+  | "join.approve"
+  | "join.reject";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -66,6 +70,9 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "device.enroll_reject",
   "device.enroll_revoke",
   "enrollment.settings",
+  "join.code_create",
+  "join.approve",
+  "join.reject",
 ];
 
 /**

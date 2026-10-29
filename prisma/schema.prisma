@@ -326,6 +326,8 @@ model Workspace {
 
   deviceEnrollments DeviceEnrollment[]
   enrollmentSetting WorkspaceEnrollmentSetting?
+  joinCodes         WorkspaceJoinCode[]
+  joinRequests      WorkspaceJoinRequest[]
 
   @@index([ownerId])
 }
@@ -629,6 +631,49 @@ model WorkspaceEnrollmentSetting {
   updatedAt   DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Join a business by a one-time code (docs/ACCOUNTS_JOIN_DESIGN.md) — made by a workspace admin, typed once by the person who joins. Only the hash is stored: the code itself is shown once to the admin.
+/// Dormant unless SYNCBIZ_JOIN_BY_CODE=1 (the table is never queried with the flag off, so an environment that has not been migrated yet is untouched).
+model WorkspaceJoinCode {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  /// sha256 of the normalised code (unique across workspaces so a typed code finds its business)
+  codeHash        String    @unique
+  createdByUserId String
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+}
+
+/// A person asking to join a business with a code. A NEW person has no User row until a workspace admin approves (so nothing about sign-in changes): the request carries the details and the password HASH.
+/// A person who already has an account (userId set) proved the password when asking and stores no hash.
+model WorkspaceJoinRequest {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  email           String
+  firstName       String
+  lastName        String
+  phone           String    @default("")
+  userId          String?
+  passwordHash    String?
+  /// pending | approved | rejected | expired
+  status          String    @default("pending")
+  /// the role chosen at approval: "MANAGER" | "MEMBER"
+  approvedRole    String?
+  decidedByUserId String?
+  decidedAt       DateTime?
+  requestedAt     DateTime  @default(now())
+  expiresAt       DateTime
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([email])
 }
 
 /// Control Room F3a (SHADOW) — ONE primary geographic / operational region per Location. Organization-level (never
