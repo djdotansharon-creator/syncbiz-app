@@ -25,8 +25,6 @@ export type WsTokenResult = {
   designatedMasterByBranch: Record<string, string> | null;
   /** Device enrollment: the role the manager approved for this device (signed claim); null = legacy token, today's behaviour. */
   enrollmentRole: "PLAYER" | "REMOTE" | null;
-  /** the owner's own computer (signed claim, only together with PLAYER): never auto-elected / auto-promoted; false = not (or legacy token). */
-  enrollmentOwner: boolean;
 };
 
 export function verifyWsToken(token: string): WsTokenResult | null {
@@ -49,7 +47,6 @@ export function verifyWsToken(token: string): WsTokenResult | null {
     stationBranchId?: unknown;
     designatedMasterByBranch?: unknown;
     enrollmentRole?: unknown;
-    enrollmentOwner?: unknown;
   };
   try {
     payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
@@ -88,16 +85,15 @@ export function verifyWsToken(token: string): WsTokenResult | null {
   }
 
   const enrollmentRole = payload.enrollmentRole === "PLAYER" || payload.enrollmentRole === "REMOTE" ? payload.enrollmentRole : null;
-  const enrollmentOwner = payload.enrollmentOwner === true && enrollmentRole === "PLAYER";
 
   if (payload.purpose === PURPOSE_WS_REGISTER) {
     if (payload.exp > now + 120) return null;
-    return { userId, authorizedBranches, workspaceId, stationDeviceId, stationBranchId, designatedMasterByBranch, enrollmentRole, enrollmentOwner };
+    return { userId, authorizedBranches, workspaceId, stationDeviceId, stationBranchId, designatedMasterByBranch, enrollmentRole };
   }
   if (payload.purpose === PURPOSE_DESKTOP_ACCESS) {
     if (payload.exp - payload.iat > MAX_DESKTOP_TTL_SEC) return null;
     if (payload.exp > now + MAX_DESKTOP_TTL_SEC) return null;
-    return { userId, authorizedBranches, workspaceId, stationDeviceId, stationBranchId, designatedMasterByBranch, enrollmentRole, enrollmentOwner };
+    return { userId, authorizedBranches, workspaceId, stationDeviceId, stationBranchId, designatedMasterByBranch, enrollmentRole };
   }
   return null;
 }

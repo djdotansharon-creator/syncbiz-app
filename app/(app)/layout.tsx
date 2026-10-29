@@ -15,7 +15,6 @@ import { isRolesEnvEnabled, blocksComputer } from "@/lib/roles";
 import { getMemberRole } from "@/lib/roles-store";
 import { isPhoneUa } from "@/lib/ua-detection";
 import { ComputerBlocked } from "@/components/roles/computer-blocked";
-import { RoleLanding } from "@/components/control-screen/role-landing";
 
 /**
  * App shell layout — wraps every page in `app/(app)/*`.
@@ -45,14 +44,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // Roles (owner 2026-10-29): a person whose role does not allow signing in from a COMPUTER sees only a notice on a computer. Off by default (SYNCBIZ_ROLES=1); only people GIVEN a role are affected; a phone and the
   // desktop app are never blocked; any failure here lets the person in (never locks anyone out).
   let computerBlocked = false;
-  let landOnControl = false; // a role that opens the Control Room lands on the control screen (browser only)
   if (user && isRolesEnvEnabled()) {
     try {
       const ua = (await headers()).get("user-agent") ?? "";
       if (!isPhoneUa(ua) && !isDesktopShellUserAgent(ua)) {
         const role = await getMemberRole(user.tenantId, user.id);
         computerBlocked = blocksComputer(role, { phone: false, desktopApp: false });
-        landOnControl = !computerBlocked && role?.openControlRoom === true;
       }
     } catch (e) {
       console.error("[roles] computer check failed — letting the person in", e instanceof Error ? e.message : String(e));
@@ -76,7 +73,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     <EnrollmentHold enforced={enrollmentEnforced}>
       <AppProviders>
         <div className="flex min-h-screen flex-col">
-          {landOnControl ? <RoleLanding /> : null}
           <AppShell>{children}</AppShell>
           <EditModalHost />
           <UndoToastHost />

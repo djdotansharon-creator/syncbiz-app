@@ -57,8 +57,6 @@ export type WsTokenClaims = {
    * REMOTE = never MASTER, never auto-promoted. Absent = legacy behaviour (today's), always.
    */
   enrollmentRole?: "PLAYER" | "REMOTE";
-  /** the owner's own computer (approved as owner class): it may play when made the player EXPLICITLY, but the WS server never elects or promotes it automatically. Absent = not the owner's computer. */
-  enrollmentOwner?: true;
 };
 
 function mintToken(
@@ -79,7 +77,6 @@ function mintToken(
     stationBranchId?: string;
     designatedMasterByBranch?: Record<string, string>;
     enrollmentRole?: "PLAYER" | "REMOTE";
-    enrollmentOwner?: true;
   } = {
     purpose,
     userId: userId.trim(),
@@ -96,7 +93,6 @@ function mintToken(
     payload.designatedMasterByBranch = claims.designatedMasterByBranch;
   }
   if (claims?.enrollmentRole === "PLAYER" || claims?.enrollmentRole === "REMOTE") payload.enrollmentRole = claims.enrollmentRole;
-  if (claims?.enrollmentOwner === true && claims?.enrollmentRole === "PLAYER") payload.enrollmentOwner = true;
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
   const sig = signPayload(payloadB64);
   return `${payloadB64}.${sig}`;

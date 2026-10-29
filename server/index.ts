@@ -134,18 +134,9 @@ type DeviceConnection = {
    * REMOTE = never MASTER, never auto-promoted, SET_MASTER ignored. null / absent = legacy behaviour, exactly as before.
    */
   enrollmentRole?: "PLAYER" | "REMOTE" | null;
-  /** the owner's own computer (signed claim): it plays only when made the player EXPLICITLY (SET_MASTER) — never elected at REGISTER, never auto-promoted. */
-  enrollmentOwner?: boolean;
 };
 
 const devices = new Map<string, DeviceConnection>();
-
-/**
- * Rooms (workspace:branch) where a Player was APPROVED — at least one device registered there carrying a signed PLAYER claim (not the owner's own computer) since this server started.
- * Owner 2026-10-29: "a computer defined as the branch's Player is the only one that can play; if it is off, nobody else becomes the Player automatically — only an explicit change".
- * So in these rooms a lost MASTER is NOT automatically replaced (see tryPromoteConnectedControlOnMasterLoss). Rooms with no claimed device (legacy, TEST, the pilot station) are untouched.
- */
-const enrolledRooms = new Set<string>();
 type ControllerEntry = {
   ws: import("ws").WebSocket;
   userId: string;
@@ -469,11 +460,6 @@ function demoteOtherMasters(roomKey: string, exceptDeviceId: string, newMasterId
 }
 
 function tryPromoteConnectedControlOnMasterLoss(roomKey: string): string | null {
-  // An approved Player defines this room: NO automatic failover — it is the only one that plays; a change is an explicit action (SET_MASTER / an admin).
-  if (enrolledRooms.has(roomKey)) {
-    logLeaseEvent("promote_skipped", { roomKey, reason: "enrollment_in_force_no_auto_failover", triggeredBy: "tryPromoteConnectedControlOnMasterLoss" });
-    return null;
-  }
   // Pilot PERMANENT MASTER: a permanently-designated branch has NO auto-promotion and NO failover. When the
   // designated station is offline the branch simply has no MASTER until it reconnects (REGISTER re-elects it).
   if (designatedByRoom.has(roomKey)) {
@@ -486,7 +472,6 @@ function tryPromoteConnectedControlOnMasterLoss(roomKey: string): string | null 
   devices.forEach((d) => {
     if (!isEligibleConnectedPlaybackCandidate(d, roomKey)) return;
     if (d.mode !== "CONTROL") return;
-    if (d.enrollmentOwner) return; // the owner's own computer plays only when made the player explicitly — never promoted automatically
     if (isStreamerStation(d)) {
       if (!streamerCandidate || d.connectedAt < streamerCandidate.connectedAt) {
         streamerCandidate = d;
@@ -1066,7 +1051,6 @@ wss.on("connection", (ws) => {
         const key = roomKey;
         const primaryId = primaryMasterByBranch.get(key);
         let masterDecisionReason = "";
-        if (auth.enrollmentRole === "PLAYER" && !auth.enrollmentOwner) enrolledRooms.add(key); // an approved Player defines this room's player (see enrolledRooms)
 
         const purpose = registrationIntent?.devicePurpose;
         const isStreamerReg = purpose === "branch_streamer_station";
@@ -1128,10 +1112,6 @@ wss.on("connection", (ws) => {
           // Device enrollment: the manager approved this device as a REMOTE (signed claim) — it controls, it never plays and never elects.
           mode = "CONTROL";
           masterDecisionReason = "enrollment: approved Remote -> CONTROL (never MASTER)";
-        } else if (auth.enrollmentOwner) {
-          // Device enrollment: the OWNER's own computer may play, but only when made the player explicitly (SET_MASTER) — opening the interface never takes the branch's player seat.
-          mode = "CONTROL";
-          masterDecisionReason = "enrollment: the owner's own computer -> CONTROL (plays only when made the player explicitly)";
         } else if (isMobile) {
           // Mobile must never own primary. Clean up any stale ownership.
           if (masterByBranch.get(key) === deviceId) {
@@ -1269,7 +1249,6 @@ wss.on("connection", (ws) => {
           registrationIntent,
           designatedTrusted,
           enrollmentRole: auth.enrollmentRole,
-          enrollmentOwner: auth.enrollmentOwner,
         });
         console.log("[SyncBiz WS] register device", { deviceId, userId, branchId, mode });
         logLeaseEvent("register", {
