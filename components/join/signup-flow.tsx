@@ -9,8 +9,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTr } from "@/lib/i18n/use-tr";
+import { joinCodeFromQuery } from "@/lib/join-link";
 import "./join.css";
 
 type Step = "details" | "choice" | "business" | "code" | "sent";
@@ -90,6 +91,14 @@ export function SignupFlow() {
   const [d, setD] = useState({ firstName: "", lastName: "", email: "", password: "", phone: "" });
   const [company, setCompany] = useState("");
   const [code, setCode] = useState("");
+  const [fromLink, setFromLink] = useState(false); // opened from a QR code / a join link: the code is already in it
+  useEffect(() => {
+    const c = joinCodeFromQuery(new URLSearchParams(window.location.search).get("join"));
+    if (c) {
+      setCode(c);
+      setFromLink(true);
+    }
+  }, []);
   const set = (k: keyof typeof d) => (e: React.ChangeEvent<HTMLInputElement>) => setD((s) => ({ ...s, [k]: e.target.value }));
 
   function detailsNext(e: React.FormEvent) {
@@ -99,7 +108,7 @@ export function SignupFlow() {
     if (!d.email.includes("@")) return setError(tr(JOIN_ERRORS.email));
     if (d.password.length < 6) return setError(tr(JOIN_ERRORS.password));
     setError("");
-    setStep("choice");
+    setStep(fromLink ? "code" : "choice"); // a person who scanned a join QR skips the choice: they are joining
   }
 
   async function createBusiness(e: React.FormEvent) {

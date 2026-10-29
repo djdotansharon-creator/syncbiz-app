@@ -11,7 +11,7 @@ Owner brief 2026-10-29: every person has their own sign-in; a new person either 
 | Public: flag, send request | `GET /api/join/config`, `POST /api/join/request` |
 | Admin (workspace admin only): make code, list, decide | `POST /api/join/codes`, `GET /api/join/requests`, `POST /api/join/requests/[id]` |
 | Sign-up in steps (details → new / join → code) | `components/join/signup-flow.tsx`, chosen by `app/signup/page.tsx` |
-| Owner panel "People joining" (top of Access Control) | `components/join/join-people-panel.tsx` |
+| Owner side: the **People grid** of the Permissions screen (a square per person, the plus tile makes the one-time code + its QR, waiting people are squares too) | `components/roles/people-grid.tsx`, `qr-code.tsx`, vendored `lib/vendor/qrcode-generator.js` |
 | Tables (two NEW, nothing existing touched) | `WorkspaceJoinCode`, `WorkspaceJoinRequest` — migration `20261029120000_join_by_code` |
 | Tests | `scripts/verify-join-by-code.ts` (12), `scripts/verify-join-by-code-db.ts` (22, real local DB) |
 
@@ -26,7 +26,7 @@ Owner brief 2026-10-29: every person has their own sign-in; a new person either 
 - **Birth date is not collected** (no use for it, and it only lowers sign-ups).
 
 ## Known gaps (not built yet)
-- No QR code (needs a QR generator; the code is the same value).
+- ~~No QR code~~ — built 2026-10-30: the plus tile shows a QR of the sign-up link with the code inside (`/signup?join=ABCD-EFGH`); a person who scans it lands on the join step with the code filled in. The generator is VENDORED (no new npm dependency). The other direction (the owner scans a QR shown by the new person) is not built.
 - No e-mail check: the approver vouches for the person (the request shows name + e-mail + phone). Two-step sign-in is a later item.
 - No red dot for waiting people on the Control Room tab; the panel is in Access Control until stage 3 moves it.
 - The payment step for the first Player: no payment provider is connected yet.

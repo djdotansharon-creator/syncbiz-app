@@ -11,7 +11,7 @@ Needs the env flag **`SYNCBIZ_ROLES=1`** and the migration **`20261029200000_rol
 | Database side | `lib/roles-store.ts` |
 | API (workspace admin only) | `GET/POST /api/roles`, `PATCH/DELETE /api/roles/[id]`, `POST /api/roles/access-code` |
 | Owner panel "Roles" (top of Access Control) | `components/roles/roles-panel.tsx` |
-| Pick a role when approving a joiner | `components/join/join-people-panel.tsx`, `lib/join-by-code-store.ts` (`roleId`) |
+| Pick a role when approving a joiner | `components/roles/people-grid.tsx` (the request tile), `lib/join-by-code-store.ts` (`roleId`) |
 | The door: a computer is turned away for a person whose role forbids it | `app/(app)/layout.tsx` + `components/roles/computer-blocked.tsx` |
 | The owner's code replaces 123 | `app/api/auth/management-unlock/route.ts` |
 | Tests | `scripts/verify-roles.ts` (13), `scripts/verify-roles-db.ts` (18, real local DB) |

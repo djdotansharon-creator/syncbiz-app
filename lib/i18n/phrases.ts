@@ -701,6 +701,17 @@ export const HE_PHRASES: Record<string, string> = {
   "You cannot change your own role.": "אי אפשר לשנות את התפקיד של עצמך.",
   "The owner and workspace admins keep their level.": "הבעלים ומנהלי העסק שומרים על הדרגה שלהם.",
   "That role no longer exists.": "התפקיד הזה כבר לא קיים.",
+  // ── people grid + QR (2026-10-30) ──
+  "Search by name or role": "חיפוש לפי שם או דרגה",
+  "Add a person": "הוספת אדם",
+  "No one matches.": "אף אחד לא תואם.",
+  "Phone": "טלפון",
+  "Account": "חשבון",
+  "Scan the code with a phone camera, or type it at sign-up.": "סרקו עם מצלמת הטלפון, או הקלידו את הקוד בהרשמה.",
+  "QR code to join": "קוד QR להצטרפות",
+  "Copy link": "העתקת קישור",
+  "New code": "קוד חדש",
+  "The person fills in their details and you approve them here.": "האדם ממלא את הפרטים שלו ואתם מאשרים אותו כאן.",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };
