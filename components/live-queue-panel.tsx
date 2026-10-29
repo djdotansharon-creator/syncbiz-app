@@ -952,7 +952,9 @@ export function LiveQueuePanel() {
   const nowPlayingDetached = (() => {
     const highlightShown = sessionTracks.length > 0 && displayedSessionTracks.some((x) => x.originalIndex === sessionForList.highlightIndex);
     if (isControlMirror) {
-      if (highlightShown) return null;
+      // owner 2026-10-30: while a Play Next song plays on the MASTER (e.g. the recommended next song) the mirror still carries the BASELINE list and its highlight, so the highlight is "shown" — but the song
+      // that plays is the Play Next one. The MASTER's own panel draws it detached for exactly this case (below); the Remote must too, or it shows the wrong song as "Now playing".
+      if (highlightShown && !isPlayNextSourceId(masterState?.currentSource?.id)) return null;
       const mt = masterState?.currentTrack;
       const msrc = masterState?.currentSource;
       if (!mt && !msrc) return null;
