@@ -1,0 +1,39 @@
+/* SETTINGS (More settings) on the control screen — owner 2026-10-29: "match our design line, abstract, as it should be". Plain black, no frames: a quiet title, sections separated by a hairline,
+   an icon + a name for each, the controls as soft pills. Only under .sb-set; the controls that other components draw inside are softened (their borders removed) from here. */
+
+.sb-set { max-width: 880px; margin: 0 auto; padding: 24px 24px 96px; color: #fff; }
+.sb-set-head h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.sb-set-head p { margin: 5px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+.sb-set-sec { padding: 30px 0 6px; border-top: 1px solid rgba(255, 255, 255, 0.07); margin-top: 26px; }
+.sb-set-head + .sb-set-sec { margin-top: 22px; }
+.sb-set-sec-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.sb-set-ico { flex: none; width: 22px; height: 22px; color: rgba(255, 255, 255, 0.62); }
+.sb-set-sec-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.sb-set-sec-head p { margin: 2px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, 0.48); }
+.sb-set-action { margin-inline-start: auto; flex: none; }
+.sb-set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 30px 44px; padding-bottom: 22px; }
+.sb-set-sub { min-width: 0; }
+.sb-set-sub h3 { margin: 0; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.88); }
+.sb-set-sub > p { margin: 3px 0 12px; font-size: 12px; line-height: 1.5; color: rgba(255, 255, 255, 0.45); }
+.sb-set-pill { display: inline-flex; align-items: center; border-radius: 999px; border: 0; background: rgba(255, 255, 255, 0.92); color: #0a0a0a; padding: 8px 18px; font-size: 13px; font-weight: 650; text-decoration: none; cursor: pointer; transition: background-color 0.15s, transform 0.12s; }
+.sb-set-pill:hover { background: #fff; }
+.sb-set-pill:disabled, .sb-set-pill[disabled] { opacity: 0.45; cursor: default; }
+.sb-set-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 22px 36px; padding-bottom: 22px; }
+.sb-set-fact b { display: block; margin-top: 3px; font-size: 15px; font-weight: 600; }
+.sb-set-fact small { display: block; margin-top: 2px; font-size: 12px; color: rgba(255, 255, 255, 0.45); }
+.sb-set-fact span { font-size: 11.5px; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.5); }
+.sb-set-list { margin: 0; padding: 0 0 22px; list-style: none; display: grid; gap: 12px; }
+.sb-set-list li { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: rgba(255, 255, 255, 0.78); }
+.sb-set-list li i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #5fe3a1; }
+.sb-set-muted { padding-bottom: 22px; font-size: 12.5px; color: rgba(255, 255, 255, 0.4); }
+
+/* soften what the embedded controls draw: no frames, soft glass pills instead */
+.sb-set [class*="border-slate"], .sb-set [class*="border-amber"], .sb-set [class*="border-white"] { border-color: transparent !important; }
+.sb-set [class*="bg-slate-9"], .sb-set [class*="bg-slate-8"], .sb-set [class*="bg-amber-500"] { background-color: rgba(255, 255, 255, 0.09) !important; }
+.sb-set [class*="hover:bg-slate-8"]:hover, .sb-set [class*="hover:bg-amber-500"]:hover { background-color: rgba(255, 255, 255, 0.16) !important; }
+.sb-set [class*="text-amber-3"] { color: rgba(255, 255, 255, 0.85) !important; }
+.sb-set button[class*="rounded-lg"], .sb-set button[class*="rounded-md"] { border-radius: 999px; }
+.sb-set [class*="p-0.5"][class*="rounded-lg"] { border-radius: 999px; }
+.sb-set [class*="p-0.5"] button { border-radius: 999px; }
+.sb-set p[class*="uppercase"] { text-transform: none; letter-spacing: 0; }
+.sb-set button[aria-pressed="true"] { background-color: rgba(255, 255, 255, 0.92) !important; color: #0a0a0a !important; }

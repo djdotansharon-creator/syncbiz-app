@@ -89,21 +89,20 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
 
   const all: Item[] = [
     { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon /> },
+    { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> }, // right beside the Control Room (owner 2026-10-29)
     { href: "/dashboard", label: L.t("nav.dashboard"), icon: <DashboardIcon /> },
     { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon /> },
     { href: "/access-control/display", label: L.t("nav.display"), icon: <DisplayIcon /> },
-    { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> },
   ];
   // the manager pages bounce a branch employee back to the player — so they are not offered (Settings is for everyone)
   const items = canManage ? all : all.filter((it) => it.href === "/settings");
 
   return (
     <div className="sb-ctl-bar" dir={L.dir} role="banner">
-      {/* the corner button: to the live player and back — no code */}
-      <Link href="/sources" prefetch className="sb-ctl-corner" title={tr("Player")} aria-label={tr("Player")}>
-        <PlayerIcon />
-        <span>{tr("Player")}</span>
-      </Link>
+      {/* the START edge: the VONO mark (right in Hebrew, left in English) */}
+      <span className="sb-ctl-brand sb-brand flex shrink-0 items-center" role="img" aria-label="VONO">
+        <span className="sb-brand-mark" aria-hidden />
+      </span>
       <nav className="sb-ctl-nav" aria-label={L.t("nav.aria")}>
         {items.map((it) => {
           const active = current === it.href || (current.startsWith(it.href + "/") && !items.some((o) => o !== it && o.href.startsWith(it.href + "/") && (current === o.href || current.startsWith(o.href + "/"))));
@@ -115,7 +114,11 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
           );
         })}
       </nav>
-      <span className="sb-ctl-balance" aria-hidden />
+      {/* the END edge (left in Hebrew, right in English): to the live player and back — no code. The icon is the end-most thing, in the same spot as the player's "back to the control screen" icon. */}
+      <Link href="/sources" prefetch className="sb-ctl-corner" title={tr("Player")} aria-label={tr("Player")}>
+        <span>{tr("Player")}</span>
+        <i className="sb-ctl-corner-ico"><PlayerIcon /></i>
+      </Link>
     </div>
   );
 }

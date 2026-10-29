@@ -37,5 +37,14 @@ const hold = read("components/enrollment-hold.tsx");
 assert("C12 only an APPROVED REMOTE opens on the control screen — and only once per tab, only from the player\'s home (so the corner button and Back are never fought)", /st\.status === "approved" && st\.role === "REMOTE"/.test(hold) && /vono_remote_home/.test(hold) && /pathname === "\/" \|\| pathname === "\/sources"/.test(hold) && /router\.replace\("\/owner\/control-room"\)/.test(hold));
 assert("C13 a Player (the owner\'s own computer, a station) gets no redirect: the landing component is mounted for REMOTE only", /role === "REMOTE"[\s\S]{0,200}<RemoteHome \/>/.test(hold) && (hold.match(/<RemoteHome \/>/g) ?? []).length === 1);
 
+// ── 2026-10-29 (owner): Settings beside the Control Room; the Player button at the END edge (left in Hebrew, right in English), the VONO mark at the START edge; the way back lands in the very same spot ──
+const order = [...bar.matchAll(/\{ href: "([^"]+)", label: [^}]+icon:/g)].map((m) => m[1]);
+assert("C14 the buttons are Control Room, Settings (right beside it), Dashboard, Permissions, Display — in that order", order.join(",") === "/owner/control-room,/settings,/dashboard,/access-control,/access-control/display", order);
+assert("C15 the VONO mark is the first thing (the START edge) and the Player button the last (the END edge), inside the bar's grid", bar.indexOf('className="sb-ctl-brand') < bar.indexOf('className="sb-ctl-nav"') && bar.indexOf('className="sb-ctl-nav"') < bar.indexOf('className="sb-ctl-corner"') && /grid-template-columns: 1fr auto 1fr/.test(css) && /\.sb-ctl-brand \{ justify-self: start; \}/.test(css) && /\.sb-ctl-corner \{ justify-self: end;/.test(css));
+assert("C16 the Player button's ICON is its end-most part (word first, icon last) — so it is the same spot as the player's back icon", /<span>\{tr\("Player"\)\}<\/span>\s*<i className="sb-ctl-corner-ico"><PlayerIcon \/><\/i>/.test(bar));
+const shellSrc = shell;
+assert("C17 in the player the way back is the LAST item of the bar's right block (end-most corner), not in the left block", shellSrc.indexOf('<DesktopUpdatePill />') < shellSrc.indexOf('className="sb-ctl-back"') && shellSrc.indexOf('className="sb-ctl-back"') < shellSrc.indexOf("Row 3: Player") && /\.sb-ctl-back \{ order: 100;/.test(css));
+assert("C18 both bars are 56px tall with the same 16px side padding and 34px icon boxes (measured to land the two icons at the same x / y)", /\.sb-ctl-bar \{[^}]*height: 56px; padding-inline: 16px;/.test(css) && /\.sb-ctl-corner-ico \{[^}]*width: 34px; height: 34px;/.test(css) && /\.sb-ctl-back \{[^}]*width: 34px; height: 34px;/.test(css));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
