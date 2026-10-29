@@ -683,6 +683,24 @@ export const HE_PHRASES: Record<string, string> = {
   "Sign in from your phone": "התחברו מהטלפון",
   "This account can only be used from a phone.": "החשבון הזה מיועד לשימוש מהטלפון בלבד.",
   "Sign out": "התנתקות",
+  // ── people (2026-10-29) ──
+  "People": "אנשים",
+  "You": "את/ה",
+  "Never signed in": "עוד לא התחבר",
+  "Just now": "עכשיו",
+  "{n} min ago": "לפני {n} דקות",
+  "{n} h ago": "לפני {n} שעות",
+  "{n} days ago": "לפני {n} ימים",
+  "Level": "דרגה",
+  "State": "מצב",
+  "Last sign-in": "התחברות אחרונה",
+  "Joined": "הצטרף",
+  "Active": "פעיל",
+  "Paused": "מושהה",
+  "Disabled": "מושבת",
+  "You cannot change your own role.": "אי אפשר לשנות את התפקיד של עצמך.",
+  "The owner and workspace admins keep their level.": "הבעלים ומנהלי העסק שומרים על הדרגה שלהם.",
+  "That role no longer exists.": "התפקיד הזה כבר לא קיים.",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };
