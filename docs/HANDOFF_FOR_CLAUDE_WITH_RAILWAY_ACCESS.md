@@ -17,7 +17,7 @@ His own words are in Appendix A (Hebrew, verbatim excerpts). The shape:
 7. Visual rules: no frames around icons, soft glass, plain black for management screens, nothing that risks playback.
 
 ## 3. What is already merged to `main` (all UI/server changes are additive)
-`main` = **`41bcd3d`** (deployed on PROD 2026-10-29 ~22:43 — `GET /api/join/config` and `GET /api/roles` both answer `enabled:false`). Earlier live states: `198ef02`, `f8c19fe`. Previous known states: `955855f` (before accounts work), `9f15c1a`, `df9b703`.
+`main` moves quickly — check `git log origin/main`. Last confirmed LIVE on PROD: `41bcd3d` (2026-10-29 ~22:43; `GET /api/join/config` and `GET /api/roles` answer `enabled:false`). Merges after it (#88, #89, #90, this doc) may or may not have deployed: **Railway has reported "Deployment failed" for some merges that build and boot cleanly from a fresh checkout — if `syncbiz-app` is not on the newest commit, open its Deployments → the failed one → logs, and Redeploy.** Previous known states: `955855f` (before accounts work), `9f15c1a`, `df9b703`.
 
 | Feature | PRs | State on PROD |
 |---|---|---|
@@ -28,6 +28,9 @@ His own words are in Appendix A (Hebrew, verbatim excerpts). The shape:
 | **Access code for Settings on the Player computer** (desktop app only; `123`) | #83 | live; browsers are never locked |
 | **Roles with switches + the owner's own access code** (panel "Roles" in Access Control; pick a role when approving a joiner; a role can forbid signing in from a computer) | #85 | **dormant** — needs migration + `SYNCBIZ_ROLES=1` |
 | `build` script retries `next build` up to 3× (Google Fonts fetch flake) | #86 | live |
+| Control screen polish: Settings beside the Control Room, Player button at the END edge (left in Hebrew / right in English) + VONO mark at the start, the player's way-back icon in exactly the same spot, frameless Settings | #88 | live once deployed |
+| Permissions screen **People** list (name, level, state, last sign-in; click for details; with roles on: give an existing person another role) | #89 | list live; role change needs `SYNCBIZ_ROLES=1` |
+| **WS rule: the approved Player is the only one that plays; no automatic replacement; the owner's own computer is never auto-elected/promoted** (signed claim `enrollmentOwner`) — `docs/MASTER_RULE_APPROVED_PLAYER.md` | #90 | dormant — only for devices with an enrollment claim (approval on); `syncbiz-ws` redeploys |
 
 Design docs: `docs/DEVICE_ENROLLMENT_DESIGN.md`, `docs/DEVICE_ENROLLMENT_ROLLBACK.md`, `docs/ACCOUNTS_JOIN_DESIGN.md`, `docs/CONTROL_SCREEN_DESIGN.md`.
 
@@ -54,9 +57,10 @@ The owner approved this explicitly on 2026-10-29, **including that the father's 
 **Do not enable these for any real customer yet** — see "known gaps" (the data routes still answer to a session cookie; the planned per-device credential, design Phase 4a, must land first).
 
 ## 5. What the other Claude is building next (do not duplicate; it will merge to `main` as dormant PRs)
-- Changing the role of an EXISTING member from the Roles screen (roles are assigned at approval today).
+- Red circle on the Control Room tab for people waiting to join; role-based landing; a dedicated gear tab on the Player computer; the phone UI.
 - Red circle for waiting people on the Control Room, role-based landing.
-- Later, **only with the owner's explicit yes and a Lenovo-class regression on TEST first**: "a branch with an approved Player has no auto-promotion of a Remote" (MASTER logic), the free phone Player rules, payment (provider not chosen — owner said drop it for now).
+- Later: the free phone Player rules; payment (provider not chosen — owner said drop it for now).
+- **Runtime acceptance of the WS rule (#90) when you switch approval on** (it is only PROVEN BY TEST so far): the father's browser approved as **Player** keeps playing across a page reload; closing it leaves the branch silent (by design) and the owner's computer does NOT take over; the owner can still make his own computer the player explicitly (Settings → Remote player → MASTER). Record the result in `docs/VONO_PILOT_BASELINE.md` as owner-attested or log-corroborated.
 
 ## 6. Known gaps (written down on purpose)
 - **Data routes:** device approval is enforced at the client hold and the WS token, not on every REST data route (a signed-in person with a not-approved device could still call the REST API directly). Fix = revocable per-device credential (design Phase 4a). Fine for the owner's own workspace; required before a real customer.
