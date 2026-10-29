@@ -17,7 +17,7 @@ His own words are in Appendix A (Hebrew, verbatim excerpts). The shape:
 7. Visual rules: no frames around icons, soft glass, plain black for management screens, nothing that risks playback.
 
 ## 3. What is already merged to `main` (all UI/server changes are additive)
-`main` = **`198ef02`** (verified deployed on PROD at 2026-10-29 ~22:26 — `GET /api/join/config` returns `{"enabled":false}`). Previous known states: `955855f` (before accounts work), `9f15c1a`, `df9b703`.
+`main` = **`41bcd3d`** (deployed on PROD 2026-10-29 ~22:43 — `GET /api/join/config` and `GET /api/roles` both answer `enabled:false`). Earlier live states: `198ef02`, `f8c19fe`. Previous known states: `955855f` (before accounts work), `9f15c1a`, `df9b703`.
 
 | Feature | PRs | State on PROD |
 |---|---|---|
@@ -26,32 +26,35 @@ His own words are in Appendix A (Hebrew, verbatim excerpts). The shape:
 | **Join a business by a one-time code** (sign-up in steps, "People joining" panel in Access Control) | #81 | **dormant** — needs migration + env flag |
 | **Control screen** (separate black screen, corner button, Settings out of the rails workspace, Remote lands on it) | #82 | live (the Remote landing needs enrollment on) |
 | **Access code for Settings on the Player computer** (desktop app only; `123`) | #83 | live; browsers are never locked |
+| **Roles with switches + the owner's own access code** (panel "Roles" in Access Control; pick a role when approving a joiner; a role can forbid signing in from a computer) | #85 | **dormant** — needs migration + `SYNCBIZ_ROLES=1` |
+| `build` script retries `next build` up to 3× (Google Fonts fetch flake) | #86 | live |
 
 Design docs: `docs/DEVICE_ENROLLMENT_DESIGN.md`, `docs/DEVICE_ENROLLMENT_ROLLBACK.md`, `docs/ACCOUNTS_JOIN_DESIGN.md`, `docs/CONTROL_SCREEN_DESIGN.md`.
 
 ## 4. YOUR TASK — turn the dormant features on for the OWNER'S workspace only (PROD)
 The owner approved this explicitly on 2026-10-29, **including that the father's computer may get stuck on the request screen until approved** ("no problem"). Do it with the owner present so he can approve the first requests at once.
 
-**Why migrations are needed:** four migrations create **new tables only** (no existing table changes), so deploys before them were safe; the features need them before being switched on.
+**Why migrations are needed:** five migrations create **new tables only** (no existing table changes), so deploys before them were safe; the features need them before being switched on.
 
 1. **Back up** the PROD database (Railway → Postgres → Backups, or `pg_dump`). Note the Railway deployment ID currently live for `syncbiz-app` (rollback reference).
 2. **Check what is pending:**
    `SYNCBIZ_ALLOW_PROD_DB=1 DATABASE_URL="<PROD public URL>" npx prisma migrate status`
-   Expect these four pending (and nothing else): `20261027161357_device_enrollment`, `20261028120000_device_enrollment_requester`, `20261028180000_device_enrollment_branch_details`, `20261029120000_join_by_code`. If anything else is pending or the status shows drift — **stop and ask the owner**.
+   Expect these five pending (and nothing else): `20261027161357_device_enrollment`, `20261028120000_device_enrollment_requester`, `20261028180000_device_enrollment_branch_details`, `20261029120000_join_by_code`, `20261029200000_roles`. If anything else is pending or the status shows drift — **stop and ask the owner**.
 3. **Apply:** `SYNCBIZ_ALLOW_PROD_DB=1 DATABASE_URL="<PROD public URL>" npx prisma migrate deploy` (the guard `scripts/prisma-safe.mjs` refuses a non-local target without `SYNCBIZ_ALLOW_PROD_DB=1`; that is intentional). Then `migrate status` must say up to date. Never print or store the URL in a file, doc or commit.
 4. **Environment variables on the `syncbiz-app` service** (Railway → Variables), then redeploy:
    - `SYNCBIZ_DEVICE_ENROLLMENT=1`
    - `SYNCBIZ_JOIN_BY_CODE=1`
+   - `SYNCBIZ_ROLES=1`
    - optional: `SYNCBIZ_MANAGEMENT_CODE=<3+ chars>` (otherwise the Player-computer access code is `123`)
    The `syncbiz-ws` service needs no new variable (the role travels as a signed claim in the token; it already knows `SYNCBIZ_WS_SECRET`).
 5. **Switch device approval on for the owner's workspace only:** sign in as the owner on PROD → Control Room → the first tile "New requests" (plus + red count) → the switch. This automatically approves every existing **station** and the **owner's own computer** (normal interface, can play, no seat). Anything else — e.g. the father's browser — becomes a pending request: approve it (as **Player** if it plays music) right away from the owner's computer.
-6. **Verify (and tell the owner what you saw):** (a) the owner's computer still works and can play; (b) the father's computer asks, and plays again after approval; (c) a second browser profile shows the request screen with only the two big icons (Player / Remote) and, once approved as Remote, **opens on the control screen**; (d) `/api/join/config` → `{"enabled":true}`; sign-up page shows the "new business / join" step; Access Control shows **People joining** and can make a one-time code; (e) the Lenovo pilot station is **not** affected (it is pinned to TEST — do not touch it).
+6. **Verify (and tell the owner what you saw):** (a) the owner's computer still works and can play; (b) the father's computer asks, and plays again after approval; (c) a second browser profile shows the request screen with only the two big icons (Player / Remote) and, once approved as Remote, **opens on the control screen**; (d) `/api/join/config` → `{"enabled":true}` and `/api/roles` (signed in as the owner) lists Manager / Shift manager / Employee; sign-up page shows the "new business / join" step; Access Control shows **People joining** and can make a one-time code; (e) the Lenovo pilot station is **not** affected (it is pinned to TEST — do not touch it).
 7. **Roll back** if anything is wrong: remove `SYNCBIZ_DEVICE_ENROLLMENT` / `SYNCBIZ_JOIN_BY_CODE` and redeploy (instant, no data loss), or switch the workspace off in the panel. Full table in `docs/DEVICE_ENROLLMENT_ROLLBACK.md` and `docs/ACCOUNTS_JOIN_DESIGN.md`.
 
 **Do not enable these for any real customer yet** — see "known gaps" (the data routes still answer to a session cookie; the planned per-device credential, design Phase 4a, must land first).
 
 ## 5. What the other Claude is building next (do not duplicate; it will merge to `main` as dormant PRs)
-- Roles defined by the owner, with switches (incl. "may sign in from a computer"), chosen when approving a joiner; the owner choosing his own access code (needs a small new table).
+- Changing the role of an EXISTING member from the Roles screen (roles are assigned at approval today).
 - Red circle for waiting people on the Control Room, role-based landing.
 - Later, **only with the owner's explicit yes and a Lenovo-class regression on TEST first**: "a branch with an approved Player has no auto-promotion of a Remote" (MASTER logic), the free phone Player rules, payment (provider not chosen — owner said drop it for now).
 
@@ -59,6 +62,7 @@ The owner approved this explicitly on 2026-10-29, **including that the father's 
 - **Data routes:** device approval is enforced at the client hold and the WS token, not on every REST data route (a signed-in person with a not-approved device could still call the REST API directly). Fix = revocable per-device credential (design Phase 4a). Fine for the owner's own workspace; required before a real customer.
 - Join-by-code has **no e-mail verification** (the approver vouches for the person) and no QR yet.
 - Payment is not connected (no provider chosen).
+- `next build` intermittently fails fetching Google Fonts (`next/font/google queries have exactly one entry`); the build script now retries 3×. Longer-term: self-host the fonts (`next/font/local`).
 - Railway has twice produced deployments reported as "failed" / no deployment at all for merges that build and boot cleanly from a fresh checkout (verified 2026-10-29: `npm ci` + `next build` with no env files, then `next start`). If a deploy does not appear or fails, look at the Railway build log — the cause was not in the code. A later redeploy of `198ef02` succeeded.
 
 ## Appendix A — the owner's brief (verbatim excerpts, Hebrew; "[...]" marks what was left out), 2026-10-29
