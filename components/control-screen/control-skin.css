@@ -1,0 +1,87 @@
+/* CONTROL SKIN (owner 2026-10-30: "organize the design of the whole control area — the Permissions screen, the windows that open on a click, the sub-buttons, the Dashboard — in OUR design line").
+   The line is the Control Room's own (the `cr-*` primitives in globals.css): soft glass cards WITHOUT borders, soft white pills for every button (a solid white pill for the main action — never blue),
+   filled borderless fields, flat counters, hairline dividers. The legacy management screens were written with Tailwind slate boxes (`rounded-2xl border border-slate-800 bg-slate-950/50`); this file re-skins
+   them from CSS so the whole area looks like one product, without touching their logic. Applies under `.mgmt-type` (the page root of Control Room / Dashboard / Access Control / Display) and to the windows
+   that open on a click (anything `fixed inset-0`, incl. portals — `html[data-sb-control]` is set by the control bar). No backdrop blur on the many nested cards (Windows GPU history): flat gradients only. */
+
+/* ── 1. cards: borders off, a soft glass fill ── */
+[data-control-screen="true"] .mgmt-type :is(div, section, article)[class*="border-slate"][class*="bg-slate"] {
+  border-color: transparent !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.042)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 0 0 1px rgba(255, 255, 255, 0.03) !important;
+  border-radius: 24px !important;
+}
+/* boxes inside a card: a flatter, lighter tile (so cards never stack into a heavy fog) */
+[data-control-screen="true"] .mgmt-type :is(div, section, article)[class*="border-slate"][class*="bg-slate"] :is(div, li, article)[class*="border-slate"][class*="bg-slate"] {
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: none !important;
+  border-radius: 16px !important;
+}
+/* rows that only have a hairline (lists) keep it, softer */
+[data-control-screen="true"] .mgmt-type [class*="divide-"] > * + * { border-color: rgba(255, 255, 255, 0.06) !important; }
+[data-control-screen="true"] .mgmt-type [class*="border-t"][class*="border-slate"], [data-control-screen="true"] .mgmt-type [class*="border-b"][class*="border-slate"] { border-color: rgba(255, 255, 255, 0.07) !important; }
+
+/* ── 2. buttons: soft pills; the main action a solid white pill ── */
+[data-control-screen="true"] .mgmt-type button[class*="border-"], html[data-sb-control] [class*="inset-0"] button[class*="border-"] {
+  border-color: transparent !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #f5f5f7 !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: background-color 0.18s, box-shadow 0.18s, transform 0.12s;
+}
+[data-control-screen="true"] .mgmt-type button[class*="border-"]:hover:not(:disabled), html[data-sb-control] [class*="inset-0"] button[class*="border-"]:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16) !important; }
+/* a chosen / accented one (it had a coloured border): a soft ring instead of the border */
+[data-control-screen="true"] .mgmt-type button:is([class*="border-emerald"], [class*="border-amber"], [class*="border-white"], [class*="border-indigo"], [class*="border-violet"]) {
+  background: rgba(255, 255, 255, 0.15) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.3) !important;
+}
+/* the main action (it was blue / sky): a solid white pill, dark text */
+[data-control-screen="true"] .mgmt-type button:is([class*="border-sky"], [class*="bg-[#0a84ff]"], [class*="bg-blue"]), html[data-sb-control] [class*="inset-0"] button:is([class*="border-sky"], [class*="bg-[#0a84ff]"], [class*="bg-blue"]) {
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: #0a0a0a !important;
+  box-shadow: none !important;
+}
+[data-control-screen="true"] .mgmt-type button:is([class*="border-sky"], [class*="bg-[#0a84ff]"], [class*="bg-blue"]):hover:not(:disabled), html[data-sb-control] [class*="inset-0"] button:is([class*="border-sky"], [class*="bg-[#0a84ff]"], [class*="bg-blue"]):hover:not(:disabled) { background: #fff !important; }
+/* a destructive action (it was red): the danger token, solid, white text */
+[data-control-screen="true"] .mgmt-type button:is([class*="border-red"], [class*="border-rose"], [class*="bg-red"], [class*="bg-rose"]), html[data-sb-control] [class*="inset-0"] button:is([class*="border-red"], [class*="border-rose"], [class*="bg-red"], [class*="bg-rose"]) {
+  background: #ff453a !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+[data-control-screen="true"] .mgmt-type button:is([class*="border-red"], [class*="border-rose"], [class*="bg-red"], [class*="bg-rose"]):hover:not(:disabled), html[data-sb-control] [class*="inset-0"] button:is([class*="border-red"], [class*="border-rose"], [class*="bg-red"], [class*="bg-rose"]):hover:not(:disabled) { background: #ff6259 !important; }
+/* the big choice tiles (they are buttons too): keep a tile shape, not a pill */
+[data-control-screen="true"] .mgmt-type button[class*="rounded-2xl"][class*="py-4"] { border-radius: 20px !important; }
+[data-control-screen="true"] .mgmt-type button:disabled { opacity: 0.45; }
+
+/* ── 3. fields: filled, no border ── */
+[data-control-screen="true"] .mgmt-type :is(input, select, textarea)[class*="border"], html[data-sb-control] [class*="inset-0"] :is(input, select, textarea)[class*="border"] {
+  border: 0 !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 16px !important;
+  color: #f5f5f7 !important;
+  transition: background-color 0.18s, box-shadow 0.18s;
+}
+[data-control-screen="true"] .mgmt-type :is(input, select, textarea)[class*="border"]:focus, html[data-sb-control] [class*="inset-0"] :is(input, select, textarea)[class*="border"]:focus { background: rgba(255, 255, 255, 0.11) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22) !important; outline: none; }
+
+/* ── 4. little labels / badges: a soft pill, no frame (their colour of text is kept) ── */
+[data-control-screen="true"] .mgmt-type [class*="rounded-md"][class*="border"][class*="uppercase"], [data-control-screen="true"] .mgmt-type span[class*="rounded-full"][class*="border"] {
+  border-color: transparent !important;
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-radius: 999px !important;
+}
+
+/* ── 5. the windows that open on a click: glass, like the "⋯" menu and Player details ── */
+html[data-sb-control] [class*="fixed"][class*="inset-0"] [class*="rounded-2xl"][class*="border"], html[data-sb-control] [class*="fixed"][class*="inset-0"] [class*="rounded-3xl"][class*="border"] {
+  border-color: transparent !important;
+  background: rgba(60, 60, 72, 0.66) !important;
+  -webkit-backdrop-filter: blur(48px) saturate(1.6);
+  backdrop-filter: blur(48px) saturate(1.6);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.07) !important;
+  border-radius: 26px !important;
+  color: #f5f5f7;
+}
+html[data-sb-control] [class*="fixed"][class*="inset-0"] [class*="rounded-2xl"][class*="border"] [class*="border-slate"][class*="bg-slate"], html[data-sb-control] [class*="fixed"][class*="inset-0"] [class*="rounded-xl"][class*="border-slate"] {
+  background: rgba(255, 255, 255, 0.07) !important; border-color: transparent !important; box-shadow: none !important; border-radius: 16px !important;
+}

@@ -8,12 +8,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { useTr } from "@/lib/i18n/use-tr";
 import { JoinPendingDot } from "@/components/control-screen/pending-dots";
 import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
 import "./control-screen.css";
+import "./control-skin.css";
 
 type Item = { href: string; label: string; icon: React.ReactNode; dot?: React.ReactNode };
 
@@ -88,6 +89,11 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
   const [pending, setPending] = useState<{ href: string; from: string } | null>(null);
   if (pending && pending.from !== pathname) setPending(null);
   const current = pending && pending.from === pathname ? pending.href : pathname;
+  // the windows that open on a click are portals outside the page root — this marks the whole document so the control skin (control-skin.css) reaches them too
+  useEffect(() => {
+    document.documentElement.setAttribute("data-sb-control", "1");
+    return () => document.documentElement.removeAttribute("data-sb-control");
+  }, []);
 
   const all: Item[] = [
     { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> }, // FIRST, the outermost (owner 2026-10-30: "I want Settings first")

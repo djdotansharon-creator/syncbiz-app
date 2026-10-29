@@ -157,7 +157,7 @@ export function RolesPanel() {
                 else e.target.value = r.name;
               }}
               aria-label={tr("Role")}
-              className="min-w-0 flex-1 rounded-lg border-0 bg-transparent px-1 py-1 text-sm font-medium text-white outline-none focus:bg-white/10"
+              className="min-w-0 flex-1 rounded-lg bg-transparent px-1 py-1 text-sm font-medium text-white outline-none focus:bg-white/10"
             />
             <span className="flex w-[120px] items-center justify-center"><Switch on={r.openControlRoom} onChange={(v) => void save(r, { openControlRoom: v })} label={tr("Opens the Control Room")} /></span>
             <span className="flex w-[120px] items-center justify-center"><Switch on={r.allowComputer} onChange={(v) => void save(r, { allowComputer: v })} label={tr("May sign in from a computer")} /></span>
