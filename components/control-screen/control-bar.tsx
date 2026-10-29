@@ -11,9 +11,11 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { useTr } from "@/lib/i18n/use-tr";
+import { JoinPendingDot } from "@/components/control-screen/pending-dots";
+import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
 import "./control-screen.css";
 
-type Item = { href: string; label: string; icon: React.ReactNode };
+type Item = { href: string; label: string; icon: React.ReactNode; dot?: React.ReactNode };
 
 const ico = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
@@ -59,7 +61,7 @@ function DisplayIcon() {
   );
 }
 
-function SettingsIcon() {
+export function SettingsIcon({ size = 22 }: { size?: number } = {}) {
   return (
     <svg {...ico}>
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
@@ -88,10 +90,10 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
   const current = pending && pending.from === pathname ? pending.href : pathname;
 
   const all: Item[] = [
-    { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon /> },
-    { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> }, // right beside the Control Room (owner 2026-10-29)
+    { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> }, // FIRST, the outermost (owner 2026-10-30: "I want Settings first")
+    { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon />, dot: <EnrollmentPendingDot /> }, // devices waiting for approval
     { href: "/dashboard", label: L.t("nav.dashboard"), icon: <DashboardIcon /> },
-    { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon /> },
+    { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon />, dot: <JoinPendingDot /> }, // people waiting to join
     { href: "/access-control/display", label: L.t("nav.display"), icon: <DisplayIcon /> },
   ];
   // the manager pages bounce a branch employee back to the player — so they are not offered (Settings is for everyone)
@@ -108,7 +110,7 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
           const active = current === it.href || (current.startsWith(it.href + "/") && !items.some((o) => o !== it && o.href.startsWith(it.href + "/") && (current === o.href || current.startsWith(o.href + "/"))));
           return (
             <Link key={it.href} href={it.href} prefetch aria-current={active ? "page" : undefined} className={`sb-ctl-btn${active ? " is-active" : ""}`} onClick={() => setPending({ href: it.href, from: pathname })}>
-              {it.icon}
+              <span className="sb-ctl-ico">{it.icon}{it.dot}</span>
               <span>{it.label}</span>
             </Link>
           );

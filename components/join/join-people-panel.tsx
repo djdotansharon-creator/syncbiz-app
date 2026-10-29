@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTr } from "@/lib/i18n/use-tr";
+import { JOIN_CHANGED_EVENT } from "@/lib/use-join-pending";
 
 type Req = { id: string; email: string; firstName: string; lastName: string; phone: string; hasAccount: boolean; requestedAt: string; expiresAt: string };
 type Role = "MANAGER" | "MEMBER";
@@ -114,6 +115,7 @@ export function JoinPeoplePanel() {
         setError(tr(ERRORS[j.error ?? ""] ?? "Something went wrong. Please try again."));
       }
       await load();
+      window.dispatchEvent(new Event(JOIN_CHANGED_EVENT)); // the red circle re-counts at once
     } catch {
       setError(tr("Something went wrong. Please try again."));
     } finally {
