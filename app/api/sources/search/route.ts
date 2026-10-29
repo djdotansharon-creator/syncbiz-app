@@ -76,35 +76,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. youtube-search-without-api-key (no API key, yt-dlp failed or not installed)
-    if (results.length === 0) {
-      try {
-        const yt = await import("youtube-search-without-api-key");
-        const ytResults = await yt.search(parsed.query);
-        for (const r of (ytResults || []).slice(0, RESULT_LIMIT)) {
-          const url = r.url || (r.id?.videoId ? `https://www.youtube.com/watch?v=${r.id.videoId}` : null);
-          if (url) {
-            const thumb =
-              r.snippet?.thumbnails?.high?.url ||
-              r.snippet?.thumbnails?.default?.url ||
-              r.snippet?.thumbnails?.url ||
-              (r.id?.videoId ? `https://img.youtube.com/vi/${r.id.videoId}/hqdefault.jpg` : null);
-            const views = (r as { views?: number }).views;
-            results.push({
-              title: r.title || r.snippet?.title || "YouTube video",
-              url,
-              cover: thumb,
-              type: "youtube",
-              viewCount: typeof views === "number" ? views : undefined,
-            });
-          }
-        }
-      } catch (e) {
-        console.warn("[sources/search] youtube-search-without-api-key failed:", e);
-      }
-    }
-
-    // 3. yt-dlp last resort (if npm package also failed)
+    // 2. yt-dlp (no API key). The npm package "youtube-search-without-api-key" used to sit before this step; npm REMOVED it from the registry on 2026-10-29
+    //    (only a 0.0.1-security placeholder is left), which made every Railway `npm install` fail with a 404 — so the dependency is gone and yt-dlp is the key-less search.
     if (results.length === 0) {
       try {
         const ytDlpResults = await searchYouTubeWithYtDlp(parsed.query, RESULT_LIMIT);

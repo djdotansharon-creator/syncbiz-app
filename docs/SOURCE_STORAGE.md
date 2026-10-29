@@ -50,5 +50,5 @@ The system automatically fetches metadata when adding a URL:
 
 ## Search
 
-- **YouTube**: Uses `youtube-search-without-api-key` package (no API key required)
+- **YouTube**: the YouTube Data API when `YOUTUBE_API_KEY` is set, otherwise `yt-dlp` (no API key required). (The npm package `youtube-search-without-api-key` was removed from the registry on 2026-10-29 and is no longer used.)
 - **SoundCloud**: Placeholder for future integration
