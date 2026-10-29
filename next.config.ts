@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["youtube-search-without-api-key", "jsonpath", "got", "yt-dlp-wrap", "@prisma/client"],
+  serverExternalPackages: ["yt-dlp-wrap", "@prisma/client"],
   /**
    * Prevent Next's file tracer from pulling these paths into `.next/standalone/`.
    * Without this we get a recursion (`desktop/staged-web/desktop/staged-web/...`)
