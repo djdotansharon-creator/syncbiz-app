@@ -1547,11 +1547,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {/* browser manager: which branch this player controls (never a silent "default") */}
               {canManage && !isDesktopApp && !isManagementRoute ? (
-                <Link href="/owner/control-room" title={mgmt(locale).t("nav.controlRoom")} aria-label={mgmt(locale).t("nav.controlRoom")} className="sb-ctl-back">
-                  <ControlRoomIcon size={20} />
-                </Link>
-              ) : null}
-              {canManage && !isDesktopApp && !isManagementRoute ? (
                 <Link
                   href="/owner/control-room"
                   title={mgmt(locale).t("ctl.change")}
@@ -1774,6 +1769,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <DesktopDownloadButton compact />
               </span>
               <DesktopUpdatePill />
+              {/* the way back to the control screen (owner 2026-10-29): the END-most corner of the bar — exactly where the control screen's "Player" button is (right in English, left in Hebrew). Browser managers only; the desktop station uses the gear. */}
+              {canManage && !isDesktopApp && !isManagementRoute ? (
+                <Link href="/owner/control-room" title={mgmt(locale).t("nav.controlRoom")} aria-label={mgmt(locale).t("nav.controlRoom")} className="sb-ctl-back">
+                  <ControlRoomIcon size={22} />
+                </Link>
+              ) : null}
             </div>
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
