@@ -29,10 +29,11 @@ function assert(name: string, cond: boolean, detail = ""): void {
 }
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function mintToken(userId: string, workspaceId: string, branch: string, enrollmentRole?: unknown): string {
+function mintToken(userId: string, workspaceId: string, branch: string, enrollmentRole?: unknown, owner = false): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: Record<string, unknown> = { purpose: "ws_register", userId, iat: now, exp: now + 60, workspaceId, authorizedBranches: [branch] };
   if (enrollmentRole !== undefined) payload.enrollmentRole = enrollmentRole;
+  if (owner) payload.enrollmentOwner = true;
   const b64 = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
   const sig = createHmac("sha256", TEST_SECRET).update(b64).digest("base64url");
   return `${b64}.${sig}`;
@@ -67,10 +68,10 @@ function mkClient(): Promise<Client> {
 }
 const modeIs = (mode: string) => (m: Msg) => m.type === "SET_DEVICE_MODE" && m.mode === mode;
 
-async function webDevice(ws: string, branch: string, deviceId: string, enrollmentRole?: unknown, user = "u1"): Promise<{ c: Client; mode: string }> {
+async function webDevice(ws: string, branch: string, deviceId: string, enrollmentRole?: unknown, user = "u1", owner = false): Promise<{ c: Client; mode: string }> {
   const c = await mkClient();
   c.send({
-    type: "REGISTER", role: "device", authToken: mintToken(user, ws, branch, enrollmentRole), deviceId, branchId: branch, isMobile: false,
+    type: "REGISTER", role: "device", authToken: mintToken(user, ws, branch, enrollmentRole, owner), deviceId, branchId: branch, isMobile: false,
     registrationIntent: { schemaVersion: 1, runtimeMode: "branch_playback", devicePurpose: "branch_web_station" },
   });
   const m = await c.waitFor((x) => x.type === "SET_DEVICE_MODE");
@@ -141,6 +142,68 @@ async function main(): Promise<void> {
     const x = await webDevice("ws-e5", "b", "e5-X", "ADMIN");
     assert("E5 an unknown claim value is treated as no claim (first → MASTER)", x.mode === "MASTER");
     x.c.ws.close();
+  }
+
+  // ── owner 2026-10-29: "a computer defined as the branch's Player is the ONLY one that can play; if it is off nobody else becomes the Player automatically — only an explicit change" ──
+  // E6: the owner's own computer (PLAYER + owner claim) is never elected at REGISTER, even alone in an empty room — but it CAN become the player explicitly (SET_MASTER)
+  {
+    const o = await webDevice("ws-e6", "b", "e6-O", "PLAYER", "u1", true);
+    assert("E6 the owner's own computer alone in an empty room → CONTROL (opening the interface never takes the player seat)", o.mode === "CONTROL");
+    o.c.send({ type: "SET_MASTER" });
+    const got = await o.c.waitFor(modeIs("MASTER"), 1500);
+    assert("E6 …but an EXPLICIT SET_MASTER from the owner's computer makes it the player", got !== null);
+    o.c.ws.close();
+    await sleep(WINDOW_MS + 400);
+  }
+
+  // E7: two approved Players: the first is MASTER, the second a standby; when the first leaves, the standby is NOT promoted (no automatic failover)
+  {
+    const a = await webDevice("ws-e7", "b", "e7-A", "PLAYER");
+    const b = await webDevice("ws-e7", "b", "e7-B", "PLAYER");
+    assert("E7 setup: first approved Player → MASTER, second → CONTROL", a.mode === "MASTER" && b.mode === "CONTROL");
+    a.c.ws.close(1001, "going away");
+    const promoted = await b.c.waitFor(modeIs("MASTER"), WINDOW_MS + 2500);
+    assert("E7 when the approved Player leaves, the other approved Player is NOT promoted automatically", promoted === null);
+    b.c.ws.close();
+    await sleep(WINDOW_MS + 400);
+  }
+
+  // E8: the approved Player's page reloads (same device id, within the window) → it reclaims MASTER — zero-touch is kept for the defined player
+  {
+    const a = await webDevice("ws-e8", "b", "e8-A", "PLAYER");
+    const o = await webDevice("ws-e8", "b", "e8-O", "PLAYER", "u2", true);
+    assert("E8 setup: approved Player MASTER, the owner's computer CONTROL", a.mode === "MASTER" && o.mode === "CONTROL");
+    a.c.ws.close(1001, "going away");
+    await sleep(150);
+    const back = await webDevice("ws-e8", "b", "e8-A", "PLAYER");
+    assert("E8 the approved Player that comes back is MASTER again (no one took its seat in between)", back.mode === "MASTER");
+    assert("E8 the owner's computer was never promoted meanwhile", !o.c.buf.some(modeIs("MASTER")));
+    back.c.ws.close(); o.c.ws.close();
+    await sleep(WINDOW_MS + 400);
+  }
+
+  // E9: with the approved Player gone, the owner's computer is still not promoted automatically (it is CONTROL, there is simply no player until the Player returns)
+  {
+    const a = await webDevice("ws-e9", "b", "e9-A", "PLAYER");
+    const o = await webDevice("ws-e9", "b", "e9-O", "PLAYER", "u2", true);
+    a.c.ws.close(1001, "going away");
+    const promoted = await o.c.waitFor(modeIs("MASTER"), WINDOW_MS + 2500);
+    assert("E9 the owner's computer is not promoted when the approved Player leaves", promoted === null);
+    o.c.ws.close();
+    await sleep(WINDOW_MS + 400);
+  }
+
+  // E10: a room WITHOUT an approved Player keeps the old election (a legacy / owner-only room): the owner's computer is simply never auto-picked, the legacy device is
+  {
+    const a = await webDevice("ws-e10", "b", "e10-A");
+    const o = await webDevice("ws-e10", "b", "e10-O", "PLAYER", "u2", true);
+    const l = await webDevice("ws-e10", "b", "e10-L");
+    assert("E10 setup: legacy MASTER; the owner's computer and a legacy device are CONTROL", a.mode === "MASTER" && o.mode === "CONTROL" && l.mode === "CONTROL");
+    a.c.ws.close(1001, "going away");
+    const promoted = await l.c.waitFor(modeIs("MASTER"), WINDOW_MS + 2500);
+    assert("E10 the legacy device is promoted (old election unchanged); the owner's computer is skipped", promoted !== null && !o.c.buf.some(modeIs("MASTER")));
+    l.c.ws.close(); o.c.ws.close();
+    await sleep(WINDOW_MS + 400);
   }
 
   finish();
