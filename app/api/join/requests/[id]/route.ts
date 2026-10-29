@@ -12,9 +12,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!guard) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const { id } = await ctx.params;
-    const b = (await req.json().catch(() => ({}))) as { decision?: unknown; role?: unknown };
+    const b = (await req.json().catch(() => ({}))) as { decision?: unknown; role?: unknown; roleId?: unknown };
     if (b.decision !== "approve" && b.decision !== "reject") return NextResponse.json({ error: "decision_required" }, { status: 400 });
-    const out = await decideJoinRequest({ workspaceId: guard.workspaceId, requestId: id, actorUserId: guard.userId, decision: b.decision, role: b.role, ip: extractClientIp(req) });
+    const out = await decideJoinRequest({ workspaceId: guard.workspaceId, requestId: id, actorUserId: guard.userId, decision: b.decision, role: b.role, roleId: b.roleId, ip: extractClientIp(req) });
     return NextResponse.json(out);
   } catch (e) {
     if (e instanceof JoinError) return NextResponse.json({ error: e.code }, { status: e.httpStatus });

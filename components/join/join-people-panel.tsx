@@ -11,6 +11,7 @@ import { useTr } from "@/lib/i18n/use-tr";
 
 type Req = { id: string; email: string; firstName: string; lastName: string; phone: string; hasAccount: boolean; requestedAt: string; expiresAt: string };
 type Role = "MANAGER" | "MEMBER";
+type OwnerRole = { id: string; name: string };
 
 const ERRORS: Record<string, string> = {
   limit: "This business has no room for more people. Free a seat or raise the limit first.",
@@ -29,7 +30,8 @@ export function JoinPeoplePanel() {
   const [reqs, setReqs] = useState<Req[]>([]);
   const [code, setCode] = useState<{ code: string; expiresAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [roles, setRoles] = useState<Record<string, Role>>({});
+  const [roles, setRoles] = useState<Record<string, string>>({});
+  const [ownerRoles, setOwnerRoles] = useState<OwnerRole[]>([]); // the roles the owner defined (when roles are on); otherwise the plain Member / Manager choice
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -43,6 +45,13 @@ export function JoinPeoplePanel() {
       if (!alive.current) return;
       setEnabled(Boolean(j.enabled));
       setReqs(j.requests ?? []);
+      try {
+        const rr = await fetch("/api/roles", { credentials: "include", cache: "no-store" });
+        const rj = rr.ok ? ((await rr.json()) as { enabled?: boolean; roles?: OwnerRole[] }) : null;
+        if (alive.current) setOwnerRoles(rj?.enabled ? (rj.roles ?? []) : []);
+      } catch {
+        /* keep the plain choice */
+      }
     } catch {
       /* offline — keep what is shown */
     }
@@ -98,7 +107,7 @@ export function JoinPeoplePanel() {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision, role: roles[id] ?? "MEMBER" }),
+        body: JSON.stringify(ownerRoles.length > 0 ? { decision, roleId: roles[id] ?? ownerRoles[ownerRoles.length - 1].id } : { decision, role: (roles[id] as Role | undefined) ?? "MEMBER" }),
       });
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -166,13 +175,19 @@ export function JoinPeoplePanel() {
                   <div className="mt-0.5 text-[11px] text-slate-500">{r.hasAccount ? tr("Already has an account") : tr("New account")}</div>
                 </div>
                 <select
-                  value={roles[r.id] ?? "MEMBER"}
-                  onChange={(e) => setRoles((s) => ({ ...s, [r.id]: e.target.value as Role }))}
+                  value={roles[r.id] ?? (ownerRoles.length > 0 ? ownerRoles[ownerRoles.length - 1].id : "MEMBER")}
+                  onChange={(e) => setRoles((s) => ({ ...s, [r.id]: e.target.value }))}
                   className="rounded-full border-0 bg-white/10 px-3 py-1.5 text-xs text-white outline-none"
                   aria-label={tr("Role")}
                 >
-                  <option value="MEMBER" className="text-slate-900">{tr("Member")}</option>
-                  <option value="MANAGER" className="text-slate-900">{tr("Manager")}</option>
+                  {ownerRoles.length > 0 ? (
+                    ownerRoles.map((o) => <option key={o.id} value={o.id} className="text-slate-900">{o.name}</option>)
+                  ) : (
+                    <>
+                      <option value="MEMBER" className="text-slate-900">{tr("Member")}</option>
+                      <option value="MANAGER" className="text-slate-900">{tr("Manager")}</option>
+                    </>
+                  )}
                 </select>
                 <button type="button" onClick={() => void decide(r.id, "approve")} disabled={busy === r.id} className="rounded-full bg-emerald-400/90 px-4 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-emerald-300 disabled:opacity-60">
                   {tr("Approve")}

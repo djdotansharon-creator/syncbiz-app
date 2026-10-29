@@ -666,6 +666,23 @@ export const HE_PHRASES: Record<string, string> = {
   "Wrong code.": "קוד שגוי.",
   "Could not unlock.": "לא ניתן לפתוח.",
   "Too many attempts. Try again in {n} min.": "יותר מדי ניסיונות. נסו שוב בעוד {n} דקות.",
+  // ── roles (2026-10-29) ──
+  "Roles": "תפקידים",
+  "Opens the Control Room": "פותח את חדר הבקרה",
+  "May sign in from a computer": "מותר להתחבר ממחשב",
+  "New role": "תפקיד חדש",
+  "Add": "הוספה",
+  "Access code for Settings on the player computer": "קוד גישה להגדרות במחשב הנגן",
+  "Access code": "קוד גישה",
+  "A role with this name already exists.": "כבר יש תפקיד בשם הזה.",
+  "Enter a name for the role.": "הקלידו שם לתפקיד.",
+  "The name is too long.": "השם ארוך מדי.",
+  "There are already 20 roles.": "כבר יש 20 תפקידים.",
+  "People still have this role — change theirs first.": "יש אנשים עם התפקיד הזה — שנו להם קודם.",
+  "The code must be 3–12 letters or digits.": "הקוד חייב להיות 3–12 אותיות או ספרות.",
+  "Sign in from your phone": "התחברו מהטלפון",
+  "This account can only be used from a phone.": "החשבון הזה מיועד לשימוש מהטלפון בלבד.",
+  "Sign out": "התנתקות",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };

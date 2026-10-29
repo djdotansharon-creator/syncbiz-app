@@ -11,6 +11,10 @@ import { getActiveSuspensionForUser } from "@/lib/auth/suspension";
 import { EnrollmentHold } from "@/components/enrollment-hold";
 import { isDesktopShellUserAgent } from "@/lib/device-enrollment";
 import { getEnrollmentConfig } from "@/lib/device-enrollment-store";
+import { isRolesEnvEnabled, blocksComputer } from "@/lib/roles";
+import { getMemberRole } from "@/lib/roles-store";
+import { isPhoneUa } from "@/lib/ua-detection";
+import { ComputerBlocked } from "@/components/roles/computer-blocked";
 
 /**
  * App shell layout — wraps every page in `app/(app)/*`.
@@ -36,6 +40,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       redirect("/suspended");
     }
   }
+
+  // Roles (owner 2026-10-29): a person whose role does not allow signing in from a COMPUTER sees only a notice on a computer. Off by default (SYNCBIZ_ROLES=1); only people GIVEN a role are affected; a phone and the
+  // desktop app are never blocked; any failure here lets the person in (never locks anyone out).
+  let computerBlocked = false;
+  if (user && isRolesEnvEnabled()) {
+    try {
+      const ua = (await headers()).get("user-agent") ?? "";
+      if (!isPhoneUa(ua) && !isDesktopShellUserAgent(ua)) {
+        const role = await getMemberRole(user.tenantId, user.id);
+        computerBlocked = blocksComputer(role, { phone: false, desktopApp: false });
+      }
+    } catch (e) {
+      console.error("[roles] computer check failed — letting the person in", e instanceof Error ? e.message : String(e));
+    }
+  }
+  if (computerBlocked) return <ComputerBlocked />;
 
   // Device approval (owner 2026-10-28): when this workspace has enrollment on, a browser / phone is held at the request screen until a manager approves it — the app is not even mounted.
   // Off by default (needs the env flag AND the workspace switch — getEnrollmentConfig answers "off" without touching the database while the env flag is off); never throws; the desktop app is never held.
