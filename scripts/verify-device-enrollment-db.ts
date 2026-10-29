@@ -175,6 +175,28 @@ async function main() {
     const mgrWho = rules.enrollmentClaimFor(ownRow, new Date());
     assert("D40 its token claim is PLAYER (the WS server does not force CONTROL on it — it plays as usual), with no branch narrowing", mgrWho === "PLAYER" && rules.restrictBranches(["b1", "b2"], ownRow.approvedBranchIds).length === 2);
 
+    // ── the account's admin asking from his own device is settled on the spot (owner 2026-10-31) ──
+    const ask = (a: { userId: string; actor: typeof admin; input: ReturnType<typeof input> }) => store.submitRequestWithSelfApproval({ workspaceId: ws.id, ip: "", userAgent: "", ...a });
+    const selfRemote = await ask({ userId: owner.id, actor: admin, input: input(mk("web-self-remote"), "REMOTE", "browser", null) });
+    assert("D42 an ADMIN asking for a Remote from his own browser is approved at once, with no branch narrowing", selfRemote.status === "approved" && selfRemote.approvedRole === "REMOTE" && selfRemote.approvedBranchIds.length === 0, selfRemote);
+    assert("D43 …and it is in the audit log as an approval made by that admin", (await prisma.auditLog.count({ where: { workspaceId: ws.id, action: "device.enroll_approve", entityId: selfRemote.id, userId: owner.id } })) >= 1);
+    const staffRemote = await ask({ userId: staffUser.id, actor: staff, input: input(mk("web-staff-remote"), "REMOTE", "browser", b1.id) });
+    assert("D44 a person who is not an admin still waits for an approver — same account or not", staffRemote.status === "pending" && staffRemote.approvedRole === null);
+    const mgrRemote = await ask({ userId: mgrUser.id, actor: mgr1, input: input(mk("web-mgr-remote"), "REMOTE", "browser", b1.id) });
+    assert("D45 a branch manager also waits (only an admin of the account is settled on the spot)", mgrRemote.status === "pending");
+    const selfTyped = await ask({ userId: owner.id, actor: admin, input: input(mk("web-self-typed"), "PLAYER", "browser", null, "Not A Real Branch Yet") });
+    assert("D46 an admin asking for a Player for a branch that is only TYPED stays waiting (he picks the real branch in the Control Room)", selfTyped.status === "pending");
+    await store.setMaxPlayers({ workspaceId: ws.id, actorUserId: owner.id, maxPlayers: (await store.getAllocation(ws.id)).used + 1 }); // exactly one free seat
+    const seatsBefore = (await store.getAllocation(ws.id)).used;
+    const selfPlayer = await ask({ userId: owner.id, actor: admin, input: input(mk("web-self-player"), "PLAYER", "browser", b2.id) });
+    const seatsAfter = (await store.getAllocation(ws.id)).used;
+    assert("D47 an admin asking for a Player of a real branch gets it at once when a seat is free (browser class, exactly that branch) — and it takes a seat", selfPlayer.status === "approved" && selfPlayer.approvedRole === "PLAYER" && selfPlayer.playerClass === "browser" && selfPlayer.approvedBranchIds.join() === b2.id && seatsAfter === seatsBefore + 1, { selfPlayer, seatsBefore, seatsAfter });
+    const selfFull = await ask({ userId: owner.id, actor: admin, input: input(mk("web-self-full"), "PLAYER", "browser", b2.id) });
+    const full = await store.getAllocation(ws.id);
+    assert("D48 when the paid seats are used up the admin's Player request is NOT approved by itself — it waits; the seat count never goes past the limit", selfFull.status === "pending" && full.used === full.max, { selfFull: selfFull.status, full });
+    const again = await ask({ userId: owner.id, actor: admin, input: input(selfRemote.durableDeviceId, "PLAYER", "browser", b2.id) });
+    assert("D49 asking again from a device that is already approved keeps what it has (a Remote does not turn into a Player by asking)", again.id === selfRemote.id && again.approvedRole === "REMOTE", again);
+
     // ── audit + switching off ──
     const actions = (await prisma.auditLog.findMany({ where: { workspaceId: ws.id }, select: { action: true } })).map((a) => a.action);
     assert("D25 every request, approval, rejection, revocation and settings change is in the audit log", ["device.enroll_request", "device.enroll_approve", "device.enroll_reject", "device.enroll_revoke", "enrollment.settings"].every((a) => actions.includes(a)));

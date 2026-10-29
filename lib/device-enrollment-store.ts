@@ -156,6 +156,33 @@ export async function submitRequest(args: { workspaceId: string; userId: string;
   return row;
 }
 
+/**
+ * An ADMIN of the workspace who asks for a role from the device he is sitting at is approved AT ONCE (owner 2026-10-31: "we are on the same account — why would I have to approve him? he can do it himself").
+ * The account is the admin's; there is nobody else to ask. A manager or anyone else still waits for an admin. It stays waiting (visible in the Control Room) when it cannot be settled by itself: a Player whose
+ * branch was only TYPED (the admin picks the real branch there), a full Player allocation, or a platform that cannot play.
+ */
+export async function submitRequestWithSelfApproval(args: Parameters<typeof submitRequest>[0] & { actor: Actor }): Promise<EnrollmentRow> {
+  const row = await submitRequest(args);
+  if (!args.actor.isAdmin) return row;
+  const now = args.now ?? new Date();
+  if (effectiveStatus(row, now) !== "pending") return row;
+  const { input } = args;
+  if (input.role === "PLAYER" && !input.branchId) return row;
+  try {
+    return await approveEnrollment({
+      workspaceId: args.workspaceId,
+      actor: args.actor,
+      id: row.id,
+      input: { role: input.role, branchIds: input.branchId ? [input.branchId] : [], mode: "standby", note: "Approved at once: an admin of the account asked from this device." },
+      ip: args.ip,
+      now,
+    });
+  } catch (e) {
+    if (e instanceof EnrollmentError) return row; // allocation full / not allowed here: it simply waits for the Control Room
+    throw e;
+  }
+}
+
 /** What a not-yet-approved device may see of the company: only the branches whose name matches what it is typing (never the whole list, nothing before the first letter). Owner 2026-10-28. */
 export async function searchBranchesForEnrollment(workspaceId: string, query: string, limit = 30): Promise<Array<{ id: string; name: string; city: string }>> {
   const cfg = await getEnrollmentConfig(workspaceId);
