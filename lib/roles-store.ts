@@ -106,20 +106,3 @@ export async function checkWorkspaceAccessCode(workspaceId: string, code: string
   if (!row) return null;
   return accessCodeMatches(code, row.codeSalt, row.codeHash);
 }
-
-/**
- * Give an EXISTING member another of the owner's roles (owner 2026-10-29: "click a person and set their permissions"). The platform level follows the role's Control Room switch — but only for plain
- * managers / members: the workspace owner and workspace admins are never changed here (they could lock the business out of itself), and nobody changes their own role.
- */
-export async function assignRoleToMember(params: { workspaceId: string; actorUserId: string; userId: string; roleId: string }): Promise<void> {
-  if (params.userId === params.actorUserId) throw new RoleError("not_yourself", 409);
-  const role = await getRoleInWorkspace(params.workspaceId, params.roleId);
-  if (!role) throw new RoleError("role_not_found", 400);
-  const member = await prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: params.workspaceId, userId: params.userId } }, select: { role: true } });
-  if (!member) throw new RoleError("not_found", 404);
-  const ws = await prisma.workspace.findUnique({ where: { id: params.workspaceId }, select: { ownerId: true } });
-  if (ws?.ownerId === params.userId || member.role === "WORKSPACE_ADMIN") throw new RoleError("protected_member", 409);
-  await assignMemberRole(params.workspaceId, params.userId, role.id);
-  await prisma.workspaceMember.update({ where: { workspaceId_userId: { workspaceId: params.workspaceId, userId: params.userId } }, data: { role: role.openControlRoom ? "MANAGER" : "CONTROLLER" } });
-  await writeTenantAuditLog(prisma, { action: "role.assign", actorUserId: params.actorUserId, workspaceId: params.workspaceId, targetUserId: params.userId, metadata: { roleId: role.id, name: role.name } });
-}

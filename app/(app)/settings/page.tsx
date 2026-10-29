@@ -15,52 +15,45 @@ import { redirect } from "next/navigation";
 import { getLocale } from "@/lib/locale-server";
 import { trFor } from "@/lib/i18n/phrases";
 import { SettingsGate } from "@/components/management/management-gate";
-import "@/components/control-screen/settings-screen.css";
 
-const ico = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, className: "sb-set-ico" } as const;
-const Icons = {
-  play: (<svg {...ico}><circle cx="12" cy="12" r="9.2" /><path d="M10 8.4l5.6 3.6-5.6 3.6z" fill="currentColor" stroke="none" /></svg>),
-  monitor: (<svg {...ico}><rect x="3" y="4.5" width="18" height="12" rx="2" /><path d="M8.5 20h7M12 16.5V20" /></svg>),
-  download: (<svg {...ico}><path d="M12 3.5v11M7.5 10.5L12 15l4.5-4.5" /><path d="M4.5 19.5h15" /></svg>),
-  card: (<svg {...ico}><rect x="3" y="5.5" width="18" height="13" rx="2.4" /><path d="M3 10h18M7 15h3" /></svg>),
-  user: (<svg {...ico}><circle cx="12" cy="8.2" r="3.6" /><path d="M4.8 19.5c.6-3.6 3.5-5.6 7.2-5.6s6.6 2 7.2 5.6" /></svg>),
-  shield: (<svg {...ico}><path d="M12 3.2l7 2.8v5.4c0 4.4-2.9 7.6-7 9.4-4.1-1.8-7-5-7-9.4V6z" /><path d="M9 12l2.2 2.2L15.4 10" /></svg>),
-};
-
-/** One frameless section: an icon + a name (+ a quiet line, + an optional action), a hairline above. */
-function Section({ icon, title, description, action, children }: { icon: ReactNode; title: string; description?: string; action?: ReactNode; children?: ReactNode }) {
+function PlaceholderCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
   return (
-    <section className="sb-set-sec">
-      <div className="sb-set-sec-head">
-        {icon}
-        <div className="min-w-0">
-          <h2>{title}</h2>
-          {description ? <p>{description}</p> : null}
-        </div>
-        {action ? <div className="sb-set-action">{action}</div> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** One quiet block inside a section (a name, a line, the control). */
-function Sub({ title, description, children }: { title?: string; description?: string; children?: ReactNode }) {
-  return (
-    <div className="sb-set-sub">
-      {title ? <h3>{title}</h3> : null}
-      {description ? <p>{description}</p> : null}
-      {children}
+    <div className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+      <h2 className="text-sm font-semibold text-slate-50">{title}</h2>
+      <p className="mt-0.5 text-xs text-slate-400">{description}</p>
+      {children ? <div className="mt-4">{children}</div> : null}
     </div>
   );
 }
 
-function Fact({ label, value, note }: { label: string; value: string; note: string }) {
+/** One status tile inside Billing & Plan. */
+function BillingStatTile({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="sb-set-fact">
-      <span>{label}</span>
-      <b>{value}</b>
-      <small>{note}</small>
+    <div className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4">
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-100">{value}</p>
+      <p className="mt-0.5 text-xs text-slate-400">{note}</p>
+    </div>
+  );
+}
+
+/** One plan option inside Billing & Plan (presentation only — payments not built yet). */
+function PlanTile({ label, price, best, bestLabel = "Best" }: { label: string; price: string; best?: boolean; bestLabel?: string }) {
+  return (
+    <div className={`rounded-xl border p-3 ${best ? "border-[#0a84ff]/40 bg-[#0a84ff]/[0.07]" : "border-slate-800/70 bg-slate-900/40"}`}>
+      <div className="flex items-center gap-1.5">
+        <p className="text-xs font-semibold text-slate-100">{label}</p>
+        {best ? <span className="text-[9px] font-bold uppercase tracking-wider text-[#7db8ff]">{bestLabel}</span> : null}
+      </div>
+      <p className="mt-1 text-sm font-semibold tabular-nums text-white">{price}</p>
     </div>
   );
 }
@@ -76,90 +69,167 @@ async function SettingsContent() {
   const priceText = (p: string) => (p.endsWith("/mo") ? `${p.slice(0, -3)} ${tr("per month")}` : p);
 
   return (
-    // the app main area is a fixed-height region — like the other management pages, this one scrolls on its own
-    <div className="mgmt-type h-full overflow-y-auto">
-    <div className="sb-set">
-      <header className="sb-set-head">
-        <h1>{tr("Settings")}</h1>
-        <p>{tr("Day-to-day playback and device preferences. Workspace business profile lives under")} {tr("Owner")}.</p>
-      </header>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-50">{tr("Settings")}</h1>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {tr("Day-to-day playback and device preferences. Workspace business profile lives under")}{" "}
+          <span className="text-slate-300">{tr("Owner")}</span>.
+        </p>
+      </div>
 
-      <Section icon={Icons.play} title={tr("Playback preferences")} description={tr("Theme and language for this browser.")}>
-        <div className="pb-6">
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">{tr("Apps & Downloads")}</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {tr("Install VONO on Windows, Android TV / Google TV, and phones & tablets.")}
+            </p>
+          </div>
+          <Link
+            href="/downloads"
+            className="shrink-0 rounded-lg bg-[#0a84ff] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0a84ff]/90"
+          >
+            {tr("Open Downloads")}
+          </Link>
+        </div>
+      </section>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <PlaceholderCard
+          title={tr("Playback preferences")}
+          description={tr("Theme and language for this browser.")}
+        >
           <SettingsPreferencesControls />
-        </div>
-      </Section>
+        </PlaceholderCard>
+        <PlaceholderCard title={tr("VONO Protection")} description={tr("Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).")}>
+          <DesktopStartupSettingsCard />
+        </PlaceholderCard>
+        <PlaceholderCard title={tr("PlayItPro Local Library")} description={tr("Play local music on this machine. The file location is never shown.")}>
+          <DesktopLocalMusicSettingsCard />
+        </PlaceholderCard>
+        <PlaceholderCard
+          title={tr("Account preferences")}
+          description={tr("Profile and workspace account options. More coming soon.")}
+        />
+        <PlaceholderCard
+          title={tr("More settings")}
+          description={tr("Additional controls will appear here in future releases.")}
+        />
+      </div>
 
-      <Section icon={Icons.monitor} title={tr("Remote player")} description={tr("Choose whether this device is MASTER (outputs audio) or CONTROL (mirrors master).")}>
-        <div className="sb-set-grid">
-          <Sub>
-            <DeviceModeSettingsSwitch />
-          </Sub>
-          <Sub title={tr("Mix / crossfade")} description={tr("Crossfade length when AutoMix is on. Direct audio URL playback only.")}>
+      {/* Billing & Plan — the ONE place subscription/plan management lives. The Royalty-Free Music
+          catalog stays music-only; unlocking a locked pack there opens a contextual modal that points
+          back here. Presentation only — no billing backend is wired yet. */}
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-50">{tr("Billing & Plan")}</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {tr("Your subscription, Music Bank access and Genre Packs — managed here, not in the catalog.")}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled
+            title={tr("Coming soon")}
+            className="shrink-0 cursor-not-allowed rounded-lg bg-[#0a84ff]/70 px-3 py-1.5 text-xs font-semibold text-white/90"
+          >
+            {tr("Change plan")}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <BillingStatTile label={tr("Current plan")} value={tr("Preview")} note={tr("Sample previews only — nothing unlocked yet.")} />
+          <BillingStatTile label={tr("Genre Packs owned")} value={`0 / ${totalPacks}`} note={tr("Unlock from the Royalty-Free Music catalog.")} />
+          <BillingStatTile label={tr("Full Music Bank")} value={tr("Locked")} note={tr("Complete-bank access · {price}", { price: priceText(FULL_BANK_PRICE_LABEL) })} />
+          <BillingStatTile label={tr("Payment method")} value="—" note={tr("Added at checkout. Coming soon.")} />
+        </div>
+
+        <div className="mt-5 border-t border-slate-800/60 pt-5">
+          <h3 className="text-xs font-semibold text-slate-300">{tr("Plans")}</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">{tr("Upgrade or change plan. Payments & entitlements coming soon.")}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <PlanTile label={tr("1 Genre Pack")} price={priceText(GENRE_PRICE_LABEL)} bestLabel={tr("Best")} />
+            <PlanTile label={`${CHOICE3_PACK_COUNT} ${tr("Genre Packs")}`} price={priceText(CHOICE3_PRICE_LABEL)} bestLabel={tr("Best")} />
+            <PlanTile label={tr("Full Music Bank")} price={priceText(FULL_BANK_PRICE_LABEL)} best bestLabel={tr("Best")} />
+          </div>
+        </div>
+
+        <p className="mt-4 text-[11px] text-slate-500">{tr("Billing history and payment methods will appear here once payments are enabled.")}</p>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <h2 className="text-sm font-semibold text-slate-50">{tr("Remote player")}</h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {tr("Choose whether this device is MASTER (outputs audio) or CONTROL (mirrors master).")}
+        </p>
+        <div className="mt-4">
+          <DeviceModeSettingsSwitch />
+        </div>
+        <div className="mt-6 border-t border-slate-800/60 pt-6">
+          <h3 className="text-xs font-semibold text-slate-300">{tr("Mix / crossfade")}</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {tr("Crossfade length when AutoMix is on. Direct audio URL playback only.")}
+          </p>
+          <div className="mt-3">
             <MixDurationSetting />
-          </Sub>
+          </div>
         </div>
-      </Section>
+      </section>
 
-      <Section icon={Icons.shield} title={tr("VONO Protection")} description={tr("Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).")}>
-        <div className="sb-set-grid">
-          <Sub>
-            <DesktopStartupSettingsCard />
-          </Sub>
-          <Sub title={tr("PlayItPro Local Library")} description={tr("Play local music on this machine. The file location is never shown.")}>
-            <DesktopLocalMusicSettingsCard />
-          </Sub>
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <h2 className="text-sm font-semibold text-slate-50">{tr("Organization")}</h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {tr("Informational only in this version.")}
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="block text-xs text-slate-500">
+              {tr("Account name")}
+            </label>
+            <input
+              disabled
+              defaultValue="SyncBiz Demo"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-400 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">
+              {tr("Default timezone")}
+            </label>
+            <input
+              disabled
+              defaultValue="America/New_York"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2 text-sm text-slate-400 outline-none"
+            />
+          </div>
         </div>
-        <ul className="sb-set-list">
-          <li><i />{tr("Optional watchdog recovery (enable via VONO Protection)")}</li>
-          <li><i />{tr("Prefer local cache when available")}</li>
-          <li><i />{tr("Log TTS playback events")}</li>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800/80 bg-slate-950/50 p-5">
+        <h2 className="text-sm font-semibold text-slate-50">
+          {tr("Playback & safety")}
+        </h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {tr("How agents behave on your devices. SyncBiz does not host or stream media.")}
+        </p>
+        <ul className="mt-4 space-y-3 text-sm text-slate-300">
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+            {tr("Optional watchdog recovery (enable via VONO Protection)")}
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+            {tr("Prefer local cache when available")}
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+            {tr("Log TTS playback events")}
+          </li>
         </ul>
-        <div className="pb-6">
-          <ClearPlaybackCacheButton />
-        </div>
-      </Section>
-
-      <Section
-        icon={Icons.download}
-        title={tr("Apps & Downloads")}
-        description={tr("Install VONO on Windows, Android TV / Google TV, and phones & tablets.")}
-        action={<Link href="/downloads" className="sb-set-pill">{tr("Open Downloads")}</Link>}
-      />
-
-      {/* Billing & Plan — the ONE place subscription/plan management lives. Presentation only — no billing backend is wired yet. */}
-      <Section
-        icon={Icons.card}
-        title={tr("Billing & Plan")}
-        description={tr("Your subscription, Music Bank access and Genre Packs — managed here, not in the catalog.")}
-        action={<button type="button" disabled title={tr("Coming soon")} className="sb-set-pill">{tr("Change plan")}</button>}
-      >
-        <div className="sb-set-facts">
-          <Fact label={tr("Current plan")} value={tr("Preview")} note={tr("Sample previews only — nothing unlocked yet.")} />
-          <Fact label={tr("Genre Packs owned")} value={`0 / ${totalPacks}`} note={tr("Unlock from the Royalty-Free Music catalog.")} />
-          <Fact label={tr("Full Music Bank")} value={tr("Locked")} note={tr("Complete-bank access · {price}", { price: priceText(FULL_BANK_PRICE_LABEL) })} />
-          <Fact label={tr("Payment method")} value="—" note={tr("Added at checkout. Coming soon.")} />
-        </div>
-        <div className="sb-set-facts">
-          <Fact label={tr("1 Genre Pack")} value={priceText(GENRE_PRICE_LABEL)} note="" />
-          <Fact label={`${CHOICE3_PACK_COUNT} ${tr("Genre Packs")}`} value={priceText(CHOICE3_PRICE_LABEL)} note="" />
-          <Fact label={tr("Full Music Bank")} value={priceText(FULL_BANK_PRICE_LABEL)} note={tr("Best")} />
-        </div>
-        <p className="sb-set-muted">{tr("Billing history and payment methods will appear here once payments are enabled.")}</p>
-      </Section>
-
-      <Section icon={Icons.user} title={tr("Account preferences")} description={tr("Profile and workspace account options. More coming soon.")}>
-        <div className="sb-set-grid">
-          <Sub title={tr("Organization")} description={tr("Informational only in this version.")}>
-            <div className="sb-set-facts" style={{ paddingBottom: 0 }}>
-              <Fact label={tr("Account name")} value="SyncBiz Demo" note="" />
-              <Fact label={tr("Default timezone")} value="America/New_York" note="" />
-            </div>
-          </Sub>
-          <Sub title={tr("More settings")} description={tr("Additional controls will appear here in future releases.")} />
-        </div>
-      </Section>
-    </div>
+        <ClearPlaybackCacheButton />
+      </section>
     </div>
   );
 }

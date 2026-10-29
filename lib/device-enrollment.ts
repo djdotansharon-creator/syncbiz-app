@@ -252,8 +252,7 @@ export type MintDecision =
   | { kind: "off" }
   | { kind: "exempt" }
   | { kind: "blocked"; status: Exclude<EnrollmentStatus, "approved"> | "unknown" }
-  /** `owner` = the owner's own computer (playerClass "owner"): it may play, but only when made the player EXPLICITLY — it is never elected or promoted automatically. */
-  | { kind: "approved"; role: EnrollmentRole; branchIds: string[]; owner: boolean };
+  | { kind: "approved"; role: EnrollmentRole; branchIds: string[] };
 
 /**
  * Should the WS-token route hand a token to this device? `enabled` = enrollment is on for the workspace. A device that is not approved gets NO token (so it can neither play nor control);
@@ -272,7 +271,7 @@ export function decideMint(args: {
   if (!DEVICE_ID.test(id) || !args.row) return { kind: "blocked", status: "unknown" };
   const status = effectiveStatus(args.row, args.now);
   if (status === "approved" && (args.row.approvedRole === "PLAYER" || args.row.approvedRole === "REMOTE")) {
-    return { kind: "approved", role: args.row.approvedRole, branchIds: [...args.row.approvedBranchIds], owner: args.row.playerClass === "owner" };
+    return { kind: "approved", role: args.row.approvedRole, branchIds: [...args.row.approvedBranchIds] };
   }
   return { kind: "blocked", status: status === "approved" ? "unknown" : status };
 }
