@@ -655,6 +655,8 @@ export const HE_PHRASES: Record<string, string> = {
   "This business has no room for more people. Free a seat or raise the limit first.": "אין מקום לעוד אנשים בעסק. פנו מקום או הגדילו את המכסה קודם.",
   "This request was already handled.": "הבקשה כבר טופלה.",
   "There are already 10 unused codes. Wait for one to expire.": "כבר יש 10 קודים שלא נוצלו. המתינו שאחד יפוג.",
+  // ── control screen (2026-10-29) ──
+  "Player": "נגן",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };
