@@ -40,6 +40,8 @@ import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flag
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
 import { DeviceRoleBadge } from "@/components/device-role-badge";
 import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
+import { ControlBar, ControlRoomIcon } from "@/components/control-screen/control-bar";
+import { isControlScreenPath } from "@/lib/control-screen";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
@@ -617,7 +619,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // player row is hidden with a CSS class (same JSX tree → the single AudioPlayer instance is never remounted, playback
   // and every provider keep running). Desktop: display:none (MPV video slot reports no rect → no stray native window);
   // browser: a tiny transparent box so YouTube iframes keep playing (same pattern as the streamer / mobile branches).
-  const isManagementRoute = /^\/(dashboard|access-control|jingles|display-design|owner\/control-room)(\/|$)/.test(pathname ?? "");
+  // CONTROL SCREEN (owner 2026-10-29): Control Room / Dashboard / Permissions / Display / Settings are one separate plain-black screen with its own button row (components/control-screen) —
+  // the player's top-bar row is hidden by CSS (still mounted), the deck stays hidden exactly as in management mode.
+  const isControlScreen = isControlScreenPath(pathname);
+  const isManagementRoute = isControlScreen || /^\/(dashboard|access-control|jingles|display-design|owner\/control-room)(\/|$)/.test(pathname ?? "");
   // Unified deck treatment: every desktop (app) route gets the media-theme
   // player shell — hero card + Command Pads aside + library-theme tokens —
   // so the top bar looks identical on /library, /radio, /owner, /schedules,
@@ -802,13 +807,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   /* Top nav = the operator's PINNED categories (gear menu toggles), in this canonical order. library+radio are always pinned.
      owner 2026-10-20: Settings is always at the far end of the bar (opposite Library); Dashboard + Access Control are NOT top-bar tabs — they live inside
      the Control Room (its own tabs), so they never show up here, pinned or not. owner 2026-10-22: no Remote Controller anywhere in this interface; Settings
-     is not a tab any more — "More settings" in the gear menu opens it. */
+     is not a tab any more — "More settings" in the gear menu opens it.
+     owner 2026-10-29: in a BROWSER the control screen is reached by the icon in the player's corner (and a Remote opens on it), so the "Control Room" tab stays only in the desktop app (the station's way in until the gear tab). */
   const topNavItems = (() => {
     const NAV_ORDER = ["library", "schedules", "radio", "jingles", "display-design", "controlRoom", "owner", "logs", "architecture", "remote", "settings"] as const;
     return navItems
       .filter((item) => item.labelKey !== "dashboard" && item.labelKey !== "access-control")
       .filter((item) => !HIDDEN_NAV_KEYS.has(item.labelKey))
-      .filter((item) => (item.labelKey === "controlRoom" ? canManage : pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey))))
+      .filter((item) => (item.labelKey === "controlRoom" ? canManage && isDesktopApp : pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey))))
       .sort((a, b) => {
         const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
         const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
@@ -1496,6 +1502,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       data-control-room={isControlRoomMode ? "true" : undefined}
       data-native-fullscreen={isNativeFullscreen ? "true" : undefined}
       data-management={isManagementRoute ? "true" : undefined}
+      data-control-screen={isControlScreen ? "true" : undefined}
       data-desktop-app={inDesktopApp ? "true" : undefined}
     >
       {/* Station B1: desktop-only "Activate this station" (never shown on a designated station) */}
@@ -1512,6 +1519,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={`flex min-h-screen flex-1 flex-col${isMediaThemeRoute ? " app-sources-theme-scope lg:h-screen lg:overflow-hidden" : ""}`}
         {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
       >
+        {isControlScreen ? <ControlBar /> : null}
         <header
           className={`sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md${
             isMediaThemeRoute ? " sources-app-header" : ""
@@ -1538,6 +1546,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <HeaderDeviceIndicators />
               </span>
               {/* browser manager: which branch this player controls (never a silent "default") */}
+              {canManage && !isDesktopApp && !isManagementRoute ? (
+                <Link href="/owner/control-room" title={mgmt(locale).t("nav.controlRoom")} aria-label={mgmt(locale).t("nav.controlRoom")} className="sb-ctl-back">
+                  <ControlRoomIcon size={20} />
+                </Link>
+              ) : null}
               {canManage && !isDesktopApp && !isManagementRoute ? (
                 <Link
                   href="/owner/control-room"
