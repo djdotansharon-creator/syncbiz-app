@@ -7,9 +7,8 @@
  * Electron desktop wrapper (which loads the same Next.js page).
  */
 import { AccessControlConsole } from "@/components/access-control-console";
-import { JoinPeoplePanel } from "@/components/join/join-people-panel";
 import { RolesPanel } from "@/components/roles/roles-panel";
-import { PeoplePanel } from "@/components/roles/people-panel";
+import { PeopleGrid } from "@/components/roles/people-grid";
 import { ManagementGate } from "@/components/management/management-gate";
 import { ManagementTabs } from "@/components/management/management-tabs";
 
@@ -20,9 +19,8 @@ export default function AccessControlPage() {
     <ManagementGate from="/access-control">
       <div className="mgmt-type h-full overflow-y-auto p-4 sm:p-6">
         <div className="mb-4"><ManagementTabs /></div>
-        <PeoplePanel />
+        <PeopleGrid />
         <RolesPanel />
-        <JoinPeoplePanel />
         <AccessControlConsole />
       </div>
     </ManagementGate>

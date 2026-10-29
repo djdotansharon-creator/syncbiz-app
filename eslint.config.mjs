@@ -7,6 +7,7 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    "lib/vendor/**", // vendored third-party code (QR generator, MIT) — not ours to lint
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
