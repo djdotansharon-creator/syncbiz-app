@@ -56,7 +56,9 @@ export type TenantAuditAction =
   | "role.create"
   | "role.update"
   | "role.delete"
-  | "role.access_code_set";
+  | "role.access_code_set"
+  /** An existing member was given another of the owner's roles (target = the person). */
+  | "role.assign";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -82,6 +84,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "role.update",
   "role.delete",
   "role.access_code_set",
+  "role.assign",
 ];
 
 /**

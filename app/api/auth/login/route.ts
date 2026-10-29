@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateCredentialsAsync, createSessionValue } from "@/lib/auth";
 import { getOrCreateUserByEmail } from "@/lib/user-store";
+import { prisma } from "@/lib/prisma";
 import { emitEvent, EVENT_TYPES } from "@/lib/analytics-boundary";
 import { ACTIVE_WORKSPACE_COOKIE_NAME } from "@/lib/active-workspace-constants";
 import { attemptKeys, blockedFor, recordFailure, recordSuccess } from "@/lib/auth-rate-limit";
@@ -37,6 +38,8 @@ export async function POST(req: NextRequest) {
 
     rateKeys.forEach((k) => recordSuccess(k));
     const user = await getOrCreateUserByEmail(normEmail);
+    // when this person last signed in (shown on the Permissions screen; the column already exists) — best effort, never delays or fails a login
+    void prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } }).catch(() => undefined);
     emitEvent(EVENT_TYPES.USER_LOGIN, { userId: user.id, email: user.email });
 
     const sessionValue = await createSessionValue(normEmail);
