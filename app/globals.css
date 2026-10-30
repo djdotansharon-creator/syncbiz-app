@@ -8012,3 +8012,17 @@ html[data-sb-display="white"] .sb-rad-btn-go { background: #1c1c1e; color: #fff;
 
 /* the role icon is a button now (it opens the Player / Remote details window — owner 2026-10-31): no browser button look */
 button.sb-role-icon { appearance: none; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+
+/* ── the windows share the gear menu's glass (owner 2026-10-31: "exactly the blur of the Settings window that opens from the side button"): the same fill and blur as `.main-menu-popover` —
+   a solid dark panel in the black / white look, frosted (white .19 + blur 48px) in the transparent look. Lite graphics make them plain (app/lite-fx.css). ── */
+html :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+  background: rgba(28, 28, 30, 0.96);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 0 44px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+  background: rgba(255, 255, 255, 0.19);
+  -webkit-backdrop-filter: blur(48px) saturate(1.2);
+  backdrop-filter: blur(48px) saturate(1.2);
+}

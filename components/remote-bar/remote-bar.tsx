@@ -17,6 +17,8 @@ import { BranchPicker } from "@/components/remote-bar/branch-picker";
 import "./remote-bar.css";
 
 const SKIP_KEY = "vono_branch_pick_skipped";
+/** the song list of the player: its rows (jump to a song) and the Play Next pad */
+const LIST_AREA = ".queue-row, .play-next-pad";
 
 export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement | null {
   const tr = useTr();
@@ -29,6 +31,28 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
 
   const isPlayer = !!ctx && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
   const show = !!ctx && ctx.isActive && ctx.isBranchConnected && !isPlayer && !isDesktopApp;
+
+  // owner 2026-10-31: with NO player online, a press on a song of the list used to mark it and the mark could not be undone (the click waited for a player that is not there). While that is so the list area is
+  // shut: the pointer becomes a red X (remote-bar.css) and a click / Enter there does nothing at all — nothing is sent, nothing is marked. Plain event capture, so the playback code is not touched.
+  const noPlayer = show && !ctx?.masterDeviceName;
+  useEffect(() => {
+    if (!noPlayer) return;
+    document.documentElement.setAttribute("data-sb-noplayer", "1");
+    const shut = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t || typeof t.closest !== "function" || !t.closest(LIST_AREA)) return;
+      if (e.type === "keydown" && (e as KeyboardEvent).key !== "Enter" && (e as KeyboardEvent).key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("click", shut, true);
+    document.addEventListener("keydown", shut, true);
+    return () => {
+      document.documentElement.removeAttribute("data-sb-noplayer");
+      document.removeEventListener("click", shut, true);
+      document.removeEventListener("keydown", shut, true);
+    };
+  }, [noPlayer]);
 
   // the header's own logo + way-back icon give way to the ones in this strip (CSS keys off this attribute)
   useEffect(() => {
