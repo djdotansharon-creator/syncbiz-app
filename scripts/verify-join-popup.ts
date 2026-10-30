@@ -51,5 +51,8 @@ assert("P16 the Player / Remote icon in the top bar opens the details window and
 const bp = read("components/remote-bar/branch-picker.tsx");
 assert("P17 no branch chosen yet: the picker window opens BEFORE the remote is used (a manager only), with a search bar above a scrolling list of the branches that are playing live (offline ones only when none is live or when searching), the choice is the Control Room's own (stored target + a full load), and it can be left for the default branch", /const forced = canManage && !branch && !skipped/.test(rb) && /useRemoteOwner\(\)/.test(bp) && /placeholder=\{tr\("Search branches"\)\}/.test(bp) && /overflow-y: auto/.test(read("components/remote-bar/branch-picker.css")) && /liveRows\.length === 0 \|\| needle/.test(bp) && /setControlBranch\(/.test(bp) && /window\.location\.assign\("\/sources"\)/.test(bp) && /Not now — use the default branch/.test(bp) && !/WebSocket|sendCommand\(|setMaster|\.play\(/.test(bp));
 
+const lite = read("app/lite-fx.css");
+assert("P18 Lite graphics: the glass windows (details, People, join card, branch picker) are PLAIN — solid dark, or white with dark text in the white look (not on the always-black control screens) — and Full keeps the glass", /html\[data-sb-fx="lite"\] :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\)/.test(lite) && /\[data-sb-display="white"\]:not\(\[data-sb-control\]\) :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\) \* \{ color: #111111/.test(lite) && /backdrop-filter: blur\(72px\)/.test(read("components/roles/people-grid.css")));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
