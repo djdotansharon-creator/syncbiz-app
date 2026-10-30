@@ -730,6 +730,7 @@ export const HE_PHRASES: Record<string, string> = {
   "No role yet": "עדיין אין תפקיד",
   "Create and give": "ליצור ולתת",
   "Nothing to change here.": "אין כאן מה לשנות.",
+  "Requests": "בקשות",
   "Remote control": "שלט רחוק",
   "This device": "המכשיר הזה",
   "Day-to-day playback and device preferences.": "העדפות השמעה והתקן יומיומיות.",

@@ -11,13 +11,18 @@ import { useTr } from "@/lib/i18n/use-tr";
 import { PeopleGrid } from "@/components/roles/people-grid";
 import { RolesHub, type RoleView } from "@/components/roles/roles-hub";
 import { PersonPage } from "@/components/roles/person-page";
+import { EnrollmentRequestsPanel } from "@/components/control-room/device-enrollment-panel";
+import { useEnrollmentSummary } from "@/lib/use-enrollment-summary";
 import "@/components/roles/permissions-hub.css";
 
-type Tab = "people" | "roles";
+type Tab = "people" | "roles" | "requests";
 
 export function PermissionsHub() {
   const tr = useTr();
   const [tab, setTab] = useState<Tab>("people");
+  const enr = useEnrollmentSummary();
+  // owner 2026-10-31: the requests of people's devices live HERE (the Control Room's first tile is "New branch" now)
+  const showRequests = enr.loaded && enr.available && ((enr.enabled && enr.canDecide) || (!enr.enabled && enr.isAdmin));
   const [person, setPerson] = useState<string | null>(null);
   const [rolesOn, setRolesOn] = useState(false);
   const [roles, setRoles] = useState<RoleView[]>([]);
@@ -44,7 +49,8 @@ export function PermissionsHub() {
     const t = window.setTimeout(() => {
       void load();
       try {
-        if (new URLSearchParams(window.location.search).get("tab") === "roles") setTab("roles");
+        const q = new URLSearchParams(window.location.search).get("tab");
+        if (q === "roles" || q === "requests") setTab(q);
       } catch {
         /* the People tab it is */
       }
@@ -67,7 +73,7 @@ export function PermissionsHub() {
     setPerson(null);
     try {
       const u = new URL(window.location.href);
-      if (t === "roles") u.searchParams.set("tab", "roles");
+      if (t !== "people") u.searchParams.set("tab", t);
       else u.searchParams.delete("tab");
       window.history.replaceState(null, "", u.toString());
     } catch {
@@ -81,13 +87,20 @@ export function PermissionsHub() {
 
   return (
     <div className="sb-ph">
-      {rolesOn ? (
+      {rolesOn || showRequests ? (
         <div className="sb-ph-tabs" role="tablist" aria-label={tr("Permissions")}>
           <button type="button" role="tab" aria-selected={tab === "people"} className="sb-ph-tab" onClick={() => pick("people")}>{tr("People")}</button>
-          <button type="button" role="tab" aria-selected={tab === "roles"} className="sb-ph-tab" onClick={() => pick("roles")}>{tr("Roles")}</button>
+          {rolesOn ? <button type="button" role="tab" aria-selected={tab === "roles"} className="sb-ph-tab" onClick={() => pick("roles")}>{tr("Roles")}</button> : null}
+          {showRequests ? (
+            <button type="button" role="tab" aria-selected={tab === "requests"} className="sb-ph-tab" onClick={() => pick("requests")}>
+              {tr("Requests")}{enr.count > 0 ? <span className="sb-ph-count">{enr.count > 9 ? "9+" : enr.count}</span> : null}
+            </button>
+          ) : null}
         </div>
       ) : null}
-      {tab === "roles" && rolesOn ? (
+      {tab === "requests" && showRequests ? (
+        <EnrollmentRequestsPanel embedded onOpenBranch={() => window.location.assign("/owner/control-room")} />
+      ) : tab === "roles" && rolesOn ? (
         <RolesHub roles={roles} customCode={customCode} onRolesChange={setRoles} reload={load} selectedId={selectedRole} onSelect={setSelectedRole} onOpenPerson={setPerson} />
       ) : (
         <PeopleGrid onOpenPerson={setPerson} />
