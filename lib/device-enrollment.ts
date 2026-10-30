@@ -16,7 +16,7 @@ export type EnrollmentRole = (typeof ENROLLMENT_ROLES)[number];
 export const ENROLLMENT_PLATFORMS = ["browser", "desktop", "android", "ios", "streamer"] as const;
 export type EnrollmentPlatform = (typeof ENROLLMENT_PLATFORMS)[number];
 
-/** a station is the desktop app / streamer; a browser player plays only while its tab is open (design doc D-B1); "owner" is the main admin's own computer — it plays like any player but is a gift: it is never counted in the paid allocation (owner 2026-10-28) */
+/** a station is the desktop app / streamer; a browser player plays only while its tab is open (design doc D-B1); "owner" is the main admin's own computer — since 2026-10-31 a REMOTE label: it controls, never plays, takes no seat (owner: only the phone plays free; a computer that plays is a numbered Player) */
 export type PlayerClass = "station" | "browser" | "owner";
 
 export const DEFAULT_TTL_DAYS = 7;
@@ -252,7 +252,7 @@ export type MintDecision =
   | { kind: "off" }
   | { kind: "exempt" }
   | { kind: "blocked"; status: Exclude<EnrollmentStatus, "approved"> | "unknown" }
-  /** `owner` = the owner's own computer (playerClass "owner"): it may play, but only when made the player EXPLICITLY — it is never elected or promoted automatically. */
+  /** `owner` = the owner's own computer (playerClass "owner"): since 2026-10-31 approved as a REMOTE, so the WS server holds it to CONTROL; the flag is kept for older rows that were approved as PLAYER, which are still never elected or promoted automatically. */
   | { kind: "approved"; role: EnrollmentRole; branchIds: string[]; owner: boolean };
 
 /**

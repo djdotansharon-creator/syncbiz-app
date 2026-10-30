@@ -33,3 +33,7 @@ Every business starts with **Manager** (Control Room on), **Shift manager**, **E
 1. `SYNCBIZ_ALLOW_PROD_DB=1 DATABASE_URL=<target> npx prisma migrate deploy` (applies `20261029200000_roles` and anything older still pending). 2. Set `SYNCBIZ_ROLES=1`, redeploy.
 Off: remove the variable and redeploy — instant; rows stay. Remove: revert the merge commit; optionally
 `DROP TABLE "WorkspaceMemberRole"; DROP TABLE "WorkspaceRole"; DROP TABLE "WorkspaceAccessCode"; DELETE FROM "_prisma_migrations" WHERE migration_name = '20261029200000_roles';`
+
+
+## 2026-10-31 — computer switch is OFF by default
+"May sign in from a computer" is OFF for every ready-made role and for a role the owner adds; the owner turns it on per role. A computer that is allowed in is a Remote (it never plays). The owner's own computer is a Remote too; to play from a computer it must be approved as a Player, which takes a numbered seat. The owner plays free only from the phone (phone app not built yet).

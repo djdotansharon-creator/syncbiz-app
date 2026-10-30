@@ -20,9 +20,9 @@ export type RoleInput = RoleSwitches & { name: string };
 
 /** The ready-made roles every business starts with (the owner may rename, change or delete them). */
 export const DEFAULT_ROLES: ReadonlyArray<RoleInput & { sortOrder: number }> = [
-  { name: "Manager", openControlRoom: true, allowComputer: true, sortOrder: 0 },
-  { name: "Shift manager", openControlRoom: false, allowComputer: true, sortOrder: 1 },
-  { name: "Employee", openControlRoom: false, allowComputer: true, sortOrder: 2 },
+  { name: "Manager", openControlRoom: true, allowComputer: false, sortOrder: 0 },
+  { name: "Shift manager", openControlRoom: false, allowComputer: false, sortOrder: 1 },
+  { name: "Employee", openControlRoom: false, allowComputer: false, sortOrder: 2 },
 ];
 
 export type RoleInputError = "name" | "name_long";

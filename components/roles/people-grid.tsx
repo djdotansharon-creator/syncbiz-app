@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { createPortal } from "react-dom";
 import { useTr } from "@/lib/i18n/use-tr";
 import { JOIN_CHANGED_EVENT } from "@/lib/use-join-pending";
+import { JOIN_CODE_RENEW_MS } from "@/lib/join-by-code";
 import { buildJoinLink } from "@/lib/join-link";
 import { QrCode } from "@/components/roles/qr-code";
 import "./people-grid.css";
@@ -44,11 +45,6 @@ function ago(iso: string | null, tr: (t: string, v?: Record<string, string | num
   const h = Math.round(min / 60);
   if (h < 24) return tr("{n} h ago", { n: h });
   return tr("{n} days ago", { n: Math.round(h / 24) });
-}
-
-function fmtLeft(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 function Win({ onClose, children, label }: { onClose: () => void; children: React.ReactNode; label: string }) {
@@ -89,6 +85,7 @@ export function PeopleGrid() {
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
   const alive = useRef(true);
+  const makeCodeRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
 
   const load = useCallback(async () => {
     try {
@@ -146,6 +143,17 @@ export function PeopleGrid() {
     return () => window.clearInterval(t);
   }, [open?.kind]);
 
+  // the "add a person" window makes its own code the moment it opens and renews it every minute while it stays open (owner 2026-10-31); each code still works once
+  useEffect(() => {
+    if (open?.kind !== "add") return;
+    const first = window.setTimeout(() => void makeCodeRef.current(true), 0);
+    const t = window.setInterval(() => void makeCodeRef.current(true), JOIN_CODE_RENEW_MS);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+  }, [open?.kind]);
+
   const fail = (c?: string) => setError(tr(ERRORS[c ?? ""] ?? "Something went wrong. Please try again."));
   const close = useCallback(() => {
     setOpen(null);
@@ -153,8 +161,8 @@ export function PeopleGrid() {
     setCopied(false);
   }, []);
 
-  async function makeCode() {
-    setBusy(true);
+  async function makeCode(silent = false) {
+    if (!silent) setBusy(true);
     setError("");
     setCopied(false);
     try {
@@ -166,12 +174,15 @@ export function PeopleGrid() {
       }
       setCode({ code: j.code, expiresAt: new Date(j.expiresAt).getTime() });
       setNow(Date.now());
+      window.dispatchEvent(new Event(JOIN_CHANGED_EVENT)); // the screens re-check at once and then every few seconds while this code is on show
     } catch {
       fail();
     } finally {
-      setBusy(false);
+      if (!silent) setBusy(false);
     }
   }
+
+  makeCodeRef.current = makeCode;
 
   async function decide(id: string, decision: "approve" | "reject") {
     setBusy(true);
@@ -332,7 +343,7 @@ export function PeopleGrid() {
             <>
               <div className="sb-pg-qr"><QrCode value={link} size={196} label={tr("QR code to join")} /></div>
               <p className="sb-pg-code" dir="ltr">{code.code}</p>
-              <p className="sb-pg-left">{tr("Works once · expires in {t}", { t: fmtLeft(left) })}</p>
+              <p className="sb-pg-left">{tr("Works once · renews every minute")}</p>
               <div className="sb-pg-actions" style={{ paddingTop: 0 }}>
                 <button type="button" className="sb-pg-btn sb-pg-btn--main" onClick={() => { void navigator.clipboard?.writeText(link).then(() => setCopied(true)).catch(() => undefined); }}>{copied ? tr("Copied") : tr("Copy link")}</button>
                 <button type="button" className="sb-pg-btn" disabled={busy} onClick={() => void makeCode()}>{tr("New code")}</button>
