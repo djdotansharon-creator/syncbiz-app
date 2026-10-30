@@ -283,3 +283,22 @@ export function restrictBranches(authorized: readonly string[], approved: readon
   const ok = new Set(approved);
   return authorized.filter((b) => ok.has(b));
 }
+
+
+/** How many Remote devices one person can have approved by themselves (a sign-in on a new browser / phone needs nobody's approval). Past this, a manager decides as before. */
+export const MAX_AUTO_REMOTES_PER_PERSON = 30;
+
+/** "Chrome on Windows" — a short readable name for a device from its user agent (display only). */
+export function deviceLabelFromUserAgent(ua: string | null | undefined): string {
+  const u = ua ?? "";
+  const browser = /Edg\//.test(u) ? "Edge" : /OPR\/|Opera/.test(u) ? "Opera" : /Firefox\//.test(u) ? "Firefox" : /Chrome\//.test(u) || /CriOS\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "Browser";
+  const os = /iPhone|iPad|iPod/.test(u) ? "iPhone" : /Android/.test(u) ? "Android" : /Windows/.test(u) ? "Windows" : /Mac OS X|Macintosh/.test(u) ? "Mac" : /Linux/.test(u) ? "Linux" : "";
+  return os ? `${browser} on ${os}` : browser;
+}
+
+export function platformFromUserAgent(ua: string | null | undefined): "browser" | "ios" | "android" {
+  const u = ua ?? "";
+  if (/iPhone|iPad|iPod/.test(u)) return "ios";
+  if (/Android/.test(u)) return "android";
+  return "browser";
+}

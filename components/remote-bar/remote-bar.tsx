@@ -32,12 +32,11 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
   const isPlayer = !!ctx && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
   const show = !!ctx && ctx.isActive && ctx.isBranchConnected && !isPlayer && !isDesktopApp;
 
-  // owner 2026-10-31: with NO player online, a press on a song of the list used to mark it and the mark could not be undone (the click waited for a player that is not there). While that is so the list area is
-  // shut: the pointer becomes a red X (remote-bar.css) and a click / Enter there does nothing at all — nothing is sent, nothing is marked. Plain event capture, so the playback code is not touched.
-  const noPlayer = show && !ctx?.masterDeviceName;
+  // owner 2026-10-31: a REMOTE only SCROLLS the song list — it may not press a song, reorder or remove (a press used to mark a song and the mark could not be undone). While this screen is a Remote the list area is
+  // shut: the pointer over it is a red X (remote-bar.css) and a click / double-click / Enter / drag there does nothing at all — nothing is sent, nothing is marked. Plain event capture; the playback code is not touched.
   useEffect(() => {
-    if (!noPlayer) return;
-    document.documentElement.setAttribute("data-sb-noplayer", "1");
+    if (!show) return;
+    document.documentElement.setAttribute("data-sb-listlocked", "1");
     const shut = (e: Event) => {
       const t = e.target as Element | null;
       if (!t || typeof t.closest !== "function" || !t.closest(LIST_AREA)) return;
@@ -45,14 +44,13 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
       e.preventDefault();
       e.stopPropagation();
     };
-    document.addEventListener("click", shut, true);
-    document.addEventListener("keydown", shut, true);
+    const kinds = ["click", "dblclick", "keydown", "dragstart", "drop"] as const;
+    for (const k of kinds) document.addEventListener(k, shut, true);
     return () => {
-      document.documentElement.removeAttribute("data-sb-noplayer");
-      document.removeEventListener("click", shut, true);
-      document.removeEventListener("keydown", shut, true);
+      document.documentElement.removeAttribute("data-sb-listlocked");
+      for (const k of kinds) document.removeEventListener(k, shut, true);
     };
-  }, [noPlayer]);
+  }, [show]);
 
   // the header's own logo + way-back icon give way to the ones in this strip (CSS keys off this attribute)
   useEffect(() => {

@@ -197,6 +197,25 @@ async function main() {
     const again = await ask({ userId: owner.id, actor: admin, input: input(selfRemote.durableDeviceId, "PLAYER", "browser", b2.id) });
     assert("D49 asking again from a device that is already approved keeps what it has (a Remote does not turn into a Player by asking)", again.id === selfRemote.id && again.approvedRole === "REMOTE", again);
 
+    // ── the account decides: a signed-in member's new browser / phone is a Remote at once (owner 2026-10-31) ──
+    const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+    await prisma.workspaceMember.createMany({ data: [{ workspaceId: ws.id, userId: staffUser.id, role: "CONTROLLER" }, { workspaceId: ws.id, userId: owner.id, role: "WORKSPACE_ADMIN" }], skipDuplicates: true });
+    const autoStaff = await store.autoApproveRemote({ workspaceId: ws.id, userId: staffUser.id, durableDeviceId: mk("web-auto-staff"), userAgent: ua });
+    assert("D50 a member's new browser is approved at once as a REMOTE (no branch narrowing, no seat), labelled from the browser, not the owner's computer", !!autoStaff && autoStaff.status === "approved" && autoStaff.approvedRole === "REMOTE" && autoStaff.playerClass === null && autoStaff.label === "Chrome on Windows" && autoStaff.platform === "browser" && autoStaff.approvedBranchIds.length === 0, autoStaff);
+    const autoOwner = await store.autoApproveRemote({ workspaceId: ws.id, userId: owner.id, durableDeviceId: mk("web-auto-owner"), userAgent: ua });
+    assert("D51 the workspace OWNER's device gets the owner's-computer label (still a REMOTE)", !!autoOwner && autoOwner.approvedRole === "REMOTE" && autoOwner.playerClass === "owner" && autoOwner.label.startsWith("Owner"));
+    const autoAgain = await store.autoApproveRemote({ workspaceId: ws.id, userId: staffUser.id, durableDeviceId: autoStaff!.durableDeviceId, userAgent: ua });
+    assert("D52 asking again changes nothing", !!autoAgain && autoAgain.id === autoStaff!.id);
+    const revokedDev = mk("web-auto-revoked");
+    const asked = await store.autoApproveRemote({ workspaceId: ws.id, userId: staffUser.id, durableDeviceId: revokedDev, userAgent: ua });
+    await store.revokeEnrollment({ workspaceId: ws.id, actor: admin, id: asked!.id, note: "test" });
+    assert("D53 a device a manager REVOKED is not approved again by itself", (await store.autoApproveRemote({ workspaceId: ws.id, userId: staffUser.id, durableDeviceId: revokedDev, userAgent: ua })) === null);
+    const outsider = await prisma.user.create({ data: { email: `enroll-outsider-${tag}@example.test`, role: "CONTROLLER" } });
+    assert("D54 someone who is not a member of the workspace gets nothing", (await store.autoApproveRemote({ workspaceId: ws.id, userId: outsider.id, durableDeviceId: mk("web-auto-out"), userAgent: ua })) === null);
+    const phoneRow = await store.autoApproveRemote({ workspaceId: ws.id, userId: staffUser.id, durableDeviceId: mk("ios-auto"), userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1" });
+    assert("D55 a phone is a REMOTE too (platform ios) — never a Player", !!phoneRow && phoneRow.platform === "ios" && phoneRow.approvedRole === "REMOTE");
+    assert("D56 each automatic approval is in the audit log (auto, self)", (await prisma.auditLog.count({ where: { workspaceId: ws.id, action: "device.enroll_approve", entityId: autoStaff!.id } })) >= 1);
+
     // ── audit + switching off ──
     const actions = (await prisma.auditLog.findMany({ where: { workspaceId: ws.id }, select: { action: true } })).map((a) => a.action);
     assert("D25 every request, approval, rejection, revocation and settings change is in the audit log", ["device.enroll_request", "device.enroll_approve", "device.enroll_reject", "device.enroll_revoke", "enrollment.settings"].every((a) => actions.includes(a)));
