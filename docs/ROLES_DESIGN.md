@@ -37,3 +37,19 @@ Off: remove the variable and redeploy — instant; rows stay. Remove: revert the
 
 ## 2026-10-31 — computer switch is OFF by default
 "May sign in from a computer" is OFF for every ready-made role and for a role the owner adds; the owner turns it on per role. A computer that is allowed in is a Remote (it never plays). The owner's own computer is a Remote too; to play from a computer it must be approved as a Player, which takes a numbered seat. The owner plays free only from the phone (phone app not built yet).
+
+## 2026-10-31 — the Discord-style Permissions screen (stage 1: the screen + storage)
+**Screen** (`/access-control`): two tabs on top — **People** (the squares; a press opens the person's own full page) and **Roles** (a list of roles; the chosen one opens beside it with EVERY permission as an on/off switch, in groups: Access · Player · Library & business · More settings; the people holding the role at the bottom). A **person's page** is a full screen with a way-back arrow beside the name: details, the role (with what it allows), the branches the person can reach, pause / remove. The old user console is kept under "Advanced" (its create-user form is gone).
+
+**Permissions** (`lib/role-permissions.ts`, stored in `WorkspaceRole.permissions` JSON; empty `{}` = the defaults of the role's name): Player — play/pause, next/previous, add songs to the list, create playlists, schedule songs, volume, time bar, stop the player completely. Library & business — announcements/jingles, manage the library, see the dashboard, open a branch's settings (off = control from afar only). More settings (a master switch that opens the rest) — which players and which people the role can see (ALL / SOME + ids / NONE), change a person's permissions and details, edit players, add people, remove people. The two older switches keep their own columns: opens the Control Room, may sign in from a computer (default OFF for every role).
+
+### Enforcement map (what is enforced WHERE — never claimed beyond this table)
+| Permission | Stored + shown | Enforced |
+|---|---|---|
+| Opens the Control Room | yes | **yes** — the person's platform role + landing (`app/(app)/layout.tsx`) |
+| May sign in from a computer | yes | **yes** — `ComputerBlocked` (`app/(app)/layout.tsx`) |
+| Branches a person can reach (person page) | yes | **yes** — the existing branch authorization (`/api/admin/users`) |
+| All Player permissions, Library & business, More settings, players / people scopes | yes | **NOT YET** — stage 2: the controls are hidden / shut on the screens; stage 3: the server (API routes) and the WS commands refuse what the role does not allow |
+Until stage 2 and 3 land, switching one of the "NOT YET" permissions off changes nothing a person can do. Stage 2 and 3 each need the owner's approval (stage 3 touches the command path of the WS server).
+
+**Migration:** `20261031150000_role_permissions` — ONE additive column (`WorkspaceRole.permissions JSONB NOT NULL DEFAULT '{}'`). It must be applied BEFORE the code that reads it is deployed (merge-after-migrate).

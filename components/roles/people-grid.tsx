@@ -70,7 +70,7 @@ function Win({ onClose, children, label }: { onClose: () => void; children: Reac
   );
 }
 
-export function PeopleGrid() {
+export function PeopleGrid({ onOpenPerson }: { onOpenPerson?: (userId: string) => void } = {}) {
   const tr = useTr();
   const [people, setPeople] = useState<Person[] | null>(null);
   const [reqs, setReqs] = useState<Req[]>([]);
@@ -265,7 +265,7 @@ export function PeopleGrid() {
         })}
 
         {shownPeople.map((p) => (
-          <button key={p.userId} type="button" className="sb-pg-tile" onClick={() => setOpen({ kind: "person", id: p.userId })}>
+          <button key={p.userId} type="button" className="sb-pg-tile" onClick={() => (onOpenPerson ? onOpenPerson(p.userId) : setOpen({ kind: "person", id: p.userId }))}>
             <span className={`sb-pg-dot${p.status === "active" ? "" : " sb-pg-dot--off"}`} aria-hidden />
             <span className="sb-pg-avatar" style={{ background: toneFor(p.name) }}>{initialOf(p.name)}</span>
             <span className="sb-pg-name">{p.name}{p.isYou ? ` · ${tr("You")}` : ""}</span>

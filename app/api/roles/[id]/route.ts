@@ -10,7 +10,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   try {
     const { id } = await ctx.params;
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    await updateRole({ workspaceId: guard.workspaceId, actorUserId: guard.userId, roleId: id, input: { name: b.name, openControlRoom: b.openControlRoom, allowComputer: b.allowComputer } });
+    await updateRole({ workspaceId: guard.workspaceId, actorUserId: guard.userId, roleId: id, input: { name: b.name, openControlRoom: b.openControlRoom, allowComputer: b.allowComputer, permissions: b.permissions } });
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof RoleError) return NextResponse.json({ error: e.code }, { status: e.httpStatus });

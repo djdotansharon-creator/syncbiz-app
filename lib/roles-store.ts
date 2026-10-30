@@ -7,6 +7,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { writeTenantAuditLog } from "@/lib/admin/tenant-audit";
+import { defaultPermissionsFor, emptyPermissions, normalizePermissions, validatePermissionsInput, type RolePermissions } from "@/lib/role-permissions";
 import { DEFAULT_ROLES, MAX_ROLES_PER_WORKSPACE, accessCodeMatches, hashAccessCode, validateAccessCode, validateRoleInput } from "@/lib/roles";
 
 export class RoleError extends Error {
@@ -15,47 +16,50 @@ export class RoleError extends Error {
   }
 }
 
-export type RoleView = { id: string; name: string; openControlRoom: boolean; allowComputer: boolean; members: number };
+export type RoleView = { id: string; name: string; openControlRoom: boolean; allowComputer: boolean; permissions: RolePermissions; members: number };
 
 /** A business that has no roles yet gets the ready-made three (safe to call every time; concurrent first calls end with one set). */
 export async function ensureDefaultRoles(workspaceId: string): Promise<void> {
   if ((await prisma.workspaceRole.count({ where: { workspaceId } })) > 0) return;
-  await prisma.workspaceRole.createMany({ data: DEFAULT_ROLES.map((r) => ({ workspaceId, name: r.name, openControlRoom: r.openControlRoom, allowComputer: r.allowComputer, sortOrder: r.sortOrder })), skipDuplicates: true });
+  await prisma.workspaceRole.createMany({ data: DEFAULT_ROLES.map((r) => ({ workspaceId, name: r.name, openControlRoom: r.openControlRoom, allowComputer: r.allowComputer, permissions: defaultPermissionsFor(r.name), sortOrder: r.sortOrder })), skipDuplicates: true });
 }
 
 export async function listRoles(workspaceId: string): Promise<RoleView[]> {
   await ensureDefaultRoles(workspaceId);
   const rows = await prisma.workspaceRole.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], include: { _count: { select: { members: true } } } });
-  return rows.map((r) => ({ id: r.id, name: r.name, openControlRoom: r.openControlRoom, allowComputer: r.allowComputer, members: r._count.members }));
+  return rows.map((r) => ({ id: r.id, name: r.name, openControlRoom: r.openControlRoom, allowComputer: r.allowComputer, permissions: normalizePermissions(r.permissions, r.name), members: r._count.members }));
 }
 
 export async function hasCustomAccessCode(workspaceId: string): Promise<boolean> {
   return (await prisma.workspaceAccessCode.count({ where: { workspaceId } })) > 0;
 }
 
-export async function createRole(params: { workspaceId: string; actorUserId: string; input: { name: unknown; openControlRoom: unknown; allowComputer: unknown } }): Promise<RoleView> {
+export async function createRole(params: { workspaceId: string; actorUserId: string; input: { name: unknown; openControlRoom: unknown; allowComputer: unknown; permissions?: unknown } }): Promise<RoleView> {
   const v = validateRoleInput(params.input);
   if (!v.ok) throw new RoleError(v.error, 400);
+  if (!validatePermissionsInput(params.input.permissions).ok) throw new RoleError("permissions", 400);
+  const permissions = params.input.permissions === undefined ? emptyPermissions() : normalizePermissions(params.input.permissions, v.value.name);
   await ensureDefaultRoles(params.workspaceId);
   if ((await prisma.workspaceRole.count({ where: { workspaceId: params.workspaceId } })) >= MAX_ROLES_PER_WORKSPACE) throw new RoleError("too_many_roles", 409);
   try {
     const last = await prisma.workspaceRole.findFirst({ where: { workspaceId: params.workspaceId }, orderBy: { sortOrder: "desc" }, select: { sortOrder: true } });
-    const row = await prisma.workspaceRole.create({ data: { workspaceId: params.workspaceId, ...v.value, sortOrder: (last?.sortOrder ?? 0) + 1 } });
+    const row = await prisma.workspaceRole.create({ data: { workspaceId: params.workspaceId, ...v.value, permissions, sortOrder: (last?.sortOrder ?? 0) + 1 } });
     await writeTenantAuditLog(prisma, { action: "role.create", actorUserId: params.actorUserId, workspaceId: params.workspaceId, targetUserId: params.actorUserId, entity: "workspace", metadata: { roleId: row.id, name: row.name } });
-    return { id: row.id, name: row.name, openControlRoom: row.openControlRoom, allowComputer: row.allowComputer, members: 0 };
+    return { id: row.id, name: row.name, openControlRoom: row.openControlRoom, allowComputer: row.allowComputer, permissions, members: 0 };
   } catch (e) {
     if ((e as { code?: string }).code === "P2002") throw new RoleError("name_taken", 409);
     throw e;
   }
 }
 
-export async function updateRole(params: { workspaceId: string; actorUserId: string; roleId: string; input: { name: unknown; openControlRoom: unknown; allowComputer: unknown } }): Promise<void> {
+export async function updateRole(params: { workspaceId: string; actorUserId: string; roleId: string; input: { name: unknown; openControlRoom: unknown; allowComputer: unknown; permissions?: unknown } }): Promise<void> {
   const v = validateRoleInput(params.input);
   if (!v.ok) throw new RoleError(v.error, 400);
+  if (!validatePermissionsInput(params.input.permissions).ok) throw new RoleError("permissions", 400);
   const row = await prisma.workspaceRole.findFirst({ where: { id: params.roleId, workspaceId: params.workspaceId }, select: { id: true } });
   if (!row) throw new RoleError("not_found", 404);
   try {
-    await prisma.workspaceRole.update({ where: { id: row.id }, data: v.value });
+    await prisma.workspaceRole.update({ where: { id: row.id }, data: { ...v.value, ...(params.input.permissions !== undefined ? { permissions: normalizePermissions(params.input.permissions, v.value.name) } : {}) } });
   } catch (e) {
     if ((e as { code?: string }).code === "P2002") throw new RoleError("name_taken", 409);
     throw e;

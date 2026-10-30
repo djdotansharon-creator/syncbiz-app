@@ -59,6 +59,22 @@ async function main() {
     assert("D4 changing the switches is saved", (await store.listRoles(ws.id)).find((x) => x.id === nightRole.id)?.allowComputer === true);
     assert("D5 a role of another business cannot be changed or deleted from this one", (await throws(() => store.updateRole({ ...base, roleId: "no-such", input: { name: "x", openControlRoom: false, allowComputer: true } }))) === "not_found" && (await throws(() => store.deleteRole({ ...base, roleId: "no-such" }))) === "not_found");
 
+    // ── the permission list of a role (owner 2026-10-31) ──
+    const perms = await import("../lib/role-permissions");
+    const listP = await store.listRoles(ws.id);
+    const mgrP = listP.find((x) => x.name === "Manager");
+    assert("D2b a ready-made role carries the defaults of its name (Manager everything, Employee only play / skip / volume), and a role made before the column existed ({}) reads the same", !!mgrP && perms.ALL_FLAG_KEYS.every((k) => mgrP.permissions.flags[k]) && listP.find((x) => x.name === "Employee")?.permissions.flags.volume === true && listP.find((x) => x.name === "Employee")?.permissions.flags.stop_player === false);
+    const withPerms = await store.createRole({ ...base, input: { name: "Floor lead", openControlRoom: false, allowComputer: false, permissions: { flags: { play_pause: true, schedule: true, more_settings: true, add_people: true }, players: { mode: "SOME", ids: ["b-1", "b-2"] }, people: { mode: "ALL", ids: [] } } } });
+    const back = (await store.listRoles(ws.id)).find((x) => x.id === withPerms.id);
+    assert("D2c a role made with a permission list keeps it: the flags, the chosen players and who it can see", !!back && back.permissions.flags.play_pause && back.permissions.flags.schedule && back.permissions.flags.add_people && !back.permissions.flags.volume && back.permissions.players.mode === "SOME" && back.permissions.players.ids.join() === "b-1,b-2" && back.permissions.people.mode === "ALL");
+    await store.updateRole({ ...base, roleId: withPerms.id, input: { name: "Floor lead", openControlRoom: false, allowComputer: false, permissions: { flags: { volume: true }, players: { mode: "NONE", ids: [] } } } });
+    const changed = (await store.listRoles(ws.id)).find((x) => x.id === withPerms.id);
+    assert("D2d changing the list is saved (and unknown keys never get in); leaving it out of an update changes nothing", !!changed && changed.permissions.flags.volume && !changed.permissions.flags.play_pause && changed.permissions.players.mode === "NONE" && (await (async () => { await store.updateRole({ ...base, roleId: withPerms.id, input: { name: "Floor lead", openControlRoom: false, allowComputer: false } }); return (await store.listRoles(ws.id)).find((x) => x.id === withPerms.id)?.permissions.flags.volume === true; })()));
+    assert("D2e a permission list that is not an object is refused", (await throws(() => store.updateRole({ ...base, roleId: withPerms.id, input: { name: "Floor lead", openControlRoom: false, allowComputer: false, permissions: ["x"] } }))) === "permissions");
+    await prisma.workspaceRole.update({ where: { id: withPerms.id }, data: { permissions: {} } });
+    assert("D2f an EMPTY stored list on a custom name means nothing allowed (never a surprise permission)", Object.values((await store.listRoles(ws.id)).find((x) => x.id === withPerms.id)!.permissions.flags).every((v) => v === false));
+    await store.deleteRole({ ...base, roleId: withPerms.id });
+
     // ── a person with a role ──
     const staff = await prisma.user.create({ data: { email: mail("staff"), role: "CONTROLLER", passwordHash: hashPassword("staff-pw-1") } });
     await prisma.workspaceMember.create({ data: { workspaceId: ws.id, userId: staff.id, role: "CONTROLLER" } });

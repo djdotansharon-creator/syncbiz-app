@@ -687,6 +687,8 @@ model WorkspaceRole {
   name            String
   openControlRoom Boolean  @default(false)
   allowComputer   Boolean  @default(true)
+  /// the Discord-style permission list of the role (lib/role-permissions.ts): flags + the players / people scopes. {} = the ready-made defaults of the role's name.
+  permissions     Json     @default("{}")
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
