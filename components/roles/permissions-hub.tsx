@@ -76,7 +76,7 @@ export function PermissionsHub() {
   };
 
   if (person) {
-    return <PersonPage userId={person} roles={rolesOn ? roles : []} onBack={() => setPerson(null)} onEditRole={(id) => { setSelectedRole(id); setPerson(null); pick("roles"); }} />;
+    return <PersonPage userId={person} roles={rolesOn ? roles : []} reloadRoles={load} onBack={() => setPerson(null)} onEditRole={(id) => { setSelectedRole(id); setPerson(null); pick("roles"); }} />;
   }
 
   return (

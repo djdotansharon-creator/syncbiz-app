@@ -38,7 +38,7 @@ export async function createRole(params: { workspaceId: string; actorUserId: str
   const v = validateRoleInput(params.input);
   if (!v.ok) throw new RoleError(v.error, 400);
   if (!validatePermissionsInput(params.input.permissions).ok) throw new RoleError("permissions", 400);
-  const permissions = params.input.permissions === undefined ? emptyPermissions() : normalizePermissions(params.input.permissions, v.value.name);
+  const permissions = params.input.permissions === undefined ? emptyPermissions(v.value.name) : normalizePermissions(params.input.permissions, v.value.name);
   await ensureDefaultRoles(params.workspaceId);
   if ((await prisma.workspaceRole.count({ where: { workspaceId: params.workspaceId } })) >= MAX_ROLES_PER_WORKSPACE) throw new RoleError("too_many_roles", 409);
   try {

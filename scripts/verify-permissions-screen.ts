@@ -32,5 +32,9 @@ const sql = mig.length === 1 ? read(`prisma/migrations/${mig[0]}/migration.sql`)
 assert("S9 the migration is ONE additive column with a default (nothing else changes) — apply it before deploying the code", mig.length === 1 && /ALTER TABLE "WorkspaceRole" ADD COLUMN "permissions" JSONB NOT NULL DEFAULT '\{\}'/.test(sql) && (sql.match(/ALTER TABLE/g) ?? []).length === 1 && !/DROP|DELETE|UPDATE/i.test(sql.replace(/--.*$/gm, "")));
 assert("S10 the enforcement map is written down honestly (what is NOT enforced yet is said so)", /Enforcement map/.test(read("docs/ROLES_DESIGN.md")) && /NOT YET/.test(read("docs/ROLES_DESIGN.md")));
 
+const shape = read("components/roles/role-shape.tsx");
+assert("S11 roles have SHAPES (not a plain dot): every shape of the catalog has a drawing, the roles list / editor / person page use the shape, and the editor has a shape + colour picker that saves with the role", (read("lib/role-permissions.ts").match(/ROLE_SHAPES = \[([^\]]*)\]/)?.[1].match(/"/g) ?? []).length / 2 === Object.keys(Object.fromEntries([...shape.matchAll(/^  (\w+): "M/gm)].map((m) => [m[1], 1]))).length && /RoleShapeIcon/.test(rolesHub) && /RoleShapeIcon/.test(person) && /ROLE_SHAPES\.map/.test(rolesHub) && /ROLE_COLORS\.map/.test(rolesHub) && /setLook\(role,/.test(rolesHub) && !/roleDot/.test(rolesHub + person));
+assert("S12 the person page is ONE flowing page, no boxes: tiny details rows under the name, the role (current one, opens into all roles + a new one) and the branches as plain sections, the account on the side", !/sb-psn-card/.test(person + css) && /aria-expanded=\{rolesOpen\}/.test(person) && /createAndGive/.test(person) && /aria-expanded=\{branchesOpen\}/.test(person) && /<aside className="sb-psn-side"/.test(person) && /className="sb-psn-meta"/.test(person));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

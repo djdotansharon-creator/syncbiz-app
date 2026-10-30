@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTr } from "@/lib/i18n/use-tr";
-import { PERMISSION_GROUPS, PERMISSION_LABELS, normalizePermissions, type PermissionKey, type RolePermissions, type Scope, type ScopeMode } from "@/lib/role-permissions";
+import { PERMISSION_GROUPS, PERMISSION_LABELS, ROLE_COLORS, ROLE_SHAPES, normalizePermissions, type PermissionKey, type RoleAppearance, type RolePermissions, type Scope, type ScopeMode } from "@/lib/role-permissions";
+import { RoleShapeIcon } from "@/components/roles/role-shape";
 import { Toggle } from "@/components/roles/toggle";
 
 export type RoleView = { id: string; name: string; openControlRoom: boolean; allowComputer: boolean; permissions: RolePermissions; members: number };
@@ -24,13 +25,6 @@ const ERRORS: Record<string, string> = {
   role_in_use: "People still have this role — change theirs first.",
   bad_code: "The code must be 3–12 letters or digits.",
   permissions: "Something went wrong. Please try again.",
-};
-
-const DOTS = ["#5fe3a1", "#7db8ff", "#ffcf5c", "#ff8a8a", "#c79bff", "#5fd4e3", "#ffa86b"];
-export const roleDot = (name: string): string => {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return DOTS[h % DOTS.length];
 };
 
 function ScopeRow({ title, hint, scope, options, onChange, tr }: { title: string; hint: string; scope: Scope; options: Array<{ id: string; label: string }>; onChange: (s: Scope) => void; tr: (t: string, v?: Record<string, string | number>) => string }) {
@@ -74,6 +68,7 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
   const [newName, setNewName] = useState("");
   const [code, setCode] = useState("");
   const [saved, setSaved] = useState("");
+  const [lookOpen, setLookOpen] = useState(false);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -124,6 +119,7 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
 
   const latest = (r: RoleView): RoleView => rolesRef.current.find((x) => x.id === r.id) ?? r;
   const setFlag = (r: RoleView, k: PermissionKey, v: boolean) => { const c = latest(r); save(c, { permissions: normalizePermissions({ ...c.permissions, flags: { ...c.permissions.flags, [k]: v } }, c.name) }); };
+  const setLook = (r: RoleView, patch: Partial<RoleAppearance>) => { const c = latest(r); save(c, { permissions: normalizePermissions({ ...c.permissions, appearance: { ...c.permissions.appearance, ...patch } }, c.name) }); };
   const setScope = (r: RoleView, which: "players" | "people", s: Scope) => { const c = latest(r); save(c, { permissions: normalizePermissions({ ...c.permissions, [which]: s }, c.name) }); };
 
   async function add() {
@@ -204,7 +200,7 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
           {roles.map((r) => (
             <li key={r.id}>
               <button type="button" className="sb-rh-item" aria-current={r.id === selectedId ? "true" : undefined} onClick={() => onSelect(r.id)}>
-                <i className="sb-rh-dot" style={{ background: roleDot(r.name) }} aria-hidden />
+                <RoleShapeIcon look={r.permissions.appearance} size={18} />
                 <span className="sb-rh-itemname">{r.name}</span>
                 <small>{r.members}</small>
               </button>
@@ -227,10 +223,25 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
         ) : (
           <>
             <div className="sb-rh-head">
-              <i className="sb-rh-dot sb-rh-dot--big" style={{ background: roleDot(role.name) }} aria-hidden />
+              <button type="button" className="sb-rh-look" aria-expanded={lookOpen} aria-label={tr("Shape and colour")} onClick={() => setLookOpen((v) => !v)}><RoleShapeIcon look={role.permissions.appearance} size={26} /></button>
               <input key={role.id + role.name} className="sb-rh-name" defaultValue={role.name} maxLength={40} aria-label={tr("Role name")} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== role.name) save(role, { name: v }); else e.target.value = role.name; }} />
               <button type="button" className="sb-rh-del" disabled={role.members > 0} title={role.members > 0 ? tr("People still have this role — change theirs first.") : undefined} onClick={() => void remove(role)}>{tr("Delete role")}</button>
             </div>
+
+            {lookOpen ? (
+              <div className="sb-rh-lookpick" role="group" aria-label={tr("Shape and colour")}>
+                <div className="sb-rh-shapes">
+                  {ROLE_SHAPES.map((sh) => (
+                    <button key={sh} type="button" className="sb-rh-shape" aria-pressed={role.permissions.appearance.shape === sh} aria-label={sh} onClick={() => setLook(role, { shape: sh })}><RoleShapeIcon look={{ shape: sh, color: role.permissions.appearance.color }} size={22} /></button>
+                  ))}
+                </div>
+                <div className="sb-rh-colors">
+                  {ROLE_COLORS.map((c) => (
+                    <button key={c} type="button" className="sb-rh-color" aria-pressed={role.permissions.appearance.color === c} aria-label={c} style={{ background: c }} onClick={() => setLook(role, { color: c })} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {PERMISSION_GROUPS.map((g) => (
               <div key={g.id} className="sb-rh-group">

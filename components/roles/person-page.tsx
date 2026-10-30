@@ -1,15 +1,17 @@
 "use client";
 
 /**
- * A PERSON — a full page, like a branch's page without the map (owner 2026-10-31): a way back arrow beside the name, the person's details below it, then every control over them: which ROLE they hold (and what
- * that role allows), which BRANCHES they can reach (control from afar / see), and the account itself (pause / resume sign-in, remove). The branch choice here is the person's own scope; whether they may open a
- * branch's SETTINGS or only control it is a permission of their role. Reads /api/people, /api/admin/users and /api/branches; writes through the same routes the old console used (workspace admin only).
+ * A PERSON — one flowing page, no boxes (owner 2026-10-31: "the details as plain small rows under the name, no frame; below, only the role the person has now — press it and all the roles open, to choose or to
+ * make a new one; the account actions on the side"). A way-back arrow beside the name; the details as tiny rows under it; then ROLE (the current one; opens into the whole list + "new role"; what it allows) and BRANCHES
+ * (the current reach; opens into the choice); the SIDE holds the account (pause / resume sign-in, remove). Whether the person may open a branch's SETTINGS or only control it is a permission of their role (shown under
+ * the role). Reads /api/people, /api/admin/users and /api/branches; writes through the same routes the old console used (workspace admin only).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTr } from "@/lib/i18n/use-tr";
 import { ALL_FLAG_KEYS, PERMISSION_LABELS } from "@/lib/role-permissions";
-import { roleDot, type RoleView } from "@/components/roles/roles-hub";
+import type { RoleView } from "@/components/roles/roles-hub";
+import { RoleShapeIcon } from "@/components/roles/role-shape";
 import "@/components/roles/people-grid.css";
 
 type Person = { userId: string; name: string; email: string; level: "owner" | "manager" | "member"; roleId: string | null; roleName: string | null; status: "active" | "paused" | "disabled"; lastSignInAt: string | null; joinedAt: string; isYou: boolean };
@@ -23,7 +25,7 @@ const toneFor = (s: string): string => {
   return TONES[h % TONES.length];
 };
 
-export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: string; roles: RoleView[]; onBack: () => void; onEditRole: (roleId: string) => void }) {
+export function PersonPage({ userId, roles, onBack, onEditRole, reloadRoles }: { userId: string; roles: RoleView[]; onBack: () => void; onEditRole: (roleId: string) => void; reloadRoles: () => Promise<void> }) {
   const tr = useTr();
   const [person, setPerson] = useState<Person | null | undefined>(undefined);
   const [account, setAccount] = useState<ApiUser | null>(null);
@@ -33,6 +35,9 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
+  const [branchesOpen, setBranchesOpen] = useState(false);
+  const [newRole, setNewRole] = useState("");
   const alive = useRef(true);
 
   const load = useCallback(async () => {
@@ -66,7 +71,7 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
   const role = useMemo(() => roles.find((r) => r.id === person?.roleId) ?? null, [roles, person?.roleId]);
   const allowed = useMemo(() => (role ? ALL_FLAG_KEYS.filter((k) => role.permissions.flags[k]) : []), [role]);
 
-  const fail = (code?: string) => setError(tr(code === "not_yourself" ? "You cannot change your own role." : code === "protected" ? "The owner and workspace admins keep their level." : "Something went wrong. Please try again."));
+  const fail = (code?: string) => setError(tr(code === "not_yourself" ? "You cannot change your own role." : code === "protected" ? "The owner and workspace admins keep their level." : code === "name_taken" ? "A role with this name already exists." : "Something went wrong. Please try again."));
 
   async function give(roleId: string) {
     setBusy(true);
@@ -79,7 +84,31 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
         return;
       }
       setNote(tr("Saved"));
+      setRolesOpen(false);
       await load();
+    } catch {
+      fail();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createAndGive() {
+    const name = newRole.trim();
+    if (!name) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await fetch("/api/roles", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, openControlRoom: false, allowComputer: false }) });
+      const j = (await r.json().catch(() => ({}))) as { error?: string; role?: { id?: string } };
+      if (!r.ok || !j.role?.id) {
+        fail(j.error);
+        return;
+      }
+      setNewRole("");
+      await reloadRoles();
+      setBusy(false);
+      await give(j.role.id);
     } catch {
       fail();
     } finally {
@@ -99,6 +128,7 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
         return;
       }
       setNote(tr("Saved"));
+      setBranchesOpen(false);
       await load();
     } catch {
       fail();
@@ -107,7 +137,7 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
     }
   }
 
-  async function account_(action: "pause-member" | "resume-member" | "remove-member") {
+  async function accountAction(action: "pause-member" | "resume-member" | "remove-member") {
     if (!person) return;
     setBusy(true);
     setError("");
@@ -144,8 +174,11 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
   const stateText = person.status === "active" ? tr("Active") : person.status === "paused" ? tr("Paused") : tr("Sign-in off");
   const isAdminLevel = person.level !== "member" || account?.accessType === "OWNER";
   const allIds = branches.map((b) => b.id);
-  const allPicked = allIds.length > 0 && allIds.every((id) => picked.includes(id));
+  const reachNames = account?.accessType === "BRANCH_USER" ? branches.filter((b) => account.branchIds.includes(b.id)).map((b) => b.name) : [];
+  const reachText = isAdminLevel ? tr("Full access to every branch.") : reachNames.length === allIds.length && allIds.length > 0 ? tr("All branches") : reachNames.length === 0 ? tr("No branch yet") : reachNames.join(" · ");
   const dirty = account?.accessType === "BRANCH_USER" && (picked.length !== account.branchIds.length || picked.some((id) => !account.branchIds.includes(id)));
+  const canPause = !!account && !person.isYou && person.level !== "owner" && account.canPauseInWorkspace !== false;
+  const canRemove = !!account && !person.isYou && person.level !== "owner" && account.canRemoveFromWorkspace !== false;
 
   return (
     <div className="sb-psn">
@@ -154,81 +187,90 @@ export function PersonPage({ userId, roles, onBack, onEditRole }: { userId: stri
         <span className="sb-pg-avatar sb-psn-avatar" style={{ background: toneFor(person.name || person.email) }}>{(person.name || person.email).trim()[0]?.toUpperCase() ?? "?"}</span>
         <div className="sb-psn-title">
           <h2>{person.name || person.email}{person.isYou ? <small> · {tr("You")}</small> : null}</h2>
-          <span>{levelText} · {stateText}</span>
+          <div className="sb-psn-meta">
+            <span dir="ltr">{person.email}</span>
+            <span>{levelText} · {stateText}</span>
+            <span>{tr("Last sign-in")}: {person.lastSignInAt ? new Date(person.lastSignInAt).toLocaleString() : tr("Never signed in")}</span>
+            <span>{tr("Joined")}: {new Date(person.joinedAt).toLocaleDateString()}</span>
+          </div>
         </div>
       </div>
 
-      <div className="sb-psn-grid">
-        <section className="sb-psn-card" aria-label={tr("Details")}>
-          <h3>{tr("Details")}</h3>
-          <dl className="sb-psn-facts">
-            <div><dt>{tr("E-mail")}</dt><dd dir="ltr">{person.email}</dd></div>
-            <div><dt>{tr("Level")}</dt><dd>{levelText}</dd></div>
-            <div><dt>{tr("State")}</dt><dd>{stateText}</dd></div>
-            <div><dt>{tr("Last sign-in")}</dt><dd>{person.lastSignInAt ? new Date(person.lastSignInAt).toLocaleString() : tr("Never signed in")}</dd></div>
-            <div><dt>{tr("Joined")}</dt><dd>{new Date(person.joinedAt).toLocaleDateString()}</dd></div>
-          </dl>
-        </section>
-
-        <section className="sb-psn-card" aria-label={tr("Role")}>
-          <h3>{tr("Role")}</h3>
-          {roles.length === 0 ? <p className="sb-psn-muted">{tr("Roles are not switched on for this business.")}</p> : isAdminLevel ? <p className="sb-psn-muted">{tr("The owner and managers keep their level — it is not changed with a role.")}</p> : (
-            <>
-              <div className="sb-psn-roles" role="radiogroup" aria-label={tr("Role")}>
-                {roles.map((r) => (
-                  <button key={r.id} type="button" role="radio" aria-checked={person.roleId === r.id} className="sb-psn-role" disabled={busy || person.isYou} onClick={() => void give(r.id)}>
-                    <i className="sb-rh-dot" style={{ background: roleDot(r.name) }} aria-hidden />{r.name}
-                  </button>
-                ))}
-              </div>
-              {role ? (
-                <>
-                  <p className="sb-psn-muted">{allowed.length === 0 ? tr("This role allows nothing yet.") : tr("This role allows:")}</p>
-                  <div className="sb-psn-allowed">
-                    {allowed.map((k) => <span key={k} className="sb-psn-tag">{tr(PERMISSION_LABELS[k].title)}</span>)}
-                    <span className="sb-psn-tag sb-psn-tag--q" data-on={role.permissions.flags.branch_settings ? "1" : "0"}>{role.permissions.flags.branch_settings ? tr("Can open a branch's settings") : tr("Controls from afar only — no branch settings")}</span>
+      <div className="sb-psn-body">
+        <div className="sb-psn-main">
+          <section className="sb-psn-sec" aria-label={tr("Role")}>
+            <h3>{tr("Role")}</h3>
+            {roles.length === 0 ? <p className="sb-psn-muted">{tr("Roles are not switched on for this business.")}</p> : isAdminLevel ? <p className="sb-psn-muted">{tr("The owner and managers keep their level — it is not changed with a role.")}</p> : (
+              <>
+                <button type="button" className="sb-psn-current" aria-expanded={rolesOpen} onClick={() => setRolesOpen((v) => !v)}>
+                  {role ? <RoleShapeIcon look={role.permissions.appearance} size={22} /> : null}
+                  <span>{role ? role.name : tr("No role yet")}</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="sb-psn-chev" data-open={rolesOpen ? "1" : "0"}><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+                {rolesOpen ? (
+                  <div className="sb-psn-open" role="radiogroup" aria-label={tr("Role")}>
+                    {roles.map((r) => (
+                      <button key={r.id} type="button" role="radio" aria-checked={person.roleId === r.id} className="sb-psn-opt" disabled={busy || person.isYou} onClick={() => void give(r.id)}>
+                        <RoleShapeIcon look={r.permissions.appearance} size={20} /><span>{r.name}</span>
+                      </button>
+                    ))}
+                    <form className="sb-psn-new" onSubmit={(e) => { e.preventDefault(); void createAndGive(); }}>
+                      <input value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder={tr("New role")} maxLength={40} aria-label={tr("New role")} />
+                      <button type="submit" disabled={busy || !newRole.trim()}>{tr("Create and give")}</button>
+                    </form>
                   </div>
-                  <button type="button" className="sb-psn-link" onClick={() => onEditRole(role.id)}>{tr("Edit this role")}</button>
-                </>
-              ) : null}
-            </>
-          )}
-        </section>
-
-        <section className="sb-psn-card" aria-label={tr("Branches")}>
-          <h3>{tr("Branches")}</h3>
-          {isAdminLevel ? <p className="sb-psn-muted">{tr("Full access to every branch.")}</p> : (
-            <>
-              <p className="sb-psn-muted">{tr("The branches this person can reach — to control from afar or to see.")}</p>
-              <div className="sb-psn-segrow">
-                <button type="button" className="sb-rh-segbtn" aria-pressed={allPicked} onClick={() => setPicked(allIds)}>{tr("All branches")}</button>
-                <button type="button" className="sb-rh-segbtn" aria-pressed={!allPicked} onClick={() => setPicked(picked.length === allIds.length ? picked.slice(0, 1) : picked)}>{tr("Selected branches")}</button>
-              </div>
-              <div className="sb-rh-pick">
-                {branches.map((b) => {
-                  const on = picked.includes(b.id);
-                  return <button key={b.id} type="button" className="sb-rh-chip" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((x) => x !== b.id) : [...picked, b.id])}>{b.name}</button>;
-                })}
-              </div>
-              <button type="button" className="sb-psn-save" disabled={busy || !dirty || picked.length === 0} onClick={() => void saveBranches(picked)}>{tr("Save branches")}</button>
-              {picked.length === 0 ? <small className="sb-psn-muted">{tr("Choose at least one branch.")}</small> : null}
-            </>
-          )}
-        </section>
-
-        {account && !person.isYou && person.level !== "owner" ? (
-          <section className="sb-psn-card" aria-label={tr("Account")}>
-            <h3>{tr("Account")}</h3>
-            <div className="sb-psn-actions">
-              {account.canPauseInWorkspace !== false ? (
-                person.status === "paused" ? <button type="button" className="sb-pg-btn" disabled={busy} onClick={() => void account_("resume-member")}>{tr("Let them sign in again")}</button> : <button type="button" className="sb-pg-btn" disabled={busy} onClick={() => void account_("pause-member")}>{tr("Pause sign-in")}</button>
-              ) : null}
-              {account.canRemoveFromWorkspace !== false ? (
-                confirmRemove ? <button type="button" className="sb-pg-btn sb-psn-danger" disabled={busy} onClick={() => void account_("remove-member")}>{tr("Press again to remove")}</button> : <button type="button" className="sb-pg-btn" disabled={busy} onClick={() => setConfirmRemove(true)}>{tr("Remove from the business")}</button>
-              ) : null}
-            </div>
+                ) : null}
+                {role ? (
+                  <>
+                    <p className="sb-psn-muted">{allowed.length === 0 ? tr("This role allows nothing yet.") : tr("This role allows:")}</p>
+                    <div className="sb-psn-allowed">
+                      {allowed.map((k) => <span key={k} className="sb-psn-tag">{tr(PERMISSION_LABELS[k].title)}</span>)}
+                      <span className="sb-psn-tag sb-psn-tag--q" data-on={role.permissions.flags.branch_settings ? "1" : "0"}>{role.permissions.flags.branch_settings ? tr("Can open a branch's settings") : tr("Controls from afar only — no branch settings")}</span>
+                    </div>
+                    <button type="button" className="sb-psn-link" onClick={() => onEditRole(role.id)}>{tr("Edit this role")}</button>
+                  </>
+                ) : null}
+              </>
+            )}
           </section>
-        ) : null}
+
+          <section className="sb-psn-sec" aria-label={tr("Branches")}>
+            <h3>{tr("Branches")}</h3>
+            {isAdminLevel ? <p className="sb-psn-muted">{reachText}</p> : (
+              <>
+                <button type="button" className="sb-psn-current" aria-expanded={branchesOpen} onClick={() => setBranchesOpen((v) => !v)}>
+                  <span>{reachText}</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="sb-psn-chev" data-open={branchesOpen ? "1" : "0"}><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+                {branchesOpen ? (
+                  <div className="sb-psn-open">
+                    <p className="sb-psn-muted">{tr("The branches this person can reach — to control from afar or to see.")}</p>
+                    <div className="sb-rh-pick">
+                      <button type="button" className="sb-rh-chip" aria-pressed={allIds.length > 0 && allIds.every((id) => picked.includes(id))} onClick={() => setPicked(allIds)}>{tr("All branches")}</button>
+                      {branches.map((b) => {
+                        const on = picked.includes(b.id);
+                        return <button key={b.id} type="button" className="sb-rh-chip" aria-pressed={on} onClick={() => setPicked(on ? picked.filter((x) => x !== b.id) : [...picked, b.id])}>{b.name}</button>;
+                      })}
+                    </div>
+                    <button type="button" className="sb-psn-save" disabled={busy || !dirty || picked.length === 0} onClick={() => void saveBranches(picked)}>{tr("Save branches")}</button>
+                    {picked.length === 0 ? <small className="sb-psn-muted"> {tr("Choose at least one branch.")}</small> : null}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </section>
+        </div>
+
+        <aside className="sb-psn-side" aria-label={tr("Account")}>
+          <h3>{tr("Account")}</h3>
+          {!canPause && !canRemove ? <p className="sb-psn-muted">{tr("Nothing to change here.")}</p> : null}
+          {canPause ? (person.status === "paused"
+            ? <button type="button" className="sb-psn-act" disabled={busy} onClick={() => void accountAction("resume-member")}>{tr("Let them sign in again")}</button>
+            : <button type="button" className="sb-psn-act" disabled={busy} onClick={() => void accountAction("pause-member")}>{tr("Pause sign-in")}</button>) : null}
+          {canRemove ? (confirmRemove
+            ? <button type="button" className="sb-psn-act sb-psn-act--danger" disabled={busy} onClick={() => void accountAction("remove-member")}>{tr("Press again to remove")}</button>
+            : <button type="button" className="sb-psn-act" disabled={busy} onClick={() => setConfirmRemove(true)}>{tr("Remove from the business")}</button>) : null}
+        </aside>
       </div>
       {note ? <p className="sb-psn-ok" role="status">{note}</p> : null}
       {error ? <p className="sb-pg-err" role="alert">{error}</p> : null}

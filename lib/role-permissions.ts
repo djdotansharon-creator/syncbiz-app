@@ -23,7 +23,28 @@ export const ALL_FLAG_KEYS: readonly PermissionKey[] = [...PLAYER_PERMISSIONS, .
 
 export type ScopeMode = "ALL" | "NONE" | "SOME";
 export type Scope = { mode: ScopeMode; ids: string[] };
-export type RolePermissions = { flags: Record<PermissionKey, boolean>; players: Scope; people: Scope };
+/** the look of a role: a SHAPE (not a plain dot) in a colour (owner 2026-10-31: "give shapes you can give to roles") */
+export const ROLE_SHAPES = ["star", "diamond", "hexagon", "shield", "crown", "bolt", "heart", "flame", "moon", "flag", "gem", "circle"] as const;
+export type RoleShape = (typeof ROLE_SHAPES)[number];
+export const ROLE_COLORS = ["#5fe3a1", "#7db8ff", "#ffcf5c", "#ff8a8a", "#c79bff", "#5fd4e3", "#ffa86b", "#f5f5f7"] as const;
+export type RoleAppearance = { shape: RoleShape; color: string };
+
+export type RolePermissions = { flags: Record<PermissionKey, boolean>; players: Scope; people: Scope; appearance: RoleAppearance };
+
+const nameHash = (name: string): number => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h;
+};
+
+/** a stable look for a role that has not been given one: the ready-made roles have their own, others follow their name */
+export function defaultAppearance(roleName: string): RoleAppearance {
+  if (roleName === "Manager") return { shape: "crown", color: "#ffcf5c" };
+  if (roleName === "Shift manager") return { shape: "shield", color: "#7db8ff" };
+  if (roleName === "Employee") return { shape: "star", color: "#5fe3a1" };
+  const h = nameHash(roleName);
+  return { shape: ROLE_SHAPES[h % (ROLE_SHAPES.length - 1)], color: ROLE_COLORS[(h >>> 3) % ROLE_COLORS.length] };
+}
 
 export const MAX_SCOPE_IDS = 200;
 
@@ -31,19 +52,19 @@ const none = (): Record<PermissionKey, boolean> => Object.fromEntries(ALL_FLAG_K
 const on = (keys: readonly PermissionKey[]): Record<PermissionKey, boolean> => ({ ...none(), ...Object.fromEntries(keys.map((k) => [k, true])) });
 
 /** a role the owner makes himself starts with nothing allowed — he switches on what he wants */
-export function emptyPermissions(): RolePermissions {
-  return { flags: none(), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] } };
+export function emptyPermissions(roleName = ""): RolePermissions {
+  return { flags: none(), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] }, appearance: defaultAppearance(roleName) };
 }
 
 const DEFAULTS_BY_NAME: Record<string, RolePermissions> = {
-  Manager: { flags: on(ALL_FLAG_KEYS), players: { mode: "ALL", ids: [] }, people: { mode: "ALL", ids: [] } },
-  "Shift manager": { flags: on(["play_pause", "skip", "queue_add", "volume", "seek", "announcements"]), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] } },
-  Employee: { flags: on(["play_pause", "skip", "volume"]), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] } },
+  Manager: { flags: on(ALL_FLAG_KEYS), players: { mode: "ALL", ids: [] }, people: { mode: "ALL", ids: [] }, appearance: defaultAppearance("Manager") },
+  "Shift manager": { flags: on(["play_pause", "skip", "queue_add", "volume", "seek", "announcements"]), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] }, appearance: defaultAppearance("Shift manager") },
+  Employee: { flags: on(["play_pause", "skip", "volume"]), players: { mode: "ALL", ids: [] }, people: { mode: "NONE", ids: [] }, appearance: defaultAppearance("Employee") },
 };
 
 export function defaultPermissionsFor(roleName: string): RolePermissions {
   const d = DEFAULTS_BY_NAME[roleName];
-  return d ? { flags: { ...d.flags }, players: { ...d.players, ids: [...d.players.ids] }, people: { ...d.people, ids: [...d.people.ids] } } : emptyPermissions();
+  return d ? { flags: { ...d.flags }, players: { ...d.players, ids: [...d.players.ids] }, people: { ...d.people, ids: [...d.people.ids] }, appearance: { ...d.appearance } } : emptyPermissions(roleName);
 }
 
 function normalizeScope(raw: unknown, fallback: Scope): Scope {
@@ -58,15 +79,20 @@ function normalizeScope(raw: unknown, fallback: Scope): Scope {
 export function normalizePermissions(raw: unknown, roleName: string): RolePermissions {
   const isEmpty = !raw || typeof raw !== "object" || Object.keys(raw as object).length === 0;
   if (isEmpty) return defaultPermissionsFor(roleName);
-  const r = raw as { flags?: unknown; players?: unknown; people?: unknown };
+  const r = raw as { flags?: unknown; players?: unknown; people?: unknown; appearance?: unknown };
   const flags = none();
   if (r.flags && typeof r.flags === "object") {
     for (const k of ALL_FLAG_KEYS) if ((r.flags as Record<string, unknown>)[k] === true) flags[k] = true;
   }
   // the sub-switches of "more settings" mean nothing while it is off — keep the stored value off so a later switch-on starts from a clear page
   if (!flags.more_settings) for (const k of MORE_SETTINGS_PERMISSIONS) flags[k] = false;
-  const base = emptyPermissions();
-  return { flags, players: normalizeScope(r.players, base.players), people: normalizeScope(r.people, base.people) };
+  const base = emptyPermissions(roleName);
+  const ap = r.appearance && typeof r.appearance === "object" ? (r.appearance as { shape?: unknown; color?: unknown }) : {};
+  const appearance: RoleAppearance = {
+    shape: (ROLE_SHAPES as readonly string[]).includes(ap.shape as string) ? (ap.shape as RoleShape) : base.appearance.shape,
+    color: (ROLE_COLORS as readonly string[]).includes(ap.color as string) ? (ap.color as string) : base.appearance.color,
+  };
+  return { flags, players: normalizeScope(r.players, base.players), people: normalizeScope(r.people, base.people), appearance };
 }
 
 /** a validation for the API: the body must be an object (flags / players / people); everything else is normalised, never rejected */
