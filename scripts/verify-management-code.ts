@@ -24,7 +24,7 @@ assert("M5 the unlock route takes the code from ANY signed-in person (role still
 const gate = read("components/management/management-gate.tsx");
 assert("M6 Settings is gated only by the station lock (desktop app) — a browser goes straight in, and it is NOT manager-only", /export async function SettingsGate/.test(gate) && /if \(!s\.unlocked\) return <ManagementLockScreen \/>/.test(gate) && !/canManage/.test(gate.slice(gate.indexOf("export async function SettingsGate"))));
 const settings = read("app/(app)/settings/page.tsx");
-assert("M7 the settings page is wrapped in that gate", /<SettingsGate from="\/settings">\s*<SettingsContent \/>/.test(settings));
+assert("M7 the settings page is wrapped in that gate", /<SettingsGate from="\/settings">\s*<SettingsContent[^>]*\/>/.test(settings));
 const access = read("lib/management-access.ts");
 assert("M8 a browser is never locked: the station lock state is unlocked unless the user agent is the desktop app", /if \(!desktop\) return \{ signedIn: true, desktop: false, unlocked: true \}/.test(access));
 const lock = read("components/management/management-lock.tsx");

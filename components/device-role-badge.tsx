@@ -49,7 +49,7 @@ export function RemoteIcon(): ReactElement {
   );
 }
 
-export function DeviceRoleBadge(): ReactElement | null {
+export function DeviceRoleBadge({ onOpen }: { onOpen?: () => void } = {}): ReactElement | null {
   const ctx = useDevicePlayer();
   const { locale } = useLocale();
   if (!ctx || !ctx.isActive || !ctx.isBranchConnected) return null;
@@ -57,12 +57,25 @@ export function DeviceRoleBadge(): ReactElement | null {
   // the desktop app's own screen is a controller by design while the co-located station plays: it is still the PLAYER computer
   const isPlayer = ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation;
   const label = isPlayer ? t.player : ctx.masterDeviceName ? t.remoteAt(ctx.masterDeviceName) : t.remote;
-  return (
-    <span className="sb-role-icon inline-flex h-8 items-center justify-center gap-1.5 px-1" data-role={isPlayer ? "player" : "remote"} role="status" aria-label={label}>
+  const inner = (
+    <>
       {isPlayer ? <PlayerIcon /> : <RemoteIcon />}
       <span className="sb-role-text text-[12.5px] font-semibold leading-none" aria-hidden>
         {isPlayer ? t.word.player : t.word.remote}
       </span>
+    </>
+  );
+  // owner 2026-10-31: pressing the icon opens the Player / Remote details window (the menu row that used to open it is gone)
+  if (onOpen) {
+    return (
+      <button type="button" onClick={onOpen} className="sb-role-icon inline-flex h-8 items-center justify-center gap-1.5 px-1" data-role={isPlayer ? "player" : "remote"} aria-label={label} aria-haspopup="dialog">
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <span className="sb-role-icon inline-flex h-8 items-center justify-center gap-1.5 px-1" data-role={isPlayer ? "player" : "remote"} role="status" aria-label={label}>
+      {inner}
     </span>
   );
 }

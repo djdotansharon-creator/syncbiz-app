@@ -41,12 +41,13 @@ import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popov
 import { DeviceRoleBadge } from "@/components/device-role-badge";
 import { ControlBar } from "@/components/control-screen/control-bar";
 import { JoinPopup } from "@/components/roles/join-popup";
+import { RemoteBar } from "@/components/remote-bar/remote-bar";
 import { ControlBackIcon } from "@/components/control-screen/control-back-icon";
 import { isControlScreenPath } from "@/lib/control-screen";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
-import { DeviceDetailsMenuRow, DeviceDetailsModal } from "@/components/device-details";
+import { DeviceDetailsModal } from "@/components/device-details";
 import { KioskDisplay } from "@/components/kiosk-display";
 import { KioskLaunchButton } from "@/components/kiosk-launch-button";
 import { LeavingNavTab, MotionNavLink, useTabTransitions } from "@/components/top-nav-motion";
@@ -284,7 +285,7 @@ const navKeys = [
   "display-design",
 ] as const;
 /** entries that exist in the code but are NOT offered in the top bar or the gear menu (owner 2026-10-22: "remote" is not part of this interface at all; "settings" moved into the gear menu as "More settings") */
-const HIDDEN_NAV_KEYS = new Set<string>(["remote", "settings"]);
+const HIDDEN_NAV_KEYS = new Set<string>(["remote", "settings", "owner"]); // owner 2026-10-31: the Owner tab moved into Settings (tabs "Business" and "Remote control")
 /** management entries — shown only to managers (security hotfix 2026-10-13) */
 const MANAGEMENT_NAV_KEYS = new Set<string>(["dashboard", "controlRoom", "access-control", "owner", "display-design"]);
 /** tabs of the top bar that are never offered in the gear menu (always on the bar — they cannot be pinned or unpinned) */
@@ -1522,6 +1523,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {...(isMediaThemeRoute ? { "data-library-theme": libraryTheme } : {})}
       >
         {isControlScreen ? <JoinPopup /> : null}
+        {!isControlScreen && !isDesktopApp ? <RemoteBar canManage={canManage} /> : null}
         {isControlScreen ? <ControlBar canManage={canManage} /> : null}
         <header
           className={`sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md${
@@ -1667,7 +1669,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <DisplayModeSwitch />
               </span>
               {/* what this screen is — Player or Remote (display only, owner 2026-10-27) */}
-              <DeviceRoleBadge />
+              <DeviceRoleBadge onOpen={() => setDeviceDetailsOpen(true)} />
               {/* Fullscreen / Control Room toggle */}
               <button
                 type="button"
@@ -1718,8 +1720,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   dir={LOCALES.find((l) => l.code === locale)?.rtl ? "rtl" : "ltr"}
                   lead={
                     <>
-                      {/* owner 2026-10-28: "Player details" / "Remote details" — the very first row, a circle with an i; the lock-screen row left this short list */}
-                      <DeviceDetailsMenuRow onOpen={() => { setMainMenuOpen(false); setDeviceDetailsOpen(true); }} />
+                      {/* owner 2026-10-31: the "Player / Remote details" row is gone — the Player / Remote icon in the top bar opens that window */}
                       <DisplayModeMenuRow />
                       <FxModeMenuRow />
                     </>

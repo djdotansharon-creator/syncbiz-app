@@ -41,6 +41,7 @@ const HE = {
   ownerSending: "מצרף…",
   waiting: "ממתין לאישור המנהל",
   waitingSub: "נעדכן אותך כשיאושר — אפשר להשאיר את המסך הזה פתוח.",
+  cantPlay: "עד שהמחשב הזה יאושר הוא לא יכול לנגן או לשלוט. אם ביקשת להיות נגן וכבר יש נגן אחר פעיל — אפשר לחכות לאישור, או לבקש מהמנהל להגדיל את מספר הנגנים.",
   expires: (d: number) => (d <= 1 ? "הבקשה תפוג היום" : `הבקשה תפוג בעוד ${d} ימים`),
   rejected: "הבקשה נדחתה",
   revoked: "האישור למכשיר הזה בוטל",
@@ -84,6 +85,7 @@ const EN: typeof HE = {
   ownerSending: "Joining…",
   waiting: "Waiting for the manager's approval",
   waitingSub: "We will let you know when it is approved — you can keep this screen open.",
+  cantPlay: "Until this computer is approved it cannot play or control anything. If it asked to be a Player and another player is already active, wait for approval — or ask your manager to increase the number of players.",
   expires: (d: number) => (d <= 1 ? "The request expires today" : `The request expires in ${d} days`),
   rejected: "The request was declined",
   revoked: "This device's approval was cancelled",
@@ -347,9 +349,12 @@ export function EnrollmentGateCard({ gate, loading }: { gate: EnrollmentGateApi;
           </>
         ) : st.status === "pending" ? (
           <>
+            {/* owner 2026-10-31: a clear "cannot play" mark and what to do — wait for approval or raise the number of players */}
+            <span className="vono-enr-x" aria-hidden><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg></span>
             <h2 className="vono-enr-h">{t.waiting}</h2>
             <p className="vono-enr-dots" aria-hidden><i /><i /><i /></p>
             <p className="vono-enr-sub">{t.waitingSub}</p>
+            <p className="vono-enr-sub vono-enr-small">{t.cantPlay}</p>
             <p className="vono-enr-sub vono-enr-small">{t.expires(daysLeft)}</p>
           </>
         ) : (

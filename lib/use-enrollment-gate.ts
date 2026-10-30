@@ -48,7 +48,7 @@ export type EnrollmentGateApi = {
 
 /** The last "approved" answer is remembered for a few minutes so an approved device does not wait a network round trip on every page load (the app starts at once while the check runs in the background;
  *  a revoke still takes the app away as soon as the answer arrives). Storage failures are ignored. */
-const OK_KEY = "vono_enr_ok";
+export const OK_KEY = "vono_enr_ok";
 const OK_MS = 10 * 60_000;
 function readOk(id: string): EnrollmentClientStatus | null {
   try {
