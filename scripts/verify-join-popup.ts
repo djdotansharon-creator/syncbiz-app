@@ -37,5 +37,16 @@ assert("P8 the owner's computer is a REMOTE (it controls, never plays, takes no 
 assert("P9 'may sign in from a computer' is OFF by default: in every ready-made role and in a role the owner adds", DEFAULT_ROLES.every((r) => r.allowComputer === false) && /name: newName, openControlRoom: false, allowComputer: false/.test(panel));
 assert("P10 no gear tab between the Player's tabs", !/sb-gear-tab/.test(shell) && !/isGearTab/.test(shell) && /item\.labelKey !== "controlRoom"/.test(shell));
 
+const rb = read("components/remote-bar/remote-bar.tsx");
+const rbCss = read("components/remote-bar/remote-bar.css");
+const settings = read("app/(app)/settings/page.tsx");
+const gate = read("components/enrollment-gate.tsx");
+assert("P11 the Remote strip (owner 2026-10-31): only on a screen that is NOT the player and not in the desktop app, mounted outside the control screens; it names the controlled branch + whether its player is online, says so plainly when none is, and changing the branch is the Control Room's own choice (stored target + a full load)", /!isControlScreen && !isDesktopApp \? <RemoteBar/.test(shell) && /!isPlayer && !isDesktopApp/.test(rb) && /ctx\.masterDeviceName/.test(rb) && /No player is connected/.test(rb) && /setControlBranch\(/.test(rb) && /window\.location\.assign\("\/sources"\)/.test(rb) && !/WebSocket|sendCommand|setMaster|\.play\(/.test(rb));
+assert("P12 while the strip shows, the header's own logo and way-back icon give way to the strip's, and the header slides under it", /html\[data-sb-remote-view\] header\[role="banner"\] \.sb-brand/.test(rbCss) && /\.sb-ctl-back/.test(rbCss) && /top: 56px/.test(rbCss) && /data-sb-remote-view/.test(rb));
+assert("P13 the Owner tab is gone from the bar and its two pages live in Settings as tabs (Business, Remote control) for people who manage; /owner sends people to the Business tab; only the open tab is mounted", /HIDDEN_NAV_KEYS = new Set<string>\(\["remote", "settings", "owner"\]\)/.test(shell) && /<SettingsTabs/.test(settings) && /<OwnerControlPanel \/>/.test(settings) && /WorkspaceBusinessProfileForm/.test(settings) && /redirect\("\/settings\?tab=business"\)/.test(read("app/(app)/(workspace)/owner/page.tsx")) && /tab === "general" \? general : tab === "business" \? business : remote/.test(read("components/settings/settings-tabs.tsx")));
+assert("P14 on an approved REMOTE the player-only settings (MASTER/CONTROL switch + mix, VONO Protection + local library) are hidden; a business without device approval sees them as before", (settings.match(/<PlayerDeviceOnly>/g) ?? []).length === 2 && /=== "REMOTE" \? null/.test(read("components/remote-bar/player-device-only.tsx")) && /vono_enr_ok/.test(read("lib/use-enrollment-gate.ts")));
+assert("P15 the waiting screen has the 'cannot play yet' X mark and says what to do (wait for approval, or ask for more players)", /vono-enr-x/.test(gate) && /increase the number of players/.test(gate));
+assert("P16 the Player / Remote icon in the top bar opens the details window and the gear-menu row is gone", /<DeviceRoleBadge onOpen=\{\(\) => setDeviceDetailsOpen\(true\)\} \/>/.test(shell) && !/<DeviceDetailsMenuRow/.test(shell));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

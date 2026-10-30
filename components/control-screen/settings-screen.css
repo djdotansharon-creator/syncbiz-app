@@ -37,3 +37,9 @@
 .sb-set [class*="p-0.5"] button { border-radius: 999px; }
 .sb-set p[class*="uppercase"] { text-transform: none; letter-spacing: 0; }
 .sb-set button[aria-pressed="true"] { background-color: rgba(255, 255, 255, 0.92) !important; color: #0a0a0a !important; }
+
+/* Settings tabs (This device · Business · Remote control) — soft pills, the open one solid white (owner 2026-10-31) */
+.sb-set-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 18px; }
+.sb-set-tab { border: 0; border-radius: 999px; padding: 8px 18px; background: rgba(255, 255, 255, 0.08); color: #f5f5f7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.15s; }
+.sb-set-tab:hover { background: rgba(255, 255, 255, 0.16); }
+.sb-set-tab[aria-selected="true"] { background: rgba(255, 255, 255, 0.94); color: #0a0a0a; }

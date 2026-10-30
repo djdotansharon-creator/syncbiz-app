@@ -92,3 +92,6 @@
   .vono-enr-tile b { font-size: 19px; }
   .vono-enr-row { grid-template-columns: 1fr; }
 }
+
+/* the "cannot play yet" mark above the waiting message (owner 2026-10-31) */
+.vono-enr-x { display: grid; place-items: center; width: 68px; height: 68px; margin-bottom: 18px; border-radius: 50%; background: rgba(255, 99, 99, 0.16); color: #ff8a8a; }

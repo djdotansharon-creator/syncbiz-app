@@ -15,6 +15,12 @@ import { redirect } from "next/navigation";
 import { getLocale } from "@/lib/locale-server";
 import { trFor } from "@/lib/i18n/phrases";
 import { SettingsGate } from "@/components/management/management-gate";
+import { SettingsTabs } from "@/components/settings/settings-tabs";
+import { PlayerDeviceOnly } from "@/components/remote-bar/player-device-only";
+import { OwnerControlPanel } from "@/components/owner-control-panel";
+import { WorkspaceBusinessProfileForm } from "@/components/workspace-business-profile-form";
+import { getWorkspaceBusinessProfileJson, sanitizeBusinessProfileForTenant } from "@/lib/workspace-business-profile";
+import { getTenantRole } from "@/lib/user-store";
 import "@/components/control-screen/settings-screen.css";
 
 const ico = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true, className: "sb-set-ico" } as const;
@@ -65,7 +71,7 @@ function Fact({ label, value, note }: { label: string; value: string; note: stri
   );
 }
 
-async function SettingsContent() {
+async function SettingsContent({ tab }: { tab?: string }) {
   const user = await getCurrentUserFromCookies();
   if (!user) redirect("/login?from=/settings");
 
@@ -75,14 +81,29 @@ async function SettingsContent() {
   /** "$17/mo" → "$17 לחודש" */
   const priceText = (p: string) => (p.endsWith("/mo") ? `${p.slice(0, -3)} ${tr("per month")}` : p);
 
+  // owner 2026-10-31: the old "Owner" tab lives here now — "Business" (workspace profile) and "Remote control" — for the people who manage the workspace
+  const role = await getTenantRole(user.id, user.tenantId);
+  const manages = role === "TENANT_OWNER" || role === "TENANT_ADMIN";
+  const business = manages ? (
+    <WorkspaceBusinessProfileForm
+      workspaceId={user.tenantId}
+      initialProfile={sanitizeBusinessProfileForTenant(await getWorkspaceBusinessProfileJson(user.tenantId))}
+      variant="tenant"
+      canEdit
+    />
+  ) : undefined;
+  const remote = manages ? <OwnerControlPanel /> : undefined;
+
   return (
     // the app main area is a fixed-height region — like the other management pages, this one scrolls on its own
     <div className="mgmt-type h-full overflow-y-auto">
     <div className="sb-set">
       <header className="sb-set-head">
         <h1>{tr("Settings")}</h1>
-        <p>{tr("Day-to-day playback and device preferences. Workspace business profile lives under")} {tr("Owner")}.</p>
+        <p>{tr("Day-to-day playback and device preferences.")}</p>
       </header>
+
+      <SettingsTabs initial={tab} business={business} remote={remote} general={<>
 
       <Section icon={Icons.play} title={tr("Playback preferences")} description={tr("Theme and language for this browser.")}>
         <div className="pb-6">
@@ -90,6 +111,7 @@ async function SettingsContent() {
         </div>
       </Section>
 
+      <PlayerDeviceOnly>
       <Section icon={Icons.monitor} title={tr("Remote player")} description={tr("Choose whether this device is MASTER (outputs audio) or CONTROL (mirrors master).")}>
         <div className="sb-set-grid">
           <Sub>
@@ -101,6 +123,9 @@ async function SettingsContent() {
         </div>
       </Section>
 
+      </PlayerDeviceOnly>
+
+      <PlayerDeviceOnly>
       <Section icon={Icons.shield} title={tr("VONO Protection")} description={tr("Unattended branch-player: auto-start with Windows and automatic recovery (VONO Desktop).")}>
         <div className="sb-set-grid">
           <Sub>
@@ -119,6 +144,7 @@ async function SettingsContent() {
           <ClearPlaybackCacheButton />
         </div>
       </Section>
+      </PlayerDeviceOnly>
 
       <Section
         icon={Icons.download}
@@ -159,16 +185,18 @@ async function SettingsContent() {
           <Sub title={tr("More settings")} description={tr("Additional controls will appear here in future releases.")} />
         </div>
       </Section>
+      </>} />
     </div>
     </div>
   );
 }
 
-export default function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams?: Promise<{ tab?: string }> }) {
+  const tab = (await searchParams)?.tab;
   // on the player computer (desktop app) the access code comes first; a browser goes straight in
   return (
     <SettingsGate from="/settings">
-      <SettingsContent />
+      <SettingsContent tab={tab} />
     </SettingsGate>
   );
 }
