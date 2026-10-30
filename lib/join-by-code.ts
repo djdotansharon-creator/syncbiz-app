@@ -6,8 +6,12 @@
 
 import { createHash, randomInt } from "crypto";
 
-/** One-time codes live 10 minutes (owner asked for "a minute"; ten leaves time to read it out and type it — change it here only). */
-export const JOIN_CODE_TTL_MS = 10 * 60_000;
+/** A one-time code lives 90 seconds (owner 2026-10-31: "renews every minute" — the window shows each code for 60 s, the extra 30 s is for the person still typing it). A photo of an old QR is useless. */
+export const JOIN_CODE_TTL_MS = 90_000;
+/** A person who OPENED the join link (the QR) is given this long to fill in his details before sending; only that code is kept alive, and it still works once. */
+export const JOIN_CLAIM_TTL_MS = 10 * 60_000;
+/** How often the "add a person" window asks for a fresh code while it is open. */
+export const JOIN_CODE_RENEW_MS = 60_000;
 /** An unanswered request stays open this many days. */
 export const JOIN_REQUEST_TTL_DAYS = 7;
 /** Most unused, unexpired codes one workspace can hold at a time (stops a runaway loop from filling the table). */
@@ -49,6 +53,10 @@ export function hashJoinCode(normalized: string): string {
 
 export function joinCodeExpiresAt(now = Date.now()): Date {
   return new Date(now + JOIN_CODE_TTL_MS);
+}
+
+export function joinClaimExpiresAt(now = Date.now()): Date {
+  return new Date(now + JOIN_CLAIM_TTL_MS);
 }
 
 export function joinRequestExpiresAt(now = Date.now()): Date {

@@ -200,12 +200,13 @@ export async function searchBranchesForEnrollment(workspaceId: string, query: st
   return any === 0 && "default".includes(q.toLowerCase()) ? [{ id: "default", name: "Default", city: "" }] : [];
 }
 
-/** The owner's own computer (owner 2026-10-28): the normal interface with every control, able to play like a player, for every branch (no narrowing) — and a gift: it never takes a Player seat (`playerClass: "owner"`). */
+/** The owner's own computer: the normal interface with every control for every branch (no narrowing) — as a REMOTE. Owner 2026-10-31: "a computer that is a remote cannot play; the owner plays free only from the phone;
+ *  a computer that plays is a Player and takes a numbered seat". So it never plays and never takes a seat; to play from it, ask for Player (the admin's own request is approved at once, with a free seat). `playerClass: "owner"` stays as the label. */
 function ownerDeviceData(userId: string, now: Date, ttlDays: number, grandfathered = false) {
   return {
     status: "approved",
-    requestedRole: "PLAYER",
-    approvedRole: "PLAYER",
+    requestedRole: "REMOTE",
+    approvedRole: "REMOTE",
     playerClass: "owner",
     requestedByUserId: userId,
     requestedBranchId: null as string | null,
@@ -243,7 +244,7 @@ export async function approveOwnDevice(args: { workspaceId: string; userId: stri
       workspaceId: args.workspaceId,
       targetUserId: row.id,
       ipAddress: args.ip || null,
-      metadata: { durableDeviceId: args.durableDeviceId, role: "PLAYER", playerClass: "owner", branchIds: [], self: true, owner: true },
+      metadata: { durableDeviceId: args.durableDeviceId, role: "REMOTE", playerClass: "owner", branchIds: [], self: true, owner: true },
     });
     return row;
   });

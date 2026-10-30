@@ -5,7 +5,7 @@
  * Player and Remote, just the icon and its name (a phone only has Remote). Choosing one: the other fades away, the chosen icon glides to the centre and grows, and underneath only what the choice needs opens, piece by piece:
  *   · Player  → the branch (type a name → matching branches appear; a name that matches nothing is a NEW branch → its address and brand), nothing about the person (the signed-in account is the asker);
  *   · Remote  → who the person is (first / last name, phone, e-mail) and the existing branch it controls.
- * The account's main admin also gets a slim "I'm the owner" bar at the bottom: his own new computer is approved at once (the normal interface, every branch, able to play, never a Player seat) — he approves
+ * The account's main admin also gets a slim "I'm the owner" bar at the bottom: his own new computer is approved at once (the normal interface, every branch — as a REMOTE: it controls but never plays and never takes a Player seat; to play from it he asks for Player) — he approves
  * everyone else, he does not wait for someone to approve him. The server gives the device no connection token until it is approved, and the app behind this screen is not even loaded (components/enrollment-hold.tsx).
  * Styles: components/enrollment-gate.css.
  */

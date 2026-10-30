@@ -88,7 +88,7 @@ export function RolesPanel() {
     if (!newName.trim()) return;
     setError("");
     try {
-      const r = await fetch("/api/roles", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newName, openControlRoom: false, allowComputer: true }) });
+      const r = await fetch("/api/roles", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: newName, openControlRoom: false, allowComputer: false }) });
       if (!r.ok) {
         const j = (await r.json().catch(() => ({}))) as { error?: string };
         fail(j.error);

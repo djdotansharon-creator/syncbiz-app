@@ -13,7 +13,7 @@ function assert(name: string, ok: boolean, detail?: unknown) {
 }
 
 assert("P1 roles need the env flag to be 1 or true (unset / 0 / yes are off)", !r.isRolesEnvEnabled({}) && !r.isRolesEnvEnabled({ SYNCBIZ_ROLES: "0" }) && !r.isRolesEnvEnabled({ SYNCBIZ_ROLES: "yes" }) && r.isRolesEnvEnabled({ SYNCBIZ_ROLES: "1" }) && r.isRolesEnvEnabled({ SYNCBIZ_ROLES: "true" }));
-assert("P2 a business starts with three ready-made roles: Manager (opens the Control Room), Shift manager, Employee — all may use a computer", r.DEFAULT_ROLES.length === 3 && r.DEFAULT_ROLES[0].name === "Manager" && r.DEFAULT_ROLES[0].openControlRoom && !r.DEFAULT_ROLES[1].openControlRoom && !r.DEFAULT_ROLES[2].openControlRoom && r.DEFAULT_ROLES.every((x) => x.allowComputer));
+assert("P2 a business starts with three ready-made roles: Manager (opens the Control Room), Shift manager, Employee — NONE may use a computer by default (owner 2026-10-31: the switch is off until the owner turns it on for a role)", r.DEFAULT_ROLES.length === 3 && r.DEFAULT_ROLES[0].name === "Manager" && r.DEFAULT_ROLES[0].openControlRoom && !r.DEFAULT_ROLES[1].openControlRoom && !r.DEFAULT_ROLES[2].openControlRoom && r.DEFAULT_ROLES.every((x) => x.allowComputer === false));
 assert("P3 a role needs a name (spaces tidied, 40 characters at most); the switches default to: Control Room off, computer on", (() => {
   const a = r.validateRoleInput({ name: "  Night   cashier ", openControlRoom: undefined, allowComputer: undefined });
   const b = r.validateRoleInput({ name: "   ", openControlRoom: true, allowComputer: true });

@@ -22,6 +22,8 @@ import {
   formatJoinCode,
   generateJoinCode,
   hashJoinCode,
+  isWellFormedJoinCode,
+  joinClaimExpiresAt,
   joinCodeExpiresAt,
   joinRequestExpiresAt,
   normalizeJoinCode,
@@ -62,6 +64,25 @@ export async function createJoinCode(params: { workspaceId: string; actorUserId:
     }
   }
   throw new JoinError("code_generation_failed", 500);
+}
+
+/**
+ * A person opened the join link (scanned the QR): the code in it is valid right now, so it is kept alive long enough for him to fill in his details — otherwise a code that renews every minute would expire
+ * while he is still typing. Public — no session. Only an unused, unexpired code is extended, never past JOIN_CLAIM_TTL_MS, and it still works once. Same single answer for every kind of bad code.
+ */
+export async function claimJoinCode(code: string, headers: Headers): Promise<{ ok: true }> {
+  const keys = attemptKeys("join-claim", "-", headers);
+  if (blockedFor(keys) > 0) throw new JoinError("rate_limited", 429);
+  const normalized = normalizeJoinCode(code);
+  const now = new Date();
+  const row = isWellFormedJoinCode(normalized) ? await prisma.workspaceJoinCode.findUnique({ where: { codeHash: hashJoinCode(normalized) } }) : null;
+  if (!row || row.usedAt || row.expiresAt <= now) {
+    keys.forEach((k) => recordFailure(k));
+    throw new JoinError("bad_code", 400);
+  }
+  const until = joinClaimExpiresAt(now.getTime());
+  if (row.expiresAt < until) await prisma.workspaceJoinCode.updateMany({ where: { id: row.id, usedAt: null }, data: { expiresAt: until } });
+  return { ok: true };
 }
 
 /**
@@ -115,6 +136,11 @@ export async function submitJoinRequest(input: JoinInput, headers: Headers): Pro
   });
   keys.forEach((k) => recordSuccess(k));
   return { ok: true, hasAccount: Boolean(existing) };
+}
+
+/** Codes that are made and not used or expired yet — while one exists somebody may be about to scan it, so the approvers' screens ask for news more often. */
+export async function countActiveJoinCodes(workspaceId: string): Promise<number> {
+  return prisma.workspaceJoinCode.count({ where: { workspaceId, usedAt: null, expiresAt: { gt: new Date() } } });
 }
 
 export type JoinRequestView = {

@@ -97,6 +97,8 @@ export function SignupFlow() {
     if (c) {
       setCode(c);
       setFromLink(true);
+      // the code renews every minute on the owner's screen: keep THIS one alive while the person fills in his details (it still works once)
+      void fetch("/api/join/claim", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: c }) }).catch(() => undefined);
     }
   }, []);
   const set = (k: keyof typeof d) => (e: React.ChangeEvent<HTMLInputElement>) => setD((s) => ({ ...s, [k]: e.target.value }));

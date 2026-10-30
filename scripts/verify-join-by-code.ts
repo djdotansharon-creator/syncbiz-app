@@ -22,7 +22,7 @@ assert("J5 a code with an ambiguous symbol or the wrong length is not well-forme
 assert("J6 the hash is stable, differs per code, and never contains the code", j.hashJoinCode("ABCDEFGH") === j.hashJoinCode("ABCDEFGH") && j.hashJoinCode("ABCDEFGH") !== j.hashJoinCode("ABCDEFGJ") && !j.hashJoinCode("ABCDEFGH").includes("ABCDEFGH") && /^[0-9a-f]{64}$/.test(j.hashJoinCode("ABCDEFGH")));
 
 const t0 = 1_800_000_000_000;
-assert("J7 a code lives 10 minutes; a request 7 days", j.joinCodeExpiresAt(t0).getTime() === t0 + 10 * 60_000 && j.joinRequestExpiresAt(t0).getTime() === t0 + 7 * 86_400_000);
+assert("J7 a code lives 90 seconds (shown 60 s, then renewed — owner 2026-10-31), a person who opened the link gets 10 minutes to type his details, a request 7 days", j.joinCodeExpiresAt(t0).getTime() === t0 + 90_000 && j.joinClaimExpiresAt(t0).getTime() === t0 + 10 * 60_000 && j.JOIN_CODE_RENEW_MS === 60_000 && j.JOIN_CODE_RENEW_MS < j.JOIN_CODE_TTL_MS && j.joinRequestExpiresAt(t0).getTime() === t0 + 7 * 86_400_000);
 const pend = { status: "pending", expiresAt: new Date(t0 + 1000) };
 assert("J8 a pending request past its date reads as expired; a decided one never does", j.effectiveJoinStatus(pend, t0) === "pending" && j.effectiveJoinStatus(pend, t0 + 2000) === "expired" && j.effectiveJoinStatus({ status: "approved", expiresAt: new Date(0) }, t0) === "approved" && j.effectiveJoinStatus({ status: "rejected", expiresAt: new Date(0) }, t0) === "rejected");
 

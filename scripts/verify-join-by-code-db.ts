@@ -53,8 +53,27 @@ async function main() {
     const made = await store.createJoinCode({ workspaceId: ws.id, actorUserId: owner.id });
     const norm = rules.normalizeJoinCode(made.code);
     const stored = await prisma.workspaceJoinCode.findMany({ where: { workspaceId: ws.id } });
-    assert("D1 a code is shown as ABCD-EFGH, lives ~10 minutes, and only its HASH is stored (the code is nowhere in the table)", /^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(made.code) && stored.length === 1 && stored[0].codeHash === rules.hashJoinCode(norm) && JSON.stringify(stored[0]).indexOf(norm) === -1 && Math.abs(new Date(made.expiresAt).getTime() - Date.now() - 600_000) < 5000);
+    assert("D1 a code is shown as ABCD-EFGH, lives ~90 seconds, and only its HASH is stored (the code is nowhere in the table)", /^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(made.code) && stored.length === 1 && stored[0].codeHash === rules.hashJoinCode(norm) && JSON.stringify(stored[0]).indexOf(norm) === -1 && Math.abs(new Date(made.expiresAt).getTime() - Date.now() - 90_000) < 5000);
     assert("D2 making a code is in the audit log", (await prisma.auditLog.count({ where: { workspaceId: ws.id, action: "join.code_create" } })) === 1);
+
+    // ── a person who OPENED the link keeps his code alive while he types his details (the code renews every minute on the owner's screen — owner 2026-10-31) ──
+    const cl = await newCode();
+    const clRow = () => prisma.workspaceJoinCode.findUnique({ where: { codeHash: rules.hashJoinCode(rules.normalizeJoinCode(cl)) } });
+    const clBefore = (await clRow())!.expiresAt.getTime();
+    await store.claimJoinCode(cl, hdr("10.0.9.1"));
+    const clAfter = (await clRow())!.expiresAt.getTime();
+    const clSubmit = await store.submitJoinRequest(person("claimed", cl), hdr());
+    assert("D2b opening the link keeps THAT code alive for 10 minutes (it was about to expire in ~90 s), and it is still used up by the first request", clBefore - Date.now() < 91_000 && Math.abs(clAfter - Date.now() - 600_000) < 5000 && clSubmit.ok && (await throws(() => store.submitJoinRequest(person("claimed2", cl), hdr()))) === "bad_code");
+    await prisma.workspaceJoinRequest.deleteMany({ where: { workspaceId: ws.id, email: mail("claimed") } }); // keep the later counts about the people the other checks make
+    const expiredCode = await newCode();
+    await prisma.workspaceJoinCode.update({ where: { codeHash: rules.hashJoinCode(rules.normalizeJoinCode(expiredCode)) }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const expiredAt = (await prisma.workspaceJoinCode.findUnique({ where: { codeHash: rules.hashJoinCode(rules.normalizeJoinCode(expiredCode)) } }))!.expiresAt.getTime();
+    const claimWrong = await throws(() => store.claimJoinCode("ABCD-EFGH", hdr("10.0.9.2")));
+    const claimUsed = await throws(() => store.claimJoinCode(cl, hdr("10.0.9.3")));
+    const claimExpired = await throws(() => store.claimJoinCode(expiredCode, hdr("10.0.9.4")));
+    const expiredAfter = (await prisma.workspaceJoinCode.findUnique({ where: { codeHash: rules.hashJoinCode(rules.normalizeJoinCode(expiredCode)) } }))!.expiresAt.getTime();
+    assert("D2c claiming a wrong, a used or an expired code gives the same answer and brings nothing back to life", claimWrong === "bad_code" && claimUsed === "bad_code" && claimExpired === "bad_code" && expiredAfter === expiredAt);
+    rate.__resetRateLimit();
 
     // ── a NEW person asks ──
     const r1 = await store.submitJoinRequest(person("noa", made.code), hdr());
