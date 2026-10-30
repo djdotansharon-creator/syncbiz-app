@@ -1,12 +1,6 @@
 /**
- * Real Access Control page.
- *
- * Renders the connected `AccessControlConsole`, which talks to /api/admin/users
- * (GET / POST / PATCH / DELETE) and /api/branches. The premium console design
- * is the single, canonical user-management UI for both the web app and the
- * Electron desktop wrapper (which loads the same Next.js page).
+ * The Permissions page (owner 2026-10-31, "like Discord"): People and Roles — see components/roles/permissions-hub.tsx. Managers only.
  */
-import { AccessControlConsole } from "@/components/access-control-console";
 import { PermissionsHub } from "@/components/roles/permissions-hub";
 import { ManagementGate } from "@/components/management/management-gate";
 import { ManagementTabs } from "@/components/management/management-tabs";
@@ -18,11 +12,8 @@ export default function AccessControlPage() {
     <ManagementGate from="/access-control">
       <div className="mgmt-type h-full overflow-y-auto p-4 sm:p-6">
         <div className="mb-4"><ManagementTabs /></div>
+        {/* owner 2026-10-31: People (squares) and Roles are the whole screen — the old roles table and the old user console are gone */}
         <PermissionsHub />
-        <details className="sb-ph-old">
-          <summary>Advanced: the old user console</summary>
-          <AccessControlConsole />
-        </details>
       </div>
     </ManagementGate>
   );
