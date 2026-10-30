@@ -15,3 +15,8 @@
 html[data-sb-remote-view] header[role="banner"] .sb-brand,
 html[data-sb-remote-view] header[role="banner"] .sb-ctl-back { display: none !important; }
 html[data-sb-remote-view] header[role="banner"] { top: 56px; }
+
+/* no player online: the song list is shut and the pointer over it is a red X (owner 2026-10-31) */
+html[data-sb-noplayer] :is(.queue-row, .play-next-pad) {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'><path d='M6 6l16 16M22 6L6 22' stroke='white' stroke-width='6.5' stroke-linecap='round'/><path d='M6 6l16 16M22 6L6 22' stroke='%23ff3b30' stroke-width='3.6' stroke-linecap='round'/></svg>") 14 14, not-allowed !important;
+}

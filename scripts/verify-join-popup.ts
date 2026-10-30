@@ -54,5 +54,9 @@ assert("P17 no branch chosen yet: the picker window opens BEFORE the remote is u
 const lite = read("app/lite-fx.css");
 assert("P18 Lite graphics: the glass windows (details, People, join card, branch picker) are PLAIN — solid dark, or white with dark text in the white look (not on the always-black control screens) — and Full keeps the glass", /html\[data-sb-fx="lite"\] :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\)/.test(lite) && /\[data-sb-display="white"\]:not\(\[data-sb-control\]\) :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\) \* \{ color: #111111/.test(lite) && /backdrop-filter: blur\(72px\)/.test(read("components/roles/people-grid.css")));
 
+const globalsCss = read("app/globals.css");
+assert("P19 no player online: a click / Enter on the song list (rows + Play Next pad) is stopped before any handler runs, the pointer there is a red X, and the guard lives only while that is true; the playback code is untouched", /const noPlayer = show && !ctx\?\.masterDeviceName/.test(rb) && /LIST_AREA = "\.queue-row, \.play-next-pad"/.test(rb) && /addEventListener\("click", shut, true\)/.test(rb) && /removeEventListener\("click", shut, true\)/.test(rb) && /html\[data-sb-noplayer\] :is\(\.queue-row, \.play-next-pad\)/.test(rbCss) && /ff3b30/.test(rbCss));
+assert("P20 the windows share the gear menu's glass: solid dark in the black / white look, frosted (white .19, blur 48px, saturate 1.2) in the transparent look — the same numbers as .main-menu-popover", /html :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\) \{\s*background: rgba\(28, 28, 30, 0\.96\)/.test(globalsCss) && /html\[data-sb-display="song"\] :is\(\.sb-devdet-panel, \.sb-pg-win, \.sb-jp, \.sb-bp-win\) \{\s*background: rgba\(255, 255, 255, 0\.19\);\s*-webkit-backdrop-filter: blur\(48px\) saturate\(1\.2\)/.test(globalsCss));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
