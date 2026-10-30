@@ -243,6 +243,7 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
               </div>
             ) : null}
 
+            <div className="sb-rh-groups">
             {PERMISSION_GROUPS.map((g) => (
               <div key={g.id} className="sb-rh-group">
                 <h3>{tr(g.title)}</h3>
@@ -275,6 +276,7 @@ export function RolesHub({ roles, customCode, onRolesChange, reload, selectedId,
                   {members.map((m) => <button key={m.userId} type="button" className="sb-rh-chip" onClick={() => onOpenPerson(m.userId)}>{m.name || m.email}</button>)}
                 </div>
               )}
+            </div>
             </div>
           </>
         )}
