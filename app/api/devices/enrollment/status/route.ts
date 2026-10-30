@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
-import { getEnrollmentByDevice, getEnrollmentConfig, touchEnrollmentSeen } from "@/lib/device-enrollment-store";
+import { autoApproveRemote, getEnrollmentByDevice, getEnrollmentConfig, touchEnrollmentSeen } from "@/lib/device-enrollment-store";
 import { toPublicStatus } from "@/lib/device-enrollment";
-import { requireEnrollmentCaller } from "@/lib/device-enrollment-auth";
+import { clientIp } from "@/lib/device-enrollment-auth";
 
 /**
  * Device enrollment — "what am I?" (docs/DEVICE_ENROLLMENT_DESIGN.md §5.1). POST { durableDeviceId } → { enforced:false } when enrollment is off for this workspace (the device behaves exactly as
  * before), otherwise unknown | pending | approved { role, branchIds } | rejected | revoked | expired. The same call for computers, phones and stations. No data of the account is returned.
+ * A signed-in member's new browser / phone is approved as a REMOTE right here (autoApproveRemote) — there is no "I'm the owner" button any more.
  */
 export async function POST(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
@@ -22,13 +23,19 @@ export async function POST(req: NextRequest) {
   if (id.length < 8 || id.length > 128) return NextResponse.json({ error: "invalid_device_id" }, { status: 400 });
   const cfg = await getEnrollmentConfig(ws);
   if (!cfg.enabled) return NextResponse.json({ enforced: false, status: "disabled" }, { headers: { "Cache-Control": "no-store" } });
-  const row = await getEnrollmentByDevice(ws, id);
-  if (row) void touchEnrollmentSeen(row.id);
-  const pub = toPublicStatus(row, new Date());
-  // the main admin gets the "I'm the owner" bar on the request screen (his own new computer does not wait for someone else); nobody else is told it exists
-  if (pub.enforced && pub.status !== "approved") {
-    const caller = await requireEnrollmentCaller();
-    if (caller.ok && caller.caller.actor.isAdmin) return NextResponse.json({ ...pub, ownerAllowed: true }, { headers: { "Cache-Control": "no-store" } });
+  let row = await getEnrollmentByDevice(ws, id);
+  const now = new Date();
+  // owner 2026-10-31: the ACCOUNT decides — a signed-in member's new browser / phone is a Remote at once (no request screen, no form, nobody to approve). Anything it cannot settle (a device a manager revoked,
+  // a suspended person, too many devices) falls through to the normal request screen below.
+  if (!row || toPublicStatus(row, now).status !== "approved") {
+    try {
+      const auto = await autoApproveRemote({ workspaceId: ws, userId: user.id, durableDeviceId: id, userAgent: req.headers.get("user-agent") ?? "", ip: clientIp(req) });
+      if (auto) row = auto;
+    } catch (e) {
+      console.error("[device-enrollment] auto approve failed", e instanceof Error ? e.message : String(e));
+    }
   }
+  if (row) void touchEnrollmentSeen(row.id);
+  const pub = toPublicStatus(row, now);
   return NextResponse.json(pub, { headers: { "Cache-Control": "no-store" } });
 }

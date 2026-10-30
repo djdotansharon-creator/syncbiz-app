@@ -211,7 +211,7 @@ export function EnrollmentGateCard({ gate, loading }: { gate: EnrollmentGateApi;
   const t = he ? HE : EN;
   const { state, request, becomeOwner, noStorage } = gate;
   const platform = detectPlatform();
-  const phone = platform !== "browser";
+  const phone = true; // owner 2026-10-31: a browser or a phone is a Remote — the Player choice is offered nowhere on this screen (a Player is the desktop app, or a manager's own decision)
   const [chosen, setChosen] = useState<"PLAYER" | "REMOTE" | null>(null);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");

@@ -16,10 +16,13 @@ import {
   allocationState,
   canApproveAnotherPlayer,
   clampTtlDays,
+  MAX_AUTO_REMOTES_PER_PERSON,
   computeExpiresAt,
   decideMint,
+  deviceLabelFromUserAgent,
   effectiveStatus,
   isEnrollmentEnvEnabled,
+  platformFromUserAgent,
   playerClassFor,
   rowBranchIds,
   type Actor,
@@ -245,6 +248,47 @@ export async function approveOwnDevice(args: { workspaceId: string; userId: stri
       targetUserId: row.id,
       ipAddress: args.ip || null,
       metadata: { durableDeviceId: args.durableDeviceId, role: "REMOTE", playerClass: "owner", branchIds: [], self: true, owner: true },
+    });
+    return row;
+  });
+}
+
+/**
+ * A signed-in member opens VONO on a browser / phone for the first time: the ACCOUNT decides who they are, so the device is a REMOTE at once — no request screen, no form, nobody to approve (owner 2026-10-31:
+ * "he is already in the system"). A browser or phone is never a Player this way (a Player is the desktop app, or an explicit decision of a manager). The workspace's owner gets the owner's-computer label.
+ * Returns null — and the normal request screen shows — when the device was REVOKED on purpose by a manager, the person is not an active member, the switch is off, or they already hold
+ * MAX_AUTO_REMOTES_PER_PERSON Remotes. Audited as a self-approval (auto).
+ */
+export async function autoApproveRemote(args: { workspaceId: string; userId: string; durableDeviceId: string; userAgent: string; ip?: string; now?: Date }): Promise<EnrollmentRow | null> {
+  const now = args.now ?? new Date();
+  const cfg = await getEnrollmentConfig(args.workspaceId);
+  if (!cfg.enabled) return null;
+  const existing = await getEnrollmentByDevice(args.workspaceId, args.durableDeviceId);
+  if (existing && effectiveStatus(existing, now) === "approved") return existing;
+  if (existing && existing.status === "revoked") return null;
+  const member = await prisma.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: args.workspaceId, userId: args.userId } }, select: { status: true } });
+  if (!member || member.status === "SUSPENDED") return null;
+  const held = await prisma.deviceEnrollment.count({ where: { workspaceId: args.workspaceId, requestedByUserId: args.userId, status: "approved", approvedRole: "REMOTE" } });
+  if (held >= MAX_AUTO_REMOTES_PER_PERSON) return null;
+  const ws = await prisma.workspace.findUnique({ where: { id: args.workspaceId }, select: { ownerId: true } });
+  const isOwner = ws?.ownerId === args.userId;
+  const label = deviceLabelFromUserAgent(args.userAgent);
+  const base = ownerDeviceData(args.userId, now, cfg.ttlDays);
+  const data = { ...base, playerClass: isOwner ? "owner" : null, decisionNote: "auto", platform: platformFromUserAgent(args.userAgent), label: (isOwner ? `Owner · ${label}` : label).slice(0, 80) };
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.deviceEnrollment.upsert({
+      where: { workspaceId_durableDeviceId: { workspaceId: args.workspaceId, durableDeviceId: args.durableDeviceId } },
+      create: { workspaceId: args.workspaceId, durableDeviceId: args.durableDeviceId, ...data },
+      update: data,
+    });
+    await writeTenantAuditLog(tx, {
+      action: "device.enroll_approve",
+      entity: "device_enrollment",
+      actorUserId: args.userId,
+      workspaceId: args.workspaceId,
+      targetUserId: row.id,
+      ipAddress: args.ip || null,
+      metadata: { durableDeviceId: args.durableDeviceId, role: "REMOTE", playerClass: data.playerClass, branchIds: [], self: true, auto: true },
     });
     return row;
   });
