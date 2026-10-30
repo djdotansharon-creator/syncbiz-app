@@ -11,8 +11,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { useTr } from "@/lib/i18n/use-tr";
-import { JoinPendingDot } from "@/components/control-screen/pending-dots";
-import { EnrollmentPendingDot } from "@/components/enrollment-pending-dot";
+import { AnyPendingDot } from "@/components/control-screen/pending-dots";
 import "./control-screen.css";
 import "./control-skin.css";
 
@@ -97,9 +96,9 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
 
   const all: Item[] = [
     { href: "/settings", label: tr("Settings"), icon: <SettingsIcon /> }, // FIRST, the outermost (owner 2026-10-30: "I want Settings first")
-    { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon />, dot: <EnrollmentPendingDot /> }, // devices waiting for approval
+    { href: "/owner/control-room", label: L.t("nav.controlRoom"), icon: <ControlRoomIcon /> },
     { href: "/dashboard", label: L.t("nav.dashboard"), icon: <DashboardIcon /> },
-    { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon />, dot: <JoinPendingDot /> }, // people waiting to join
+    { href: "/access-control", label: L.t("nav.accessControl"), icon: <PeopleIcon />, dot: <AnyPendingDot /> }, // people waiting to join + devices waiting for approval — both live in Permissions now (owner 2026-10-31)
     { href: "/access-control/display", label: L.t("nav.display"), icon: <DisplayIcon /> },
   ];
   // the manager pages bounce a branch employee back to the player — so they are not offered (Settings is for everyone)
