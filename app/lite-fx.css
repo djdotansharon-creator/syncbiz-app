@@ -86,3 +86,24 @@ html[data-sb-fx="lite"] .library-list-shell--frameless.sb-drop-armed > *:not(.sb
 @media (prefers-reduced-motion: reduce) {
   html[data-sb-fx="lite"] .library-source-card-grid .library-source-card { transition: none !important; }
 }
+
+/* 2b · the glass WINDOWS (Player / Remote details, the People windows, the live join card, the branch picker) — in Lite there is no blur to make the half-see-through fill readable, so they are PLAIN:
+   dark in the black / transparent look, white with dark text in the white look (owner 2026-10-31: "plain white in lite, or black depending on the mode"). The control screens are always black, so they keep the dark one. */
+html[data-sb-fx="lite"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+  background: #1c1c20 !important;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.38) !important;
+}
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+  background: #ffffff !important;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.18) !important;
+}
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) * { color: #111111 !important; border-color: rgba(0, 0, 0, 0.09) !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(small, dt, .sb-devdet-x, .sb-pg-x, .sb-pg-left, .sb-pg-hint, .sb-jp-who small, .sb-jp-who span, .sb-jp-role, .sb-bp-main small, .sb-bp-note, .sb-bp-x, .sb-bp-skip, .sb-bp-search svg) { color: rgba(0, 0, 0, 0.56) !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn, .sb-jp-btn, .sb-jp-role select, .sb-pg-select, .sb-bp-row, .sb-bp-search, .sb-jp-avatar) { background: rgba(0, 0, 0, 0.06) !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-bp-row[aria-selected="true"], .sb-bp-row:hover, .sb-pg-btn:hover, .sb-jp-btn:hover) { background: rgba(0, 0, 0, 0.12) !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn--main, .sb-jp-btn--main) { background: #111111 !important; color: #ffffff !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(.sb-pg-btn--main, .sb-jp-btn--main) * { color: #ffffff !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="player"] .ic { color: #1f9d3f !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="remote"] .ic { color: #2f6fd0 !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-bp-row[data-live="1"] .sb-bp-dot { background: #1f9d3f !important; }
+html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-bp-search input::placeholder { color: rgba(0, 0, 0, 0.42) !important; }
