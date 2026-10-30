@@ -1,0 +1,22 @@
+/* BranchPicker — the same glass as the windows that open on a click (people-grid.css .sb-pg-win), a search bar above a scrolling list; live branches carry a green dot (owner 2026-10-31). */
+.sb-bp-back { position: fixed; inset: 0; z-index: 2147482400; display: grid; place-items: start center; padding: clamp(24px, 10vh, 100px) 20px 20px; background: rgba(0, 0, 0, 0.55); }
+.sb-bp-win { position: relative; width: min(420px, 100%); max-height: calc(100vh - 80px); display: flex; flex-direction: column; padding: 24px 22px 18px; border-radius: 26px; background: rgba(98, 98, 114, 0.5); -webkit-backdrop-filter: blur(72px) saturate(1.7); backdrop-filter: blur(72px) saturate(1.7); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: #f5f5f7; }
+.sb-bp-x { position: absolute; top: 10px; inset-inline-end: 12px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: rgba(255, 255, 255, 0.6); font-size: 22px; line-height: 1; cursor: pointer; }
+.sb-bp-x:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.sb-bp-title { margin: 0 0 14px; font-size: 18px; font-weight: 650; text-align: center; }
+.sb-bp-search { display: flex; align-items: center; gap: 8px; padding: 0 14px; height: 42px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.7); }
+.sb-bp-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #f5f5f7; font: inherit; font-size: 14.5px; }
+.sb-bp-search input::placeholder { color: rgba(255, 255, 255, 0.45); }
+.sb-bp-list { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; min-height: 0; max-height: min(52vh, 420px); overflow-y: auto; padding-inline-end: 2px; }
+.sb-bp-note { margin: 6px 4px; font-size: 13.5px; color: rgba(255, 255, 255, 0.6); text-align: center; }
+.sb-bp-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border: 0; border-radius: 16px; background: rgba(255, 255, 255, 0.06); color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color 0.15s; }
+.sb-bp-row:hover { background: rgba(255, 255, 255, 0.16); }
+.sb-bp-row[aria-selected="true"] { background: rgba(255, 255, 255, 0.2); }
+.sb-bp-row[data-live="0"] { opacity: 0.6; }
+.sb-bp-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); }
+.sb-bp-row[data-live="1"] .sb-bp-dot { background: #30d158; box-shadow: 0 0 0 4px rgba(48, 209, 88, 0.18); }
+.sb-bp-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sb-bp-main b { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-bp-main small { font-size: 12.5px; color: rgba(255, 255, 255, 0.58); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-bp-skip { margin: 14px auto 0; border: 0; background: transparent; color: rgba(255, 255, 255, 0.55); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.sb-bp-skip:hover { color: #fff; }
