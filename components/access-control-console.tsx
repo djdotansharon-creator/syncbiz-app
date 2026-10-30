@@ -528,12 +528,8 @@ export function AccessControlConsole() {
     if (!email) return;
     const found = users.find((u) => u.email.toLowerCase() === email);
     if (!found) {
-      setWorkflow("create");
-      setSelectedUserEmail(null);
-      setAccessMode("BRANCH_USER");
-      setSelectedBranchIds([]);
-      setCreateForm({ name: "", email, password: "" });
-      setToast(null);
+      // owner 2026-10-31: no more "create a user with an e-mail and a password" here — people join with the + in People (a one-time code or QR) and are approved with a role
+      setToast(L.t("ac.toast.useCode"));
       return;
     }
     setWorkflow("found");
@@ -1032,94 +1028,6 @@ export function AccessControlConsole() {
                   </div>
                 </div>
               )}
-            </ConsoleCard>
-          ) : null}
-
-          {unlocked && workflow === "create" ? (
-            <ConsoleCard>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-sm font-semibold text-slate-100">{L.t("ac.create.title")}</div>
-                  <div className="mt-1 text-xs text-slate-400">
-                    {L.t("ac.create.hint")}
-                  </div>
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {L.t("ac.emailLabel")} <span className="text-slate-200 font-semibold" dir="ltr">{createForm.email || "—"}</span>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.displayName")}</label>
-                  <input
-                    value={createForm.name}
-                    onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
-                    placeholder={L.t("ac.fullName")}
-                    dir="auto"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.email")}</label>
-                  <input
-                    value={createForm.email}
-                    onChange={(e) => setCreateForm((p) => ({ ...p, email: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
-                    placeholder="user@company.com"
-                    inputMode="email"
-                    dir="ltr"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-500">{L.t("ac.passwordLabel")}</label>
-                  <input
-                    type="password"
-                    value={createForm.password}
-                    onChange={(e) => setCreateForm((p) => ({ ...p, password: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
-                    placeholder={L.t("ac.passwordPlaceholder")}
-                    dir="ltr"
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkflow("idle");
-                    setSelectedUserEmail(null);
-                    setLookupEmail(createForm.email);
-                    setCreateForm({ name: "", email: createForm.email, password: "" });
-                    setToast(null);
-                  }}
-                  className="rounded-xl border border-slate-800/80 bg-slate-900/30 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800/60 hover:border-slate-600/90 transition-all"
-                >
-                  {L.t("ac.backToLookup")}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCreateUser}
-                  disabled={
-                    busy === "create" ||
-                    !createForm.email.trim() ||
-                    !createForm.password ||
-                    createForm.password.length < 6
-                  }
-                  className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-200 hover:bg-sky-500/15 hover:border-sky-500/60 disabled:opacity-60 disabled:pointer-events-none transition-all"
-                >
-                  {busy === "create" ? L.t("ac.creating") : L.t("ac.createUser")}
-                </button>
-              </div>
-
-              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">{L.t("ac.nextStep")}</div>
-                <div className="mt-1 text-xs text-amber-100">
-                  {L.t("ac.nextStepPre")} <span className="font-semibold">{L.t("ac.branchUser")}</span>{L.t("ac.nextStepPost")}
-                </div>
-              </div>
             </ConsoleCard>
           ) : null}
 
