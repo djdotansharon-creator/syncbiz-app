@@ -53,6 +53,10 @@ type Listing = {
 const HE = {
   title: "בקשות חדשות",
   tile: "בקשות חדשות",
+  newBranchTile: "סניף חדש",
+  newBranchSub: (used: number, max: number) => `נגנים ${used} מתוך ${max}`,
+  newBranchFull: "ההקצאה מלאה — כדי להוסיף נגן צריך להגדיל אותה.",
+  newBranchFree: "להוסיף סניף ונגן",
   tileNone: "אין בקשות שממתינות",
   tileSome: (n: number) => (n === 1 ? "בקשה אחת ממתינה" : `${n} בקשות ממתינות`),
   tileOff: "אישור מכשירים חדשים — כבוי",
@@ -107,6 +111,10 @@ const HE = {
 const EN: typeof HE = {
   title: "New requests",
   tile: "New requests",
+  newBranchTile: "New branch",
+  newBranchSub: (used: number, max: number) => `Players ${used} of ${max}`,
+  newBranchFull: "The allocation is full — to add a Player it has to be increased.",
+  newBranchFree: "Add a branch and its player",
   tileNone: "Nothing is waiting",
   tileSome: (n: number) => (n === 1 ? "1 request waiting" : `${n} requests waiting`),
   tileOff: "Approving new devices — off",
@@ -398,16 +406,18 @@ function SwitchControl({ d }: { d: Data }): ReactElement | null {
 }
 
 /** the "New requests" screen: opens in the list's place (like a branch does); requests grouped by branch, a branch name opens that branch on the map */
-export function EnrollmentRequestsPanel({ onBack, onOpenBranch }: { onBack: () => void; onOpenBranch: (branchId: string) => void }): ReactElement {
+export function EnrollmentRequestsPanel({ onBack, onOpenBranch, embedded }: { onBack?: () => void; onOpenBranch: (branchId: string) => void; embedded?: boolean }): ReactElement {
   const d = useEnrollmentData();
   const { he, t, listing, err } = d;
   const dir = he ? "rtl" : "ltr";
 
   const head = (
     <header className="cr-bp-head">
-      <button type="button" onClick={onBack} className="cr-bp-icon cr-bp-back" aria-label={t.back} title={t.back}>
-        <svg className="h-[18px] w-[18px] rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-      </button>
+      {embedded || !onBack ? null : (
+        <button type="button" onClick={onBack} className="cr-bp-icon cr-bp-back" aria-label={t.back} title={t.back}>
+          <svg className="h-[18px] w-[18px] rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+      )}
       <span className="cr-enr-plus" aria-hidden>
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
       </span>
@@ -534,6 +544,41 @@ export function EnrollmentTile({ selected, onOpen }: { selected: boolean; onOpen
         <span className="cr-row-name">{t.tile}</span>
         <span className="cr-row-sub">
           <span>{!s.enabled ? t.tileOff : s.count > 0 ? t.tileSome(s.count) : t.tileNone}</span>
+        </span>
+      </span>
+    </li>
+  );
+}
+
+
+/**
+ * The FIRST tile of the Control Room's branch list is "New branch" (owner 2026-10-31: the requests of people's devices belong to Permissions; here a plus that opens a new Player — a branch and its player — while the
+ * allocation has room): the plus, the name and "Players used of allowed". With no room it says so instead of opening. A business that has not switched device approval on has no allocation and is never held back.
+ */
+export function NewBranchTile({ onAdd }: { onAdd: () => void }): ReactElement | null {
+  const { locale } = useLocale();
+  const t: Dict = locale === "he" ? HE : EN;
+  const s = useEnrollmentSummary();
+  const [alloc, setAlloc] = useState<Listing["allocation"] | null>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!s.loaded || !s.enabled) return;
+    let alive = true;
+    void getJson<Listing>("/api/control-room/enrollments").then((l) => { if (alive && l.ok && l.data) setAlloc(l.data.allocation); });
+    return () => { alive = false; };
+  }, [s.loaded, s.enabled, s.count]);
+  if (!s.loaded || !(s.isAdmin || s.canDecide)) return null;
+  const limited = s.enabled && !!alloc;
+  const noRoom = limited && alloc!.full;
+  return (
+    <li data-new-branch-tile className="cr-row cr-row--requests" onClick={() => (noRoom ? setFull(true) : onAdd())} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (noRoom) setFull(true); else onAdd(); } }}>
+      <span className="cr-row-logo cr-enr-tile-logo" aria-hidden>
+        <svg viewBox="0 0 24 24" width="55%" height="55%" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+      </span>
+      <span className="cr-row-main">
+        <span className="cr-row-name">{t.newBranchTile}</span>
+        <span className="cr-row-sub">
+          <span>{full && noRoom ? t.newBranchFull : limited ? t.newBranchSub(alloc!.used, alloc!.max) : t.newBranchFree}</span>
         </span>
       </span>
     </li>

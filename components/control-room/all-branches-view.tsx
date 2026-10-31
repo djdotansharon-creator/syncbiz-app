@@ -6,7 +6,7 @@ import { useRemoteOwner } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { StatusLed, STATUS_KEY, type MapDotStatus } from "@/components/control-room/branch-map";
 import { NetworkMap } from "@/components/control-room/network-map";
-import { BranchDevices, EnrollmentRequestsPanel, EnrollmentTile } from "@/components/control-room/device-enrollment-panel";
+import { BranchDevices, EnrollmentRequestsPanel, NewBranchTile } from "@/components/control-room/device-enrollment-panel";
 import { BranchPanel } from "@/components/control-room/branch-panel";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
@@ -475,8 +475,8 @@ export function AllBranchesView() {
             }
             return (
               <ul className="cr-list min-h-0 min-w-0 flex-1 overflow-y-auto p-2.5" data-density={density}>
-                {/* the FIRST tile: new devices asking for approval (owner 2026-10-28) — shown only to someone who may decide, and only while the feature is on */}
-                <EnrollmentTile selected={false} onOpen={openRequests} />
+                {/* the FIRST tile: "New branch" (owner 2026-10-31) — a plus that opens a new branch + player while the allocation has room; the requests of people's devices moved to Permissions */}
+                <NewBranchTile onAdd={() => { setRequestsOpen(false); setOpenId(null); setBroadcastOpen(false); setBrandsOpen(false); setJinglesOpen(false); setForm({ mode: "add" }); }} />
                 {visibleRows.length === 0 ? (
                   <li className="px-6 py-8 text-sm text-[var(--sb-text-secondary)]">
                     {L.t(filtersActive ? "cr.noMatch" : "cr.noBranches")}{" "}

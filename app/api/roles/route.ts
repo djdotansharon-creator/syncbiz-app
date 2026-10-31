@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   if (!guard) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   try {
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const role = await createRole({ workspaceId: guard.workspaceId, actorUserId: guard.userId, input: { name: b.name, openControlRoom: b.openControlRoom, allowComputer: b.allowComputer } });
+    const role = await createRole({ workspaceId: guard.workspaceId, actorUserId: guard.userId, input: { name: b.name, openControlRoom: b.openControlRoom, allowComputer: b.allowComputer, permissions: b.permissions } });
     return NextResponse.json({ role }, { status: 201 });
   } catch (e) {
     if (e instanceof RoleError) return NextResponse.json({ error: e.code }, { status: e.httpStatus });
