@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
+import React, { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -363,159 +362,6 @@ function LogoutButton({ compact: isCompact }: { compact?: boolean } = {}) {
   );
 }
 
-/**
- * HeaderProfileButton — compact avatar that opens a portal dropdown
- * with user info, workspace switcher, and logout.
- * Rendered inside the unified header right cluster.
- */
-type WorkspaceEntry = { id: string; name: string };
-
-function HeaderProfileButton({
-  sessionName,
-  sessionAccountName,
-  timeStr,
-  workspaceList,
-  activeWorkspaceId,
-  locale,
-}: {
-  sessionName?: string | null;
-  sessionAccountName?: string | null;
-  timeStr: string;
-  workspaceList?: WorkspaceEntry[] | null;
-  activeWorkspaceId?: string | null;
-  locale: string;
-}) {
-  const { t } = useTranslations();
-  const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; right: number; left: number } | null>(null);
-  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
-  const [logoutLoading, setLogoutLoading] = useState(false);
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => { setMounted(true); }, []);
-
-  useEffect(() => {
-    if (!open || !btnRef.current) { setCoords(null); return; }
-    const rect = btnRef.current.getBoundingClientRect();
-    setCoords({ top: rect.bottom + 6, right: window.innerWidth - rect.right, left: rect.left });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (btnRef.current && !btnRef.current.closest("[data-profile-panel-root]")?.contains(e.target as Node)) {
-        if (!btnRef.current.contains(e.target as Node)) setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  async function handleLogout() {
-    setLogoutLoading(true);
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch { /* ignore — redirect anyway */ }
-    // Hard redirect (not router.push) so the heavy media UI fully unmounts on logout.
-    if (typeof window !== "undefined") window.location.assign("/login");
-  }
-
-  const initials = sessionName
-    ? sessionName.split(/\s+/).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
-    : "••";
-
-  const dropdown =
-    mounted && open && coords
-      ? createPortal(
-          <div
-            data-profile-panel-root
-            style={coords.left < window.innerWidth / 2 ? { position: "fixed", top: coords.top, left: Math.max(8, coords.left), zIndex: 70 } : { position: "fixed", top: coords.top, right: coords.right, zIndex: 70 }}
-            className="w-56 rounded-xl border border-slate-700/60 bg-slate-900/98 shadow-[0_8px_32px_rgba(0,0,0,0.55)] backdrop-blur-sm"
-          >
-            {/* User info */}
-            <div className="flex items-start gap-2.5 px-4 py-3">
-              <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-[11px] font-semibold text-sky-200 ring-1 ring-sky-500/30">
-                {initials}
-              </span>
-              <div className="min-w-0 flex-1">
-                {sessionName && (
-                  <p className="truncate text-[12px] font-semibold leading-tight text-slate-100">{sessionName}</p>
-                )}
-                {sessionAccountName && (
-                  <p className="truncate text-[11px] leading-snug text-slate-400">{sessionAccountName}</p>
-                )}
-                <p className="mt-1 tabular-nums text-[11px] text-slate-500" suppressHydrationWarning>
-                  {timeStr}
-                </p>
-              </div>
-            </div>
-
-            {/* Workspace switcher (only when multiple workspaces) */}
-            {activeWorkspaceId && workspaceList && workspaceList.length > 1 && (
-              <div className="border-t border-slate-700/50 px-4 py-2.5" dir="ltr">
-                <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
-              </div>
-            )}
-
-            {/* Logout row */}
-            <div className="border-t border-slate-700/50 p-2">
-              <button
-                type="button"
-                onClick={() => { setOpen(false); setLogoutConfirmOpen(true); }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] text-slate-400 transition hover:bg-slate-800/80 hover:text-rose-300 focus:outline-none"
-              >
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-                {t.logout ?? "Log out"}
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )
-      : null;
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={sessionName ?? "Profile"}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold transition focus:outline-none focus:ring-2 focus:ring-sky-400/40 ${
-          open
-            ? "bg-sky-500/25 text-sky-100 ring-1 ring-sky-400/50"
-            : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30 hover:bg-sky-500/25 hover:ring-sky-400/50"
-        }`}
-      >
-        {initials}
-      </button>
-      {dropdown}
-      <DeleteConfirmModal
-        isOpen={logoutConfirmOpen}
-        onClose={() => setLogoutConfirmOpen(false)}
-        onConfirm={handleLogout}
-        title={t.logoutConfirmTitle}
-        message={t.logoutConfirm}
-        confirmLabel={t.confirmLogout}
-        loading={logoutLoading}
-        loadingLabel={t.loggingOut}
-        compact
-      />
-    </>
-  );
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
   const tr = useTr();
   // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
@@ -535,7 +381,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { t } = useTranslations();
   const [now, setNow] = useState(() => new Date());
   const [sessionName, setSessionName] = useState<string | null>(null);
-  const [sessionAccountName, setSessionAccountName] = useState<string | null>(null);
   const [workspaceList, setWorkspaceList] = useState<Array<{ id: string; name: string }> | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   /** security hotfix 2026-10-13: management entries (Dashboard / Control Room / Access Control) only for managers.
@@ -567,7 +412,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         if (data.accessType && data.accessType !== "OWNER") clearControlBranch();
         const displayName = (data.name ?? "").trim() || (data.email ?? "").trim() || null;
         setSessionName(displayName);
-        setSessionAccountName((data.accountName ?? "").trim() || null);
         setWorkspaceList(Array.isArray(data.workspaces) ? data.workspaces : []);
         setActiveWorkspaceId(typeof data.tenantId === "string" ? data.tenantId : null);
       })
@@ -1647,20 +1491,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <LanguageSelector />
               </span>
 
-              {/* Profile avatar → dropdown with full info + workspace switcher.
-                  Logout now lives in the gear menu, so we only keep this extra circle
-                  when there's more than one workspace to switch between (avoids a redundant
-                  top-bar button). The signed-in first name still shows next to the clock. */}
-              {workspaceList && workspaceList.length > 1 ? (
-                <HeaderProfileButton
-                  sessionName={sessionName}
-                  sessionAccountName={sessionAccountName}
-                  timeStr={timeStr}
-                  workspaceList={workspaceList}
-                  activeWorkspaceId={activeWorkspaceId}
-                  locale={locale}
-                />
-              ) : null}
+              {/* owner 2026-10-31: the circle with the user's initials is gone from the top bar. Logout lives in the gear menu; the workspace switch (the only other thing it held) moved there too. */}
 
               {/* Display mode: black / white / transparent (2026-10-13) */}
               {/* Display-mode pill (black / white / transparent) — a design worth keeping: hidden from the
@@ -1723,6 +1554,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {/* owner 2026-10-31: the "Player / Remote details" row is gone — the Player / Remote icon in the top bar opens that window */}
                       <DisplayModeMenuRow />
                       <FxModeMenuRow />
+                      {activeWorkspaceId && workspaceList && workspaceList.length > 1 ? (
+                        <div className="sb-fx-section" dir="ltr">
+                          <span className="sb-fx-title">{tr("Business")}</span>
+                          <WorkspaceSwitcher workspaces={workspaceList} activeId={activeWorkspaceId} />
+                        </div>
+                      ) : null}
                     </>
                   }
                   anchorGlyph={<IconGear />}
