@@ -5,10 +5,10 @@
  * it controls a player somewhere else), so a press on "play" that goes to another device is never a silent mystery (owner 2026-10-27: a browser that was only a remote looked broken).
  * An icon with its name beside it (owner 2026-10-27: "next to the icon I want text"), no frame or box and no hover tooltip (the site has none — owner 2026-10-26); the name is kept for screen readers (`aria-label`). The waves breathe slowly
  * (opacity only, off for people who asked their system for less motion). Display only: it reads the device context and changes nothing — no playback, no election, no socket.
- * Hidden while the screen is not connected to the branch. Sits in the outer top bar, never inside the player. Styles: `.sb-role-icon*` in app/globals.css.
+ * While the screen cannot reach its branch it says so after a few seconds ("Player · not connected"), so a screen that plays on its own is never unlabelled (owner 2026-10-31). Sits in the outer top bar, never inside the player. Styles: `.sb-role-icon*` in app/globals.css.
  */
 
-import type { ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { useLocale } from "@/lib/locale-context";
 
@@ -17,12 +17,16 @@ const HE = {
   player: "נגן — המוזיקה מנגנת במחשב הזה",
   remote: "שלט רחוק — המסך הזה שולט בנגן אחר, המוזיקה מנגנת שם ולא כאן",
   remoteAt: (name: string) => `שלט רחוק — המסך הזה שולט בנגן ${name}, המוזיקה מנגנת שם ולא כאן`,
+  offline: "לא מחובר",
+  offlineHint: "לא מחובר לסניף",
 };
 const EN = {
   word: { player: "Player", remote: "Remote" },
   player: "Player — the music plays on this computer",
   remote: "Remote — this screen controls another player, the music plays there, not here",
   remoteAt: (name: string) => `Remote — this screen controls the player ${name}, the music plays there, not here`,
+  offline: "not connected",
+  offlineHint: "not connected to the branch",
 };
 
 const SVG = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
@@ -49,19 +53,31 @@ export function RemoteIcon(): ReactElement {
   );
 }
 
+/** how long a screen may be off the branch before the badge says so (a normal page load is connected within a second or two — no flash of a wrong word) */
+const OFFLINE_SHOW_MS = 6000;
+
 export function DeviceRoleBadge({ onOpen }: { onOpen?: () => void } = {}): ReactElement | null {
   const ctx = useDevicePlayer();
   const { locale } = useLocale();
-  if (!ctx || !ctx.isActive || !ctx.isBranchConnected) return null;
+  const offline = !!ctx && ctx.isActive && !ctx.isBranchConnected;
+  const [offlineLong, setOfflineLong] = useState(false);
+  useEffect(() => {
+    // owner 2026-10-31: a screen that cannot reach its branch used to show NOTHING (and quietly played by itself) — after a few seconds it now says what it is, plus "not connected"
+    const id = window.setTimeout(() => setOfflineLong(offline), offline ? OFFLINE_SHOW_MS : 0);
+    return () => window.clearTimeout(id);
+  }, [offline]);
+  if (!ctx || !ctx.isActive) return null;
+  if (!ctx.isBranchConnected && !offlineLong) return null;
   const t = locale === "he" ? HE : EN;
   // the desktop app's own screen is a controller by design while the co-located station plays: it is still the PLAYER computer
   const isPlayer = ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation;
-  const label = isPlayer ? t.player : ctx.masterDeviceName ? t.remoteAt(ctx.masterDeviceName) : t.remote;
+  const label = `${isPlayer ? t.player : ctx.masterDeviceName ? t.remoteAt(ctx.masterDeviceName) : t.remote}${ctx.isBranchConnected ? "" : ` (${t.offlineHint})`}`;
   const inner = (
     <>
       {isPlayer ? <PlayerIcon /> : <RemoteIcon />}
       <span className="sb-role-text text-[12.5px] font-semibold leading-none" aria-hidden>
         {isPlayer ? t.word.player : t.word.remote}
+        {ctx.isBranchConnected ? "" : ` · ${t.offline}`}
       </span>
     </>
   );

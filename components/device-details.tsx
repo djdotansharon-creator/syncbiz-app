@@ -129,15 +129,20 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
   const connected = !!ctx && ctx.isActive && ctx.isBranchConnected;
   const isOwnerComputer = !!approval && approval.enforced && approval.status === "approved" && approval.playerClass === "owner";
   const isPlayer = !!ctx && (ctx.deviceMode === "MASTER" || ctx.isDesignatedAudioStation);
-  const roleName = isOwnerComputer ? t.owner : isPlayer ? t.player : t.remote;
+  // owner 2026-10-31: a Remote — the owner's own computer included — shows the REMOTE icon and its own details plus who it controls, never the player's card
+  const roleName = isPlayer ? t.player : t.remote;
   const approvedBranches = approval && approval.enforced && approval.status === "approved" ? approval.branchIds ?? [] : [];
-  const branchText = isOwnerComputer
+  const branchText = isPlayer && isOwnerComputer
     ? `${t.allBranches}${branchId ? ` · ${nameOf(branchId)}` : ""}`
-    : approvedBranches.length > 0
-      ? approvedBranches.map(nameOf).join(", ")
-      : branchId
+    : !isPlayer
+      ? branchId
         ? nameOf(branchId)
-        : "—";
+        : "—"
+      : approvedBranches.length > 0
+        ? approvedBranches.map(nameOf).join(", ")
+        : branchId
+          ? nameOf(branchId)
+          : "—";
   const isDesktop = typeof window !== "undefined" && !!(window as Window & { syncbizDesktop?: unknown }).syncbizDesktop;
   const deviceText = `${isDesktop ? t.desktop : detectDeviceLabel()}${ctx?.deviceId ? ` · ${ctx.deviceId.slice(-6)}` : ""}`;
   const approvalText = !approval
@@ -160,14 +165,14 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
         <button type="button" className="sb-devdet-x" onClick={onClose} aria-label={t.close}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
-        <div className="sb-devdet-hero" data-role={isPlayer || isOwnerComputer ? "player" : "remote"}>
-          <span className="ic">{isPlayer || isOwnerComputer ? <PlayerIcon /> : <RemoteIcon />}</span>
+        <div className="sb-devdet-hero" data-role={isPlayer ? "player" : "remote"}>
+          <span className="ic">{isPlayer ? <PlayerIcon /> : <RemoteIcon />}</span>
           <b>{roleName}</b>
           <small>{connected ? t.connected : t.notConnected}</small>
         </div>
         <dl className="sb-devdet-list">
           <div><dt>{t.branch}</dt><dd dir="auto">{branchText}</dd></div>
-          <div><dt>{isPlayer && !isOwnerComputer ? t.plays : t.controls}</dt><dd dir="auto">{isPlayer ? t.thisComputer : controlling}</dd></div>
+          <div><dt>{isPlayer ? t.plays : t.controls}</dt><dd dir="auto">{isPlayer ? t.thisComputer : controlling}</dd></div>
           <div><dt>{t.device}</dt><dd dir="auto">{deviceText}</dd></div>
           <div><dt>{t.approval}</dt><dd>{approvalText}</dd></div>
           {account ? <div><dt>{t.account}</dt><dd dir="auto">{account}</dd></div> : null}
