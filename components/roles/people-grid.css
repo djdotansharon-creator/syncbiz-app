@@ -2,9 +2,14 @@
    Square glass tiles (no frames), the plus tile first, windows that open on a click are glass like the Player details. Frameless, soft, the Control Room's language. */
 
 .sb-pg { margin-bottom: 30px; color: #fff; }
-.sb-pg-top { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+/* owner 2026-11-01: the search sits in the CENTRE of the row (the title keeps the start edge); on a narrow screen it drops under the title, still centred */
+.sb-pg-top { display: grid; grid-template-columns: 1fr minmax(0, 360px) 1fr; align-items: center; gap: 12px; margin-bottom: 18px; }
 .sb-pg-title { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
-.sb-pg-search { position: relative; margin-inline-start: auto; width: min(100%, 360px); }
+.sb-pg-search { position: relative; grid-column: 2; width: 100%; }
+@media (max-width: 640px) {
+  .sb-pg-top { grid-template-columns: 1fr; }
+  .sb-pg-search { grid-column: 1; justify-self: center; max-width: 360px; }
+}
 .sb-pg-search svg { position: absolute; inset-inline-start: 14px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); color: rgba(255, 255, 255, 0.5); pointer-events: none; }
 .sb-pg-search input { width: 100%; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: #fff; padding: 11px 16px; padding-inline-start: 40px; font-size: 14px; outline: none; transition: background-color 0.18s, box-shadow 0.18s; }
 .sb-pg-search input::placeholder { color: rgba(255, 255, 255, 0.4); }
