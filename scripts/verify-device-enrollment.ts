@@ -3,6 +3,7 @@
  * input checks. No database, no browser. Run: npx tsx scripts/verify-device-enrollment.ts
  */
 import * as e from "../lib/device-enrollment";
+import { narrowBranchClaim } from "../lib/enrollment-branch-claim";
 
 let pass = 0;
 let fail = 0;
@@ -78,6 +79,18 @@ assert("E29 an approved device gets its role; a Player gets exactly its branch",
 assert("E30 an 'approved' row with no valid role gets no token", mint({ row: approvedRow({ approvedRole: null }) }).kind === "blocked");
 assert("E31 the desktop app's own screen is not gated by this door (stations use the activation code); a plain browser is", mint({ userAgent: "Mozilla/5.0 (Windows) VONO/2.2.8 Chrome/130 Electron/33.0.0 Safari/537.36", row: null }).kind === "exempt" && mint({ row: null }).kind === "blocked");
 assert("E32 the token's branches are narrowed to what the manager approved; an empty approval narrows nothing; nothing outside the user's own rights is ever added", JSON.stringify(e.restrictBranches(["a", "b", "default"], ["b"])) === '["b"]' && JSON.stringify(e.restrictBranches(["a", "b"], [])) === '["a","b"]' && e.restrictBranches(["a"], ["zzz"]).length === 0);
+
+// ── the legacy "default" alias in an approved device's ticket (owner 2026-11-01: father's Remote was refused 4004 on every attempt) ──
+const U = "70227520-ce14-40b5-8a71-d8483b746db3", V = "11111111-2222-3333-4444-555555555555";
+const own = [U, V, "default"]; // what getAuthorizedBranchIds hands out: every branch of the workspace + "default"
+const n1 = narrowBranchClaim(own, [U], U);
+assert("E33 approved for the workspace's MAIN branch (its real id) → the ticket keeps its real id AND the legacy 'default' alias (what every browser registers), and nothing else", n1.length === 2 && n1.includes(U) && n1.includes("default") && !n1.includes(V), n1);
+const n2 = narrowBranchClaim(own, [V], U);
+assert("E34 approved for ANOTHER branch → 'default' (the main branch) is NOT added and neither is the main branch: the alias never widens access", n2.length === 1 && n2[0] === V, n2);
+assert("E35 an empty approval narrows nothing (as before), and a workspace with no canonical 'default' behaves exactly as before", JSON.stringify(narrowBranchClaim(own, [], U)) === JSON.stringify(own) && JSON.stringify(narrowBranchClaim(own, [U], null)) === JSON.stringify([U]));
+const n4 = narrowBranchClaim(own, ["default"], U);
+assert("E36 approved as 'default' (the legacy name) → the real id comes with it", n4.length === 2 && n4.includes(U) && n4.includes("default"), n4);
+assert("E37 still never outside the user's own authorization: a branch the user cannot reach is not added even when approved", JSON.stringify(narrowBranchClaim([V, "default"], [U], U)) === JSON.stringify(["default"]), narrowBranchClaim([V, "default"], [U], U));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
