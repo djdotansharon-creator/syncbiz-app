@@ -17,8 +17,8 @@ import { BranchPicker } from "@/components/remote-bar/branch-picker";
 import "./remote-bar.css";
 
 const SKIP_KEY = "vono_branch_pick_skipped";
-/** the song list of the player: its rows (jump to a song) and the Play Next pad */
-const LIST_AREA = ".queue-row, .play-next-pad";
+/** the song list of the player: its rows (jump to a song), the thin rows of the side strip (".sb-queue-rowline", owner 2026-11-01: a press on one made it flicker "pressed" and sent a jump) and the Play Next pad */
+const LIST_AREA = ".queue-row, .play-next-pad, .sb-queue-rowline";
 
 export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement | null {
   const tr = useTr();
