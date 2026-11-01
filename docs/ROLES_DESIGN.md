@@ -53,3 +53,5 @@ Off: remove the variable and redeploy — instant; rows stay. Remove: revert the
 Until stage 2 and 3 land, switching one of the "NOT YET" permissions off changes nothing a person can do. Stage 2 and 3 each need the owner's approval (stage 3 touches the command path of the WS server).
 
 **Migration:** `20261031150000_role_permissions` — ONE additive column (`WorkspaceRole.permissions JSONB NOT NULL DEFAULT '{}'`). It must be applied BEFORE the code that reads it is deployed (merge-after-migrate).
+
+**PROD rollout log (2026-10-31):** the migration was applied to PROD by the owner (the only migration applied). The first Railway build of the merge (`e3f2a17`) failed for BOTH services (`syncbiz-app`, `syncbiz-ws`) inside "Build image", with no build log at all; `syncbiz-ws` sources had not changed, and a clean local install + build of `e3f2a17` passes — so the cause is NOT PROVEN in our code. A failed Railway deployment offers no Redeploy, so a docs-only commit starts a fresh build. Rollback: Railway → the last successful deployment (`c07a958`, #110) → ⋮ → Redeploy.
