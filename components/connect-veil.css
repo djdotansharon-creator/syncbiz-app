@@ -1,0 +1,24 @@
+/* ConnectVeil (owner 2026-11-01): an unconnected browser opens under a full blur with a small pill; after a few seconds a small glass window explains (the branch picker for a manager who has not chosen one).
+   Under the branch picker's own window (z 2147482400) and above everything else; the emergency link sits above both. */
+.vono-veil { position: fixed; inset: 0; z-index: 2147482300; display: grid; place-items: center; background: rgba(8, 8, 10, 0.46); -webkit-backdrop-filter: blur(22px) saturate(1.1); backdrop-filter: blur(22px) saturate(1.1); color: #f5f5f7; animation: vono-veil-in 0.2s ease both; transition: opacity 0.26s ease; }
+.vono-veil.is-leaving { opacity: 0; pointer-events: none; }
+@keyframes vono-veil-in { from { opacity: 0; } to { opacity: 1; } }
+/* Light graphics (weak computers): no blur at all — a plain dark cover */
+html[data-sb-fx="lite"] .vono-veil { background: rgba(6, 6, 8, 0.95); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+.vono-veil-pill { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); font-size: 14px; font-weight: 600; }
+.vono-veil-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: vono-veil-spin 0.8s linear infinite; }
+@keyframes vono-veil-spin { to { transform: rotate(360deg); } }
+
+.vono-veil-win { width: min(360px, calc(100% - 40px)); padding: 26px 24px 22px; border-radius: 26px; background: rgba(98, 98, 114, 0.5); -webkit-backdrop-filter: blur(72px) saturate(1.7); backdrop-filter: blur(72px) saturate(1.7); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.06); text-align: center; }
+html[data-sb-fx="lite"] .vono-veil-win { background: #26262c; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.vono-veil-title { margin: 0 0 8px; font-size: 18px; font-weight: 650; }
+.vono-veil-note { margin: 0 0 16px; font-size: 13.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.65); }
+.vono-veil-btn { border: 0; border-radius: 999px; padding: 9px 22px; background: rgba(255, 255, 255, 0.94); color: #0a0a0a; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.vono-veil-btn:hover { background: #fff; }
+
+/* the deliberate way past the veil — small, quiet, above the branch picker's window */
+.vono-veil-emergency { position: fixed; bottom: 22px; inset-inline: 0; margin-inline: auto; width: fit-content; max-width: calc(100% - 32px); z-index: 2147482500; border: 0; background: transparent; padding: 8px 14px; color: rgba(255, 255, 255, 0.5); font-size: 12.5px; text-decoration: underline; cursor: pointer; }
+.vono-veil-emergency:hover { color: #fff; }
+
+@media (prefers-reduced-motion: reduce) { .vono-veil { animation: none; transition: none; } .vono-veil-spin { animation-duration: 2.4s; } }

@@ -41,6 +41,7 @@ import { DeviceRoleBadge } from "@/components/device-role-badge";
 import { ControlBar } from "@/components/control-screen/control-bar";
 import { JoinPopup } from "@/components/roles/join-popup";
 import { RemoteBar } from "@/components/remote-bar/remote-bar";
+import { ConnectVeil } from "@/components/connect-veil";
 import { ControlBackIcon } from "@/components/control-screen/control-back-icon";
 import { SessionInitial } from "@/components/user-initial";
 import { isControlScreenPath } from "@/lib/control-screen";
@@ -1369,6 +1370,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         {isControlScreen ? <JoinPopup /> : null}
         {!isControlScreen && !isDesktopApp ? <RemoteBar canManage={canManage} /> : null}
+        {/* a browser that is not connected to a branch opens blurred and never turns itself into a player (owner 2026-11-01) */}
+        {!isControlScreen && !isDesktopApp ? <ConnectVeil canManage={canManage} /> : null}
         {isControlScreen ? <ControlBar canManage={canManage} /> : null}
         <header
           className={`sticky top-0 z-50 flex flex-col overflow-hidden border-b border-slate-800/80 bg-slate-950/98 shadow-[0_4px_24px_rgba(0,0,0,0.4)] backdrop-blur-md${
