@@ -995,6 +995,8 @@ wss.on("connection", (ws) => {
       const validation = validateRegisterPayload(msg);
       if (!validation.ok) {
         clearTimeout(timeout);
+        // diagnostic (owner 2026-11-01: why is a browser refused?): the reason only — read-only, no behaviour change
+        console.warn("[SyncBiz WS][reject] invalid_register", { reason: validation.error });
         ws.send(JSON.stringify({ type: "ERROR", message: validation.error } as ServerMessage));
         ws.close(4004, validation.error);
         return;
@@ -1002,6 +1004,8 @@ wss.on("connection", (ws) => {
       const auth = verifyWsToken(validation.authToken);
       if (!auth) {
         clearTimeout(timeout);
+        // diagnostic (owner 2026-11-01): which device was refused — ids and a length only, NEVER the token itself
+        console.warn("[SyncBiz WS][reject] invalid_token", { requestedRole: validation.role, requestedBranch: validation.branchId, deviceId: validation.deviceId ?? "-", tokenLength: validation.authToken.length });
         ws.send(JSON.stringify({ type: "ERROR", message: "Invalid or expired token" } as ServerMessage));
         ws.close(4005, "Invalid token");
         return;
@@ -1017,6 +1021,18 @@ wss.on("connection", (ws) => {
       // owner_global carries no register branch (it targets a branch per-COMMAND), so it is
       // validated in the COMMAND handler instead.
       if (role !== "owner_global" && !isBranchAllowed(branchId, authorizedBranches)) {
+        // diagnostic (owner 2026-11-01): who asked for which branch and what the signed claim allowed — ids only (the same ids the "register device" line already prints), never the token
+        console.warn("[SyncBiz WS][reject] branch_not_authorized", {
+          requestedRole: role,
+          requestedBranch: branchId,
+          deviceId: validation.deviceId ?? "-",
+          userId,
+          workspaceId: auth.workspaceId ?? null,
+          enrollmentRole: auth.enrollmentRole ?? null,
+          enrollmentOwner: auth.enrollmentOwner === true,
+          allowedBranchCount: authorizedBranches === null ? null : authorizedBranches.length,
+          allowedBranches: authorizedBranches === null ? null : authorizedBranches.slice(0, 20),
+        });
         ws.send(JSON.stringify({ type: "ERROR", message: "Branch not authorized" } as ServerMessage));
         ws.close(4004, "Branch not authorized");
         return;
