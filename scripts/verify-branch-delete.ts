@@ -43,6 +43,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   assert("C3 user assignments are REFUSED (`assignment`), never deleted", /"assignment"/.test(fn) && !/userBranchAssignment\.deleteMany/.test(fn));
   assert("C4 the server requires confirmName === the branch's name (`confirm`)", /ctx\.confirmName/.test(fn) && /"confirm"/.test(fn));
   assert("C5 the route passes the typed name, the actor and the client IP", /confirmName: body\?\.confirmName/.test(route) && /userId: auth\.userId/.test(route) && /extractClientIp\(req\)/.test(route));
+  // owner 2026-11-01: his own default branch is SHOWN as "You" but stored under another name — typing "You" could never match the stored name
+  const view = fs.readFileSync(path.resolve(__dirname, "../components/control-room/all-branches-view.tsx"), "utf8");
+  assert("C6 the screen keeps the STORED name beside the displayed one and sends the stored name when the owner types the displayed one (the guard stays: he must still type what the screen shows; the server still compares with the stored name)",
+    /dbName: string;/.test(view) && /dbName: b\.name \|\| b\.code \|\| "Branch"/.test(view) && /typeToConfirm=\{deleting\.name\}/.test(view) && /confirmName: typed\.trim\(\) === deleting\.name\.trim\(\) \? deleting\.dbName : typed/.test(view) && /ctx\.confirmName\.trim\(\) !== cur\.name\.trim\(\)/.test(fn));
 }
 
 async function dbPart(): Promise<void> {
