@@ -888,6 +888,15 @@ function SourcesManagerInner({
     const id = requestAnimationFrame(() => requestAnimationFrame(() => el.setAttribute("data-anim", "1")));
     return () => cancelAnimationFrame(id);
   }, []);
+  /* owner 2026-11-01: the FIRST paint already drew a rail the browser had saved as closed — from <html> (`data-sb-boot-rail-left|right`, set before paint by lib/fx-boot.ts, drawn by app/globals.css). Once this grid's own
+     attribute says the same, the hint is removed so it can never fight a later toggle (a hint is only removed after the state has really caught up — no frame where the rail is drawn open in between). */
+  useEffect(() => {
+    const grid = railGridRef.current;
+    if (!grid) return;
+    const html = document.documentElement;
+    if (html.getAttribute("data-sb-boot-rail-left") === "collapsed" && grid.getAttribute("data-left-rail") === "collapsed") html.removeAttribute("data-sb-boot-rail-left");
+    if (html.getAttribute("data-sb-boot-rail-right") === "collapsed" && grid.getAttribute("data-right-rail") === "collapsed") html.removeAttribute("data-sb-boot-rail-right");
+  }, [leftRailOpen, rightRailOpen]);
   /* while a rail moves, the page's heavy glass (backdrop blurs, blurred glows) is switched off for those ~650ms — every frame
      re-lays-out the grid, and re-blurring dozens of tiles per frame is what made the movement stutter */
   const railMoveTimer = useRef<number | null>(null);

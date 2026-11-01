@@ -78,7 +78,8 @@ export function SourcesManagerClient(props: SourcesManagerClientProps) {
 
   if (!Manager) {
     return (
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 p-12 text-center text-slate-500" aria-busy="true">Loading…</div>
+      /* owner 2026-11-01: neutral, not the slate palette — slate is blue-tinted and this box is on screen in the very first frame, before the saved look is applied */
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-12 text-center text-white/40" aria-busy="true">Loading…</div>
     );
   }
   return <Manager {...props} />;
