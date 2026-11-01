@@ -19,7 +19,10 @@ html[data-sb-remote-view] header[role="banner"] { top: 56px; }
 /* a Remote only scrolls the song list: it is shut. Moving the pointer over it (and scrolling) looks normal; the pointer turns into a small red X — no frame — only while the button is HELD DOWN on it, i.e. while the person tries to press (owner 2026-11-01) */
 html[data-sb-listlocked] :is(.queue-row, .play-next-pad, .sb-queue-rowline),
 html[data-sb-listlocked] :is(.queue-row, .play-next-pad, .sb-queue-rowline) button { cursor: default; }
+/* …and it stays while the button is held and the pointer slides over the rest of the list area (a held press started inside it — `data-sb-listpress`, set in remote-bar.tsx) */
 html[data-sb-listlocked] :is(.queue-row, .play-next-pad, .sb-queue-rowline):active,
-html[data-sb-listlocked] :is(.queue-row, .play-next-pad, .sb-queue-rowline):active * {
+html[data-sb-listlocked] :is(.queue-row, .play-next-pad, .sb-queue-rowline):active *,
+html[data-sb-listlocked][data-sb-listpress] :is(.queue-row, .play-next-pad, .sb-queue-rowline, .sb-queue-list),
+html[data-sb-listlocked][data-sb-listpress] :is(.queue-row, .play-next-pad, .sb-queue-rowline, .sb-queue-list) * {
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='M3.5 3.5l9 9M12.5 3.5l-9 9' stroke='%23ff3b30' stroke-width='2.4' stroke-linecap='round'/></svg>") 8 8, not-allowed !important;
 }
