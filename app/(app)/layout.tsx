@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { EditModalHost } from "@/components/edit-modal-host";
 import { UndoToastHost } from "@/components/undo-toast-host";
 import { AppProviders } from "./providers";
+import { getLocale } from "@/lib/locale-server";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { getActiveSuspensionForUser } from "@/lib/auth/suspension";
 import { EnrollmentHold } from "@/components/enrollment-hold";
@@ -72,9 +73,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     }
   }
 
+  // the language the root layout already rendered <html lang dir> in: the app's own texts are drawn in it from the very first frame
+  const locale = await getLocale();
+
   return (
     <EnrollmentHold enforced={enrollmentEnforced}>
-      <AppProviders>
+      <AppProviders locale={locale}>
         <div className="flex min-h-screen flex-col">
           {landOnControl ? <RoleLanding /> : null}
           <AppShell>{children}</AppShell>

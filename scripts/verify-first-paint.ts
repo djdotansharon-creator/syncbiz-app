@@ -59,7 +59,7 @@ assert("F9 a rail saved as closed is drawn closed from the first frame: the same
 assert("F10 the hint can never fight a later toggle: the sources manager removes each one only after its own grid attribute says the same (no frame where the rail is drawn open in between)",
   /getAttribute\("data-left-rail"\) === "collapsed"\) html\.removeAttribute\("data-sb-boot-rail-left"\)/.test(sm) && /getAttribute\("data-right-rail"\) === "collapsed"\) html\.removeAttribute\("data-sb-boot-rail-right"\)/.test(sm) && /\}, \[leftRailOpen, rightRailOpen\]\);/.test(sm));
 assert("F11 nothing in playback is touched: no playback / device / socket code appears in what this change added", !/usePlayback|useDevicePlayer|WebSocket|sendCommand/.test(FIRST_PAINT_BOOT_SCRIPT));
-assert("F12 the box that stands where the library will be (on screen in the very first frame) is neutral grey, not the blue-tinted slate palette", /border-white\/\[0\.07\] bg-white\/\[0\.03\] p-12 text-center text-white\/40" aria-busy="true">Loading…/.test(read("components/sources-manager-client.tsx")) && !/slate-950\/60 p-12 text-center text-slate-500" aria-busy/.test(read("components/sources-manager-client.tsx")));
+assert("F12 the box that stands where the library will be (on screen in the very first frame) is neutral grey, not the blue-tinted slate palette", /border-white\/\[0\.07\] bg-white\/\[0\.03\] p-12 text-center text-white\/40" aria-busy="true">\{t\.loadingSources\}/.test(read("components/sources-manager-client.tsx")) && !/slate-950\/60 p-12 text-center text-slate-500" aria-busy/.test(read("components/sources-manager-client.tsx")));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
