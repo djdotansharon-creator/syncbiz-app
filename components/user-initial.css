@@ -1,0 +1,7 @@
+/* who is signed in (owner 2026-11-01): the first letter of the name on a soft white disc with a faint grey tint — at the END-most corner of the top bar (right in English, left in Hebrew, because the bar mirrors).
+   Display only: no hover state, no tooltip, no click. */
+.sb-user-initial { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(145deg, #ffffff 0%, #e4e4ea 100%); color: #3a3a41; font-size: 13.5px; font-weight: 650; line-height: 1; user-select: none; -webkit-user-select: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05); }
+/* the very last thing at the END edge: the header's way-back icon (order 100) and the full-screen toggle (order 10) both sit inside it */
+.sb-user-initial--header, .sb-rb-end > .sb-user-initial { order: 101; }
+/* the Remote's strip carries its own disc at the same corner: the header's copy (under the strip) steps aside */
+html[data-sb-remote-view] .sb-user-initial--header { display: none; }

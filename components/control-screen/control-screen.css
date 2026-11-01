@@ -12,6 +12,7 @@ html[data-sb-display] [data-control-screen="true"] .app-sources-theme-scope { ba
 /* the side padding is the same 16px as the player's own top bar (measured), so the corner icon lands in exactly the same spot in both */
 .sb-ctl-brand { justify-self: start; }
 .sb-ctl-nav { display: flex; align-items: center; gap: 6px; justify-self: center; }
+.sb-ctl-end { justify-self: end; display: flex; align-items: center; gap: 10px; }
 .sb-ctl-corner { justify-self: end; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; color: rgba(255, 255, 255, 0.82); text-decoration: none; font-size: 14px; font-weight: 600; transition: background-color 0.18s, color 0.18s; padding-inline-start: 14px; }
 .sb-ctl-corner:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 .sb-ctl-corner-ico { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; font-style: normal; }

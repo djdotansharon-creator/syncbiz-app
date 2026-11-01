@@ -42,6 +42,7 @@ import { ControlBar } from "@/components/control-screen/control-bar";
 import { JoinPopup } from "@/components/roles/join-popup";
 import { RemoteBar } from "@/components/remote-bar/remote-bar";
 import { ControlBackIcon } from "@/components/control-screen/control-back-icon";
+import { SessionInitial } from "@/components/user-initial";
 import { isControlScreenPath } from "@/lib/control-screen";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
@@ -1609,6 +1610,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               <DesktopUpdatePill />
               {/* the way back to the control screen (owner 2026-10-29): the END-most corner of the bar — exactly where the control screen's "Player" button is (right in English, left in Hebrew). Browser managers only; the desktop station uses the gear. */}
               {canManage && !isDesktopApp && !isManagementRoute ? <ControlBackIcon /> : null}
+              {/* who is signed in (owner 2026-11-01): the END-most corner of the bar — the first letter of the name on a soft white disc (right in English, left in Hebrew) */}
+              <SessionInitial className="sb-user-initial--header" />
             </div>
           </div>
           {/* Row 3: Player — keep a single AudioPlayer instance across routes (media vs non-media); swapping branches remounts embeds */}
