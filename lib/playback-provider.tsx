@@ -72,6 +72,7 @@ import {
 import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec, mainBootSource } from "./device-mode-guard";
 import { autoAdvanceHandoff } from "./auto-advance-handoff";
 import { urlTimingMark } from "./url-startup-timing";
+import { ShuffleOrder, shuffleKeyOf } from "./shuffle-order";
 
 export type PlaybackStatus = "idle" | "playing" | "paused" | "stopped";
 
@@ -325,6 +326,14 @@ export function sessionRepeatMode(
 
 type SessionNextKind = "advance" | "restart" | "exhausted";
 
+/** Random's view of the playing list (lib/shuffle-order.ts): the next song, and whether the current one closes the round. */
+export type SessionShuffler = {
+  pick: (len: number, current: number) => number;
+  roundEnds: (len: number, current: number) => boolean;
+  /** The list stops here (its round is complete and LOOP is "off"). */
+  finish?: () => void;
+};
+
 /**
  * Next index within the active playlist session only. No global queue / no jump to another top-level source.
  * Loop behavior follows `repeatMode`:
@@ -337,8 +346,9 @@ export function computeSessionNextTrackIndex(
   currentIndex: number,
   shuffle: boolean,
   repeatMode: "playlist" | "track" | "off",
-  getShuffledIndex: (len: number, current: number) => number,
+  shuffler: ((len: number, current: number) => number) | SessionShuffler,
 ): { kind: SessionNextKind; nextIndex: number } {
+  const pick = typeof shuffler === "function" ? shuffler : shuffler.pick;
   if (trackCount < 1) return { kind: "exhausted", nextIndex: 0 };
   const safeCount = trackCount;
   const capped = Math.min(Math.max(0, currentIndex), safeCount - 1);
@@ -352,16 +362,21 @@ export function computeSessionNextTrackIndex(
     return { kind: "restart", nextIndex: 0 };
   }
 
-  if (capped < safeCount - 1) {
-    const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : capped + 1;
+  // Random with a shuffle order: the list ends where its ROUND ends (every song played once), not at its last position.
+  const lastOfRound =
+    shuffle && typeof shuffler !== "function" ? shuffler.roundEnds(safeCount, capped) : capped >= safeCount - 1;
+
+  if (!lastOfRound) {
+    const nextIdx = shuffle ? pick(safeCount, capped) : capped + 1;
     return { kind: "advance", nextIndex: nextIdx };
   }
 
   if (repeatMode === "off") {
+    if (shuffle && typeof shuffler !== "function") shuffler.finish?.();
     return { kind: "exhausted", nextIndex: capped };
   }
 
-  const nextIdx = shuffle ? getShuffledIndex(safeCount, capped) : 0;
+  const nextIdx = shuffle ? pick(safeCount, capped) : 0;
   return { kind: "restart", nextIndex: nextIdx };
 }
 
@@ -1922,30 +1937,27 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  /** Shuffle = a "bag": every track plays once before any repeats, and never the same one twice in a row (owner 2026-10-18:
-   *  "the shuffle should really give a different song from the list each time" — a plain random pick kept repeating a few).
-   *  Pure selection logic; the signature and every caller are unchanged. */
-  const shuffleBagRef = useRef<{ len: number; played: Set<number> }>({ len: 0, played: new Set() });
-  const getShuffledIndex = useCallback((len: number, current: number): number => {
-    if (len <= 1) return 0;
-    const bag = shuffleBagRef.current;
-    if (bag.len !== len) {
-      bag.len = len;
-      bag.played = new Set();
-    }
-    if (current >= 0 && current < len) bag.played.add(current); // what is playing now has had its turn
-    let pool: number[] = [];
-    for (let i = 0; i < len; i++) if (!bag.played.has(i)) pool.push(i);
-    if (pool.length === 0) {
-      // everything has played once: a new round (the current song is the first one "used up" in it)
-      bag.played = new Set(current >= 0 && current < len ? [current] : []);
-      for (let i = 0; i < len; i++) if (!bag.played.has(i)) pool.push(i);
-    }
-    if (pool.length === 0) pool = [0];
-    const next = pool[Math.floor(Math.random() * pool.length)]!;
-    bag.played.add(next);
-    return next;
-  }, []);
+  /** Random = one fixed random order per list (owner 2026-10-28, lib/shuffle-order.ts): every song plays once before a new random
+   *  round, the list ends (explicit LOOP "off") only when its round is complete, and the AutoMix pre-load PEEKS — what is
+   *  pre-loaded is what plays next. `next()` advances the order ("advance"); getNextStreamUrl / getNextEmbeddedSource "peek". */
+  const shuffleOrderRef = useRef(new ShuffleOrder());
+  const shufflerFor = useCallback(
+    (tracks: ReadonlyArray<{ id?: string; url?: string }>, mode: "advance" | "peek"): SessionShuffler => {
+      const order = shuffleOrderRef.current;
+      const epoch = playCommandEpochRef.current; // a new play command after a list stopped at its round's end = a new round
+      let key: string | null = null;
+      const k = () => {
+        order.atEpoch(epoch);
+        return (key ??= shuffleKeyOf(tracks));
+      };
+      return {
+        pick: (len, cur) => (mode === "advance" ? order.advance(k(), len, cur) : order.peek(k(), len, cur)),
+        roundEnds: (len, cur) => order.roundEnds(k(), len, cur),
+        finish: mode === "advance" ? () => order.finish(k(), epoch) : undefined,
+      };
+    },
+    [],
+  );
 
   /**
    * Returns the state update for a within-playlist track change.
@@ -2239,7 +2251,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             restored.currentTrackIndex,
             restored.shuffle,
             sessionRepeatMode(effectiveRepeatMode, sessionTracks),
-            getShuffledIndex,
+            shufflerFor(sessionTracks, "advance"),
           );
           if (sessionStep.kind === "exhausted") {
             transportLockRef.current = false;
@@ -2272,7 +2284,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           restored.currentTrackIndex,
           restored.shuffle,
           sessionRepeatMode(effectiveRepeatMode, trks),
-          getShuffledIndex,
+          shufflerFor(trks, "advance"),
         );
         if (fbStep.kind === "exhausted") {
           transportLockRef.current = false;
@@ -2334,7 +2346,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           s.currentTrackIndex,
           s.shuffle,
           sessionRepeatMode(effectiveRepeatMode, sessionTracks),
-          getShuffledIndex,
+          shufflerFor(sessionTracks, "advance"),
         );
 
         if (sessionStep.kind === "exhausted") {
@@ -2469,7 +2481,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentTrackIndex,
         s.shuffle,
         sessionRepeatMode(effectiveRepeatMode, tracks),
-        getShuffledIndex,
+        shufflerFor(tracks, "advance"),
       );
       if (fbStep.kind === "exhausted") {
         transportLockRef.current = false;
@@ -2502,7 +2514,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     stopAllBeforePlay,
     playLocal,
     playSource,
-    getShuffledIndex,
+    shufflerFor,
     getAdvanceState,
     logRuntimePlaybackAudit,
     emitPlaylistSessionAudit,
@@ -2542,7 +2554,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           s.currentTrackIndex,
           s.shuffle,
           autoRepeatMode,
-          getShuffledIndex,
+          shufflerFor(sessionTracks, "peek"),
         );
         if (step.kind === "exhausted") return null;
         // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
@@ -2571,7 +2583,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentTrackIndex,
         s.shuffle,
         autoRepeatMode,
-        getShuffledIndex,
+        shufflerFor(tracks, "peek"),
       );
       if (step.kind === "exhausted") return null;
       // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
@@ -2582,7 +2594,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // MASTER-only standby authorization — identical mechanism to the active deck (see play_next branch).
       return !embedded && url ? appendMediaToken(url) : null;
     })();
-  }, [getShuffledIndex]);
+  }, [shufflerFor]);
 
   /** Next embedded source for YouTube AutoMix. Returns YouTube only (Phase 1). */
   const getNextEmbeddedSource = useCallback((): { type: "youtube"; url: string; videoId: string } | null => {
@@ -2602,7 +2614,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         s.currentTrackIndex,
         s.shuffle,
         autoRepeatMode,
-        getShuffledIndex,
+        shufflerFor(sessionTracks, "peek"),
       );
       if (step.kind === "exhausted") return null;
       // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
@@ -2634,7 +2646,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       s.currentTrackIndex,
       s.shuffle,
       autoRepeatMode,
-      getShuffledIndex,
+      shufflerFor(tracks, "peek"),
     );
     if (step.kind === "exhausted") return null;
     // The list wraps, but a Play Next item (e.g. a recommended song) plays first — never pre-load / crossfade into track 1 under it.
@@ -2647,7 +2659,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       return videoId ? { type: "youtube", url, videoId } : null;
     }
     return null;
-  }, [getShuffledIndex]);
+  }, [shufflerFor]);
 
   const setVolume = useCallback((value: number) => {
     setState((s) => ({ ...s, volume: Math.max(0, Math.min(100, value)) }));
