@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import type { UnifiedSource } from "@/lib/source-types";
+import { useTranslations } from "@/lib/locale-context";
 
 /**
  * `SourcesManager` must not SSR: it uses `usePlayback` from the root `PlaybackProvider`, so it is loaded on the client.
@@ -32,6 +33,7 @@ type ManagerComponent = ComponentType<SourcesManagerClientProps>;
 
 export function SourcesManagerClient(props: SourcesManagerClientProps) {
   const [Manager, setManager] = useState<ManagerComponent | null>(null);
+  const { t } = useTranslations(); // the placeholder is in the first frame — in the saved language (owner 2026-11-01)
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +81,7 @@ export function SourcesManagerClient(props: SourcesManagerClientProps) {
   if (!Manager) {
     return (
       /* owner 2026-11-01: neutral, not the slate palette — slate is blue-tinted and this box is on screen in the very first frame, before the saved look is applied */
-      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-12 text-center text-white/40" aria-busy="true">Loading…</div>
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-12 text-center text-white/40" aria-busy="true">{t.loadingSources}</div>
     );
   }
   return <Manager {...props} />;
