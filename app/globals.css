@@ -8026,3 +8026,13 @@ html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-wi
   -webkit-backdrop-filter: blur(48px) saturate(1.2);
   backdrop-filter: blur(48px) saturate(1.2);
 }
+
+/* ── first paint of the rails (owner 2026-11-01: "the song list is open and then closes"). `lib/fx-boot.ts` FIRST_PAINT_BOOT_SCRIPT copies a rail the browser saved as CLOSED onto <html> before anything is painted
+   (`data-sb-boot-rail-left|right`); these rules draw it closed from the very first frame — the same variables the closed state uses (see the rail blocks above) — and the sources manager removes the hint once its own
+   state agrees. More specific than the `[data-*-rail="open"]` rules (0,3,1 vs 0,2,0), so they win at every width without touching them. ── */
+@media (min-width: 1024px) {
+  html[data-sb-boot-rail-left="collapsed"] .workspace-rail-grid[data-left-rail="open"] { --rail-left: 40px; --rp-l: 0; }
+  html[data-sb-boot-rail-right="collapsed"] .workspace-rail-grid[data-right-rail="open"] { --rail-right: 40px; --rp-r: 0; }
+  html[data-sb-boot-rail-left="collapsed"] .sb-rail-toggle--left svg { transform: rotate(180deg); }
+  html[data-sb-boot-rail-right="collapsed"] .sb-rail-toggle--right svg { transform: rotate(180deg); }
+}

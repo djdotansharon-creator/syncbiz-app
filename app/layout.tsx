@@ -6,7 +6,7 @@ import "./lite-fx.css";
 import "./kiosk-display.css";
 import "flag-icons/css/flag-icons.min.css";
 import { getLocale } from "@/lib/locale-server";
-import { FX_BOOT_SCRIPT, KIOSK_BOOT_SCRIPT } from "@/lib/fx-boot";
+import { FIRST_PAINT_BOOT_SCRIPT, FX_BOOT_SCRIPT, KIOSK_BOOT_SCRIPT } from "@/lib/fx-boot";
 import { NoNativeTooltips } from "@/components/no-native-tooltips";
 
 const geistSans = Geist({
@@ -79,6 +79,8 @@ export default async function RootLayout({
         {/* graphics mode (full / lite) is decided before the first paint — see lib/fx-mode.ts */}
         <script dangerouslySetInnerHTML={{ __html: FX_BOOT_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: KIOSK_BOOT_SCRIPT }} />
+        {/* the first paint is already the saved look: display mode + closed rails (owner 2026-11-01) */}
+        <script dangerouslySetInnerHTML={{ __html: FIRST_PAINT_BOOT_SCRIPT }} />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${heebo.variable} ${rubik.variable} antialiased bg-slate-950 text-slate-50`}
