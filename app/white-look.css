@@ -1,0 +1,95 @@
+/* WHITE look (display mode "white", pearl-light theme) — owner 2026-11-01: "fix the white completely; there are areas that are not good".
+   Found by measurement (an automatic readability audit of every text element in white mode + screenshots): the top block (the header AND the deck inside it) stayed the dark navy of the dark looks while its contents
+   (deck icons, time labels, queue) were already made dark-on-light, and many texts kept the dark looks' near-white colour on the light page — unreadable. This file finishes the light look. Loaded after globals.css, so at equal
+   weight it wins. Scope: only `html[data-sb-display="white"]`; the black and "song" looks and every other page are untouched. Palette = the one the existing white rules already use:
+   ink #1c1c1e · second rgba(28,28,30,.62) · quiet rgba(28,28,30,.5) · hairline rgba(0,0,0,.08). */
+
+/* ── the top block: header + the deck / queue inside it ── */
+html[data-sb-display="white"] header.sticky { background-color: rgba(247, 248, 251, 0.94) !important; border-color: rgba(0, 0, 0, 0.08) !important; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06) !important; color: #1c1c1e; }
+html[data-sb-display="white"] .library-deck-unified { background-color: rgba(255, 255, 255, 0.5) !important; border-color: rgba(0, 0, 0, 0.07) !important; }
+html[data-sb-display="white"] .sb-brand-mark { background-color: #0b0b0c; }
+html[data-sb-display="white"] .sb-top-nav-bar { background-color: #1c1c1e; }
+html[data-sb-display="white"] header.sticky nav a { color: rgba(28, 28, 30, 0.58); }
+html[data-sb-display="white"] header.sticky nav a:hover, html[data-sb-display="white"] header.sticky nav a[data-active="true"] { color: #1c1c1e; }
+html[data-sb-display="white"] .sb-role-icon { color: #1f9d45; }
+html[data-sb-display="white"] header.sticky :is(.control-room-toggle, .main-menu-gear) { color: #48484a; }
+html[data-sb-display="white"] header.sticky :is(.control-room-toggle, .main-menu-gear):hover { color: #1c1c1e; }
+html[data-sb-display="white"] .sb-user-initial { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.14); }
+
+/* the queue panel inside the deck */
+html[data-sb-display="white"] .sb-queue-tab { color: #1c1c1e; }
+html[data-sb-display="white"] .sb-queue-tab-bar { background-color: #1c1c1e; }
+html[data-sb-display="white"] .sb-queue-toggle { color: #6e6e73; }
+html[data-sb-display="white"] .sb-queue-toggle:hover { color: #1c1c1e; }
+html[data-sb-display="white"] .library-deck-unified :is(.text-slate-500, [class*="text-slate-500/"]) { color: rgba(28, 28, 30, 0.5); }
+html[data-sb-display="white"] .library-deck-unified :is(.text-slate-400, .text-slate-300, [class*="text-slate-400/"], [class*="text-slate-300/"]) { color: rgba(28, 28, 30, 0.62); }
+html[data-sb-display="white"] .library-deck-unified :is(.text-slate-100, .text-slate-200, .text-slate-50, .text-white, [class*="text-white/"]) { color: #1c1c1e; }
+
+/* ── the library: rails, tabs, search, section titles, lists ── */
+html[data-sb-display="white"] .library-theme :is(.library-section-title, .truncate, .library-card-title) { color: #1c1c1e; }
+html[data-sb-display="white"] .library-theme :is(button, a, span)[class*="text-[#f5f5f7]"], html[data-sb-display="white"] .library-theme :is(button, a, span)[class*="text-[color:var(--lib-text-primary)]"] { color: #1c1c1e; }
+html[data-sb-display="white"] .library-theme :is(button, a, span)[class*="text-[#a1a1a6]"], html[data-sb-display="white"] .library-theme :is(button, a, span)[class*="text-[#8e8e93]"] { color: rgba(28, 28, 30, 0.6); }
+
+/* ── the light page's own surfaces: every text / icon colour the dark looks set to near-white becomes ink ──
+   Scope = the library screen (rails + center) and the workspace pages. NOT inside a surface that is dark in every look (the search panel, a card with its cover overlay, the dark centre panels) and NOT on a
+   control that carries its own solid colour (a green / blue / red button, a white chip) — those keep their light text. Dark surfaces are named by their own classes, never guessed from an ancestor. */
+html[data-sb-display="white"] :is(.library-page-shell, .app-sources-theme-scope main) :is([class*="text-white"], [class*="text-[#f5f5f7]"], [class*="text-[#e5e5ea]"], [class*="text-[#fff"], [class*="text-slate-50"], [class*="text-slate-100"], [class*="text-slate-200"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"], :is(button, a, span)[class*="bg-emerald-"], :is(button, a, span)[class*="bg-sky-"], :is(button, a, span)[class*="bg-blue-"], :is(button, a, span)[class*="bg-red-"], :is(button, a, span)[class*="bg-rose-"], :is(button, a, span)[class*="bg-[#0a84ff]"], :is(button, a, span)[class~="bg-white"]) *):not(:is(button, a, span)[class*="bg-emerald-"], :is(button, a, span)[class*="bg-sky-"], :is(button, a, span)[class*="bg-blue-"], :is(button, a, span)[class*="bg-red-"], :is(button, a, span)[class*="bg-rose-"], :is(button, a, span)[class*="bg-[#0a84ff]"], :is(button, a, span)[class~="bg-white"]) { color: #1c1c1e; }
+html[data-sb-display="white"] :is(.library-page-shell, .app-sources-theme-scope main) :is([class*="text-slate-300"], [class*="text-slate-400"], [class*="text-[#a1a1a6]"], [class*="text-[#8e8e93]"], [class*="text-[#c7c7cc]"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: rgba(28, 28, 30, 0.62); }
+html[data-sb-display="white"] :is(.library-page-shell, .app-sources-theme-scope main) :is([class*="text-slate-500"], [class*="text-slate-600"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: rgba(28, 28, 30, 0.5); }
+
+/* section titles carry an !important white in the dark looks */
+html[data-sb-display="white"] .library-list-shell--frameless :is(.library-section-title, h2.library-text-title, h3.library-section-title) { color: #1c1c1e !important; }
+
+/* rails, toolbar and small buttons of the library */
+html[data-sb-display="white"] .sb-rail-toggle { color: rgba(28, 28, 30, 0.55); }
+html[data-sb-display="white"] .sb-rail-toggle:hover { color: #1c1c1e; background: rgba(0, 0, 0, 0.06); }
+html[data-sb-display="white"] .sb-kiosk-launch { color: rgba(28, 28, 30, 0.6); }
+html[data-sb-display="white"] .sb-kiosk-launch:hover { color: #1c1c1e; }
+html[data-sb-display="white"] :is(.sb-pl-add, .sb-drop-plus, .sb-mic) { color: #1c1c1e; }
+html[data-sb-display="white"] .library-theme :is(button, a)[class*="h-8"][class*="w-8"]:not([class*="bg-"]) { color: rgba(28, 28, 30, 0.7); }
+
+/* the idle disc and the deck's quiet bits */
+html[data-sb-display="white"] .library-deck-art-host--idle { background: #dcdde3 !important; }
+html[data-sb-display="white"] .library-deck-art-host--idle svg { color: rgba(28, 28, 30, 0.38); }
+
+/* the Guests panel is drawn straight on the page (no surface at all) in light text — a dark glass card on the light page, like the DJ panel and the jingles console */
+html[data-sb-display="white"] .sb-gst { background: rgba(22, 22, 26, 0.94); border-radius: 26px; padding: 18px 20px; color: #f5f5f7; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.16); }
+
+/* the DJ Creator AI panel is drawn as a faint WHITE glass over a dark page: on the light page it vanished with its light text — it becomes the same dark glass card as the jingles console */
+html[data-sb-display="white"] .sb-dj { background: rgba(22, 22, 26, 0.94); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.16); color: #f5f5f7; }
+
+/* ── the jingles console is the one centre panel with NO background of its own (the others are dark cards): in the white look it becomes a dark glass card, like the search panel, so its light text is readable ── */
+html[data-sb-display="white"] .jc-workspace-panel { background: rgba(22, 22, 26, 0.94); border-radius: 26px; padding: 18px 20px; color: #f5f5f7; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.16); }
+
+/* ── the rest of the library toolbar and rails ── */
+html[data-sb-display="white"] .sb-sh { color: rgba(28, 28, 30, 0.55); }
+html[data-sb-display="white"] .sb-library-ingest-inner input::placeholder { color: rgba(28, 28, 30, 0.45); }
+html[data-sb-display="white"] .sb-mic { color: #1c1c1e !important; }
+html[data-sb-display="white"] .sb-mic::before { background: radial-gradient(closest-side, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.08) 62%, rgba(0, 0, 0, 0)); }
+/* the "DJ AI" tile is a white-on-glass feature tile in the dark looks — on the light page it becomes a dark feature tile (text stays light) */
+html[data-sb-display="white"] .sb-djl { background: linear-gradient(135deg, #2c2c31, #1c1c1e); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); -webkit-backdrop-filter: none; backdrop-filter: none; color: #f5f5f7; }
+/* the idle disc of the deck (a dark #101014 circle in the dark looks) */
+html[data-sb-display="white"] .library-deck-unified .h-36.w-36.rounded-full { background-color: #dcdde3 !important; }
+html[data-sb-display="white"] .library-deck-unified .h-36.w-36.rounded-full svg { color: rgba(28, 28, 30, 0.4); }
+
+/* ── workspace pages (Schedules, Radio classic, …) draw their cards in slate-900 / 800 glass: on the light page they are light glass with a hairline ── */
+html[data-sb-display="white"] .library-page-shell :is([class*="bg-slate-900"], [class*="bg-slate-800"], [class*="bg-slate-950"], [class*="bg-zinc-900"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-djl, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]), :is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *):not(button[class*="bg-slate-800"], a[class*="bg-slate-800"]) { background-color: rgba(255, 255, 255, 0.62) !important; }
+html[data-sb-display="white"] .library-page-shell :is([class*="border-slate-800"], [class*="border-slate-700"], [class*="border-slate-600"], [class*="border-zinc-800"], [class*="border-zinc-700"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { border-color: rgba(0, 0, 0, 0.1) !important; }
+
+/* ── accent texts: the light tints of the dark looks (…-200 / -300 / -400) become the same hue, darkened, on the light page ── */
+html[data-sb-display="white"] .library-page-shell :is([class*="text-emerald-2"], [class*="text-emerald-3"], [class*="text-emerald-4"], [class*="text-green-2"], [class*="text-green-3"], [class*="text-green-4"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #0a7d4f; }
+html[data-sb-display="white"] .library-page-shell :is([class*="text-sky-2"], [class*="text-sky-3"], [class*="text-sky-4"], [class*="text-blue-2"], [class*="text-blue-3"], [class*="text-blue-4"], [class*="text-cyan-2"], [class*="text-cyan-3"], [class*="text-cyan-4"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #0a63b5; }
+html[data-sb-display="white"] .library-page-shell :is([class*="text-amber-2"], [class*="text-amber-3"], [class*="text-amber-4"], [class*="text-yellow-2"], [class*="text-yellow-3"], [class*="text-yellow-4"], [class*="text-orange-3"], [class*="text-orange-4"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #8a5a00; }
+html[data-sb-display="white"] .library-page-shell :is([class*="text-rose-2"], [class*="text-rose-3"], [class*="text-rose-4"], [class*="text-red-2"], [class*="text-red-3"], [class*="text-red-4"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #b4232f; }
+html[data-sb-display="white"] .library-page-shell :is([class*="text-violet-2"], [class*="text-violet-3"], [class*="text-violet-4"], [class*="text-purple-3"], [class*="text-purple-4"], [class*="text-indigo-2"], [class*="text-indigo-3"], [class*="text-indigo-4"]):not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #5b3cc4; }
+
+/* ── no needless layers: a drop-shadow filter on an icon is an off-screen render per icon and is invisible on the light page ── */
+html[data-sb-display="white"] svg { filter: none !important; }
+
+/* ── buttons answer the pointer (measured against the black look: Scheduled / All Library rows, playlist rows, "+ new playlist", the tile clock / bin, Genres and the tabs showed NO change on hover — their
+   hover colours are white tints, invisible on the light page). Same scope rule as the texts: not inside a surface that is dark in every look, not on a control with its own solid colour. ── */
+html[data-sb-display="white"] :is(.library-page-shell, header.sticky) :is([class*="hover:bg-white"], [class*="hover:bg-slate-8"], [class*="hover:bg-slate-7"], [class*="hover:bg-zinc-8"], [class*="hover:bg-[#2"], [class*="hover:bg-[#1"]):hover:not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-dj, .sb-gst, .sb-djl, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *):not(:is(button, a, span)[class*="bg-emerald-"], :is(button, a, span)[class*="bg-sky-"], :is(button, a, span)[class*="bg-blue-"], :is(button, a, span)[class*="bg-red-"], :is(button, a, span)[class*="bg-rose-"], :is(button, a, span)[class~="bg-white"]) { background-color: rgba(0, 0, 0, 0.07) !important; }
+html[data-sb-display="white"] :is(.library-page-shell, header.sticky) :is([class*="hover:text-white"], [class*="hover:text-slate-1"], [class*="hover:text-slate-2"], [class*="hover:text-[#f"]):hover:not(:is(.jc-workspace-panel, .sb-search-panel, .library-source-card, .sb-lbc, .sb-dj, .sb-gst, .sb-djl, .sb-anim-rise[class*="bg-[#0c0c"], .sb-anim-rise[class*="bg-slate-950"], .sb-anim-rise[class*="bg-black"]) *) { color: #000000 !important; }
+html[data-sb-display="white"] .library-page-shell :is(.sb-pl-add, .sb-pl-plus) { background: rgba(0, 0, 0, 0.035); }
+html[data-sb-display="white"] .sb-pl-row:hover { background: rgba(0, 0, 0, 0.07); }
+html[data-sb-display="white"] :is(.sb-pl-plus, .sb-pl-add):hover { background: rgba(0, 0, 0, 0.08); }
