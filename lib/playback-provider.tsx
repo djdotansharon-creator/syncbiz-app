@@ -2517,7 +2517,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const autoRepeatMode = getPlaybackRepeatMode();
       if (autoRepeatMode === "track") return null;
 
-      if (isPlayNextSourceId(s.currentSource.id) && s.playNextQueue.length > 0) {
+      // Play Next always comes first (owner 2026-10-28): while it holds songs, its first song is what next() plays — from a
+      // list / bank song too, not only from a Play Next song — so the AutoMix pre-load is that song and nothing else.
+      if (s.playNextQueue.length > 0) {
         const t = s.playNextQueue[0]!;
         const u = canonicalYouTubeWatchUrlForPlayback(t.url ?? "");
         const em = canEmbedInCard(unifiedToPlaybackTrack(t, 0).type);
@@ -2591,6 +2593,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     /* Track-loop: natural end replays the same song — no auto-advance target. */
     const autoRepeatMode = getPlaybackRepeatMode();
     if (autoRepeatMode === "track") return null;
+
+    // Play Next always comes first (owner 2026-10-28) — the same rule as getNextStreamUrl: its first song, or no pre-load
+    // when that song is not a YouTube video (the current song then ends and next() starts it).
+    if (s.playNextQueue.length > 0) {
+      const t = s.playNextQueue[0]!;
+      const u = canonicalYouTubeWatchUrlForPlayback(t.url ?? "");
+      if (!u || unifiedToPlaybackTrack(t, 0).type !== "youtube") return null;
+      const videoId = getYouTubeVideoId(u);
+      if (videoId) mvpLog("playback_get_next_embedded", { scope: "play_next", nextId: t.id });
+      return videoId ? { type: "youtube", url: u, videoId } : null;
+    }
 
     const sessionTracks = getPlaylistSessionTracks(s);
     if (
