@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { useTr } from "@/lib/i18n/use-tr";
 import { AnyPendingDot } from "@/components/control-screen/pending-dots";
+import { SessionInitial } from "@/components/user-initial";
 import "./control-screen.css";
 import "./control-skin.css";
 
@@ -122,10 +123,14 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
         })}
       </nav>
       {/* the END edge (left in Hebrew, right in English): to the live player and back — no code. The icon is the end-most thing, in the same spot as the player's "back to the control screen" icon. */}
-      <Link href="/sources" prefetch className="sb-ctl-corner" title={tr("Player")} aria-label={tr("Player")}>
-        <span>{tr("Player")}</span>
-        <i className="sb-ctl-corner-ico"><PlayerIcon /></i>
-      </Link>
+      <span className="sb-ctl-end">
+        <Link href="/sources" prefetch className="sb-ctl-corner" title={tr("Player")} aria-label={tr("Player")}>
+          <span>{tr("Player")}</span>
+          <i className="sb-ctl-corner-ico"><PlayerIcon /></i>
+        </Link>
+        {/* who is signed in (owner 2026-11-01): the very last thing at the END edge */}
+        <SessionInitial />
+      </span>
     </div>
   );
 }

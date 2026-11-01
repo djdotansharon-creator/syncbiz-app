@@ -13,6 +13,7 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 import { getControlBranch } from "@/lib/control-branch";
 import { useTr } from "@/lib/i18n/use-tr";
 import { ControlBackIcon } from "@/components/control-screen/control-back-icon";
+import { SessionInitial } from "@/components/user-initial";
 import { BranchPicker } from "@/components/remote-bar/branch-picker";
 import "./remote-bar.css";
 
@@ -84,7 +85,7 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
         </button>
         <span className="sb-rb-state" role="status">{online ? tr("Player online") : tr("No player is connected — nothing will play")}</span>
       </div>
-      <span className="sb-rb-end">{canManage ? <ControlBackIcon /> : null}</span>
+      <span className="sb-rb-end">{canManage ? <ControlBackIcon /> : null}<SessionInitial /></span>
       {forced || picking ? <BranchPicker current={branch?.branchId ?? null} forced={forced} onClose={closePicker} /> : null}
     </div>
   );
