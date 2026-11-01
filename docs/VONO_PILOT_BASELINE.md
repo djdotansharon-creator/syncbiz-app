@@ -8,6 +8,11 @@
 
 ## 1. STATUS
 
+- **🟡 TEMPORARY DIAGNOSTIC — PARKED REMOVAL (owner approved 2026-11-01, PR #116, SERVER `server/index.ts`, read-only).** The WS server writes
+  `[SyncBiz WS][reject] branch_not_authorized | invalid_token | invalid_register` before each refusal of a REGISTER (device id, branch asked for, user / workspace /
+  enrollment role, branches the signed claim allowed, token LENGTH — never the token). Why: PROD log 2026-11-01 01:15–10:54 UTC = 306 attempts, 6 registered, 203 closed 4004,
+  82 closed 4005 with `deviceId: '-'` and no reason — which device / branch is refused is NOT PROVEN. Close codes and every other path unchanged (`server/verify-reject-log.ts` 11/11,
+  existing WS suites green). **REMOVE the three lines once the cause is fixed** (or keep only if the owner wants them). Rollback = revert the merge commit.
 - **🟡 P0 F4 — scheduled jingle fired once per open tab — PR #64 MERGE APPROVED by the owner 2026-10-24 (code HEAD
   `acc107a`); deploy PROD `syncbiz-app` only; PROD smoke test PENDING (owner). RENDERER
   ONLY** (`components/jingles-control/JingleScheduleAutoPlayer.tsx`). Root cause (PROVEN BY CODE + RUNTIME, local app +
