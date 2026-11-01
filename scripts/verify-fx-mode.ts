@@ -79,7 +79,8 @@ assert("M8 a mirror the operator switched off stays off in the transparent displ
 
 // ── the stylesheet: nothing outside the switch row may apply unless data-sb-fx="lite" is set ────────────────────────
 const css = readFileSync(path.join(__dirname, "..", "app", "lite-fx.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-const liteStart = css.indexOf('html[data-sb-fx="lite"]');
+const SCOPE = ':is(html[data-sb-fx="lite"], html[data-sb-display="white"])'; // the flat rules apply in Light graphics AND in the white display (owner 2026-11-02: the white look carries no glass)
+const liteStart = css.indexOf(SCOPE);
 const body = css.slice(liteStart);
 const flat: string[] = [];
 let depth = 0;
@@ -110,8 +111,8 @@ const splitSelectors = (sel: string): string[] => {
   out.push(c.trim());
   return out;
 };
-const unscoped = flat.filter((sel) => !sel.startsWith("@media") && !splitSelectors(sel).every((p) => p.startsWith('html[data-sb-fx="lite"]')));
-assert("S1 every rule of the lite part is scoped to html[data-sb-fx=\"lite\"]", unscoped.length === 0, unscoped.slice(0, 3));
+const unscoped = flat.filter((sel) => !sel.startsWith("@media") && !splitSelectors(sel).every((p) => p.startsWith(SCOPE)));
+assert("S1 every rule of the lite part is scoped to Light graphics or the white display (:is(html[data-sb-fx=\"lite\"], html[data-sb-display=\"white\"])) — nothing applies in the black or transparent look with Full graphics", unscoped.length === 0, unscoped.slice(0, 3));
 assert("S2 the lite part has real content (more than 10 rules)", flat.length > 10, flat.length);
 const before = css.slice(0, liteStart);
 const outside = [...before.matchAll(/([^{}]+)\{/g)].map((m) => m[1]!.trim()).filter((s) => s && !/^\.sb-fx-/.test(s.replace(/^html\[data-sb-display="white"\]\s*/, "")));
