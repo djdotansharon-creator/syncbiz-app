@@ -19,6 +19,8 @@ import "./remote-bar.css";
 const SKIP_KEY = "vono_branch_pick_skipped";
 /** the song list of the player: its rows (jump to a song), the thin rows of the side strip (".sb-queue-rowline", owner 2026-11-01: a press on one made it flicker "pressed" and sent a jump) and the Play Next pad */
 const LIST_AREA = ".queue-row, .play-next-pad, .sb-queue-rowline";
+/** the same area plus the list's own box (the space between / under the rows): where the red X follows a held button */
+const LIST_AREA_WITH_LIST = ".queue-row, .play-next-pad, .sb-queue-rowline, .sb-queue-list";
 
 export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement | null {
   const tr = useTr();
@@ -46,9 +48,30 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
     };
     const kinds = ["click", "dblclick", "keydown", "dragstart", "drop"] as const;
     for (const k of kinds) document.addEventListener(k, shut, true);
+    // owner 2026-11-01: the WHOLE list area is "not for pressing" — once the button goes down inside it, the small red X stays on every row (and the gaps) until the button is released, even when the pointer slides to another song
+    const html = document.documentElement;
+    const pressOn = (e: Event) => {
+      const t = e.target as Element | null;
+      if (t && typeof t.closest === "function" && t.closest(LIST_AREA_WITH_LIST)) html.setAttribute("data-sb-listpress", "1");
+    };
+    const pressOff = () => html.removeAttribute("data-sb-listpress");
+    const moved = (e: Event) => { if (html.hasAttribute("data-sb-listpress") && (e as PointerEvent).buttons === 0) pressOff(); }; // a release outside the window never reached us
+    document.addEventListener("pointerdown", pressOn, true);
+    document.addEventListener("pointerup", pressOff, true);
+    document.addEventListener("pointercancel", pressOff, true);
+    document.addEventListener("dragend", pressOff, true);
+    document.addEventListener("pointermove", moved, true);
+    window.addEventListener("blur", pressOff);
     return () => {
-      document.documentElement.removeAttribute("data-sb-listlocked");
+      html.removeAttribute("data-sb-listlocked");
+      pressOff();
       for (const k of kinds) document.removeEventListener(k, shut, true);
+      document.removeEventListener("pointerdown", pressOn, true);
+      document.removeEventListener("pointerup", pressOff, true);
+      document.removeEventListener("pointercancel", pressOff, true);
+      document.removeEventListener("dragend", pressOff, true);
+      document.removeEventListener("pointermove", moved, true);
+      window.removeEventListener("blur", pressOff);
     };
   }, [show]);
 
