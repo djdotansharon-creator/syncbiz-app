@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { resolveMintDecision } from "@/lib/device-enrollment-store";
-import { restrictBranches } from "@/lib/device-enrollment";
+import { narrowBranchClaim } from "@/lib/enrollment-branch-claim";
 import { shadowTokenCapabilities } from "@/lib/authz";
 import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
 import { createWsToken, type WsTokenClaims } from "@/lib/auth-ws-token";
 import { getAuthorizedBranchIds } from "@/lib/user-store";
 import { getDesignatedMastersForBranches } from "@/lib/branch-master-designation";
-import { observeBranchResolutionShadow } from "@/lib/branch-resolver";
+import { getCanonicalLegacyBranchId, observeBranchResolutionShadow } from "@/lib/branch-resolver";
 
 /** Returns short-lived token for WS REGISTER. Requires authenticated session. Uses stable userId. */
 export async function GET(req: Request) {
@@ -31,7 +31,8 @@ export async function GET(req: Request) {
     if (enrollment.kind === "approved") {
       claims.enrollmentRole = enrollment.role;
       if (enrollment.owner) claims.enrollmentOwner = true; // the owner's own computer: never auto-elected / auto-promoted (server/index.ts)
-      claims.authorizedBranches = restrictBranches(authorizedBranches, enrollment.branchIds);
+      // owner 2026-11-01: keep the legacy "default" alias when its own branch is the approved one (every browser still registers "default" — without it an approved Remote was refused 4004 on every attempt)
+      claims.authorizedBranches = narrowBranchClaim(authorizedBranches, enrollment.branchIds, await getCanonicalLegacyBranchId(user.tenantId));
     }
     const token = createWsToken(user.id, claims);
     // Control Room Phase 1 / Gate 1: SHADOW observation only (claims above are unchanged).
