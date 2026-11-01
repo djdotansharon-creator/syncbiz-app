@@ -3,8 +3,8 @@
 /**
  * The device's own side of enrollment (docs/DEVICE_ENROLLMENT_DESIGN.md §5.1–5.2): ask the server "what am I?" for this browser profile's enrollment id, and request a role.
  * `state === null` while the answer is not known yet (the hold screen shows a calm "connecting" until it is). The server answers `enforced:false` unless enrollment is on for the workspace.
- * The desktop app's own screen never asks (stations use the activation code, and the layout does not hold it). Polling is calm: 20 s while a request is pending (then 60 s), a 5-minute
- * re-check while approved (so a revoke shows up), a 4-second retry while the very first answer has not arrived, nothing otherwise.
+ * The desktop app's own screen never asks (stations use the activation code, and the layout does not hold it). Polling is calm: 20 s while a request is pending (then 60 s), a 20-second
+ * re-check while approved (so a revoke shows up within seconds — it was 5 minutes until 2026-11-01), plus an immediate check when the tab is focused / visible or the network returns, a 4-second retry while the very first answer has not arrived, nothing otherwise.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -50,6 +50,8 @@ export type EnrollmentGateApi = {
  *  a revoke still takes the app away as soon as the answer arrives). Storage failures are ignored. */
 export const OK_KEY = "vono_enr_ok";
 const OK_MS = 10 * 60_000;
+/** how often an APPROVED device asks the server "am I still approved?" (a revoke takes the app away within this time; the desktop app never asks) */
+export const APPROVED_RECHECK_MS = 20_000;
 function readOk(id: string): EnrollmentClientStatus | null {
   try {
     const j = JSON.parse(window.localStorage.getItem(OK_KEY) ?? "null") as { id?: string; at?: number; status?: EnrollmentClientStatus } | null;
@@ -116,8 +118,15 @@ export function useEnrollmentGate(): EnrollmentGateApi {
     if (cached) setState((cur) => cur ?? cached);
     void check();
     const onFocus = () => void check();
+    const onVisible = () => { if (document.visibilityState === "visible") void check(); };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    window.addEventListener("online", onFocus); // network back: ask at once (a revoke may have happened meanwhile)
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [check]);
 
   // the very first answer has not arrived (server busy / offline for a moment): ask again every 4 seconds
@@ -133,7 +142,8 @@ export function useEnrollmentGate(): EnrollmentGateApi {
       polls.current = 0;
       return;
     }
-    const delay = status === "approved" ? 300_000 : polls.current < 10 ? 20_000 : 60_000;
+    // owner 2026-11-01: a device a manager just revoked kept working until its next refresh — the 5-minute re-check was too slow; an approved device now asks every 20 s
+    const delay = status === "approved" ? APPROVED_RECHECK_MS : polls.current < 10 ? 20_000 : 60_000;
     const t = window.setTimeout(() => {
       polls.current += 1;
       void check();
