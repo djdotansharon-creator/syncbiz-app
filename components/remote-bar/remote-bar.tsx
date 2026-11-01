@@ -33,7 +33,7 @@ export function RemoteBar({ canManage }: { canManage: boolean }): ReactElement |
   const show = !!ctx && ctx.isActive && ctx.isBranchConnected && !isPlayer && !isDesktopApp;
 
   // owner 2026-10-31: a REMOTE only SCROLLS the song list — it may not press a song, reorder or remove (a press used to mark a song and the mark could not be undone). While this screen is a Remote the list area is
-  // shut: the pointer over it is a red X (remote-bar.css) and a click / double-click / Enter / drag there does nothing at all — nothing is sent, nothing is marked. Plain event capture; the playback code is not touched.
+  // shut: the pointer turns into a small red X (remote-bar.css) while the button is held down on it, and a click / double-click / Enter / drag there does nothing at all — nothing is sent, nothing is marked. Plain event capture; the playback code is not touched.
   useEffect(() => {
     if (!show) return;
     document.documentElement.setAttribute("data-sb-listlocked", "1");
