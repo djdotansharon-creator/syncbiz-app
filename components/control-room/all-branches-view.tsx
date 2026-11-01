@@ -63,6 +63,8 @@ type DbBranch = {
 type Row = {
   id: string;
   name: string;
+  /** the branch's STORED name (the display name above says "You" for the owner's own default branch) — what the server compares a delete confirmation with */
+  dbName: string;
   /** customer branch number (locationCode) — secondary but clear */
   branchNumber: string | null;
   city: string;
@@ -116,7 +118,7 @@ export function AllBranchesView() {
   const [backToRequests, setBackToRequests] = useState(false);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string; dbName: string } | null>(null);
   const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setRequestsOpen(false); setBackToRequests(false); };
   const openRequests = () => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsOpen(false); setBrandsNew(false); setBackToRequests(false); setRequestsOpen(true); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
@@ -196,6 +198,7 @@ export function AllBranchesView() {
         id: b.id,
         // the owner's OWN player (the legacy "default" branch) reads "You" (owner 2026-10-20)
         name: b.id === "default" ? L.t("cr.you") : b.name || b.code || "Branch",
+        dbName: b.name || b.code || "Branch",
         branchNumber: typeof b.locationCode === "string" && b.locationCode.trim() ? b.locationCode.trim() : null,
         city: b.city ?? "",
         country: b.country ?? "",
@@ -219,6 +222,7 @@ export function AllBranchesView() {
       out.push({
         id: live.canonicalBranchId || live.branchId,
         name: live.branchName ?? "Connected station",
+        dbName: live.branchName ?? "Connected station",
         branchNumber: null,
         city: "",
         country: "",
@@ -455,7 +459,7 @@ export function AllBranchesView() {
                     branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation, logoUrl: open.logoUrl || (open.brandId ? brandById.get(open.brandId)?.logoUrl : null) || null, brandName: open.brandId ? brandById.get(open.brandId)?.name ?? null : null, brandColor: open.brandId ? brandById.get(open.brandId)?.color ?? DEFAULT_BRAND_COLOR : null }}
                     onBack={() => { setOpenId(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
                     onEdit={() => setForm({ mode: "edit", id: open.id })}
-                    onDelete={() => setDeleting({ id: open.id, name: open.name })}
+                    onDelete={() => setDeleting({ id: open.id, name: open.name, dbName: open.dbName })}
                     sendCommandTo={sendCommandTo}
                   >
                   {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
@@ -566,7 +570,8 @@ export function AllBranchesView() {
               const res = await fetch(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`, {
                 method: "DELETE",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ confirmName: typed }), // the server compares it with the branch's name
+                // the owner types the name he SEES ("You" for his own default branch); the server compares with the STORED name — so the shown name is swapped for the stored one (the guard stays: he must still type what the screen shows)
+                body: JSON.stringify({ confirmName: typed.trim() === deleting.name.trim() ? deleting.dbName : typed }),
               });
               if (!res.ok) return deleteRefusalText(L, (await res.json().catch(() => ({}))) as DeleteRefusal);
             } catch {
