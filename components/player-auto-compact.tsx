@@ -11,6 +11,7 @@
  * Keyboard / scrollbar / touch scrolling of the song list or the search results are covered by the scroll listener (shrink only while moving down).
  * Nothing happens while a dialog is open, and a wheel over the player's queue panel (open or folded) is ignored (owner 2026-10-22).
  *
+ * While it glides, `data-sb-pc-moving` switches the live glass (backdrop blur) off for the glide only — every frame re-laid-out the deck and re-blurred everything behind it (jerky, owner 2026-11-02).
  * The morph is choreographed: `data-sb-player="compact"` = geometry, flips at once and glides; `data-sb-pc-swap` = the title block + the timeline (the
  * only things that change place) fade out while `data-sb-pc-row` (their slim-bar placement) is switched; then they fade back in.
  * Renders null.
@@ -93,7 +94,7 @@ export function PlayerAutoCompact(): null {
   useScrollingFlag(management);
   useEffect(() => {
     const root = document.documentElement;
-    const ATTRS = ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row"];
+    const ATTRS = ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving"];
     const clearAll = () => ATTRS.forEach((a) => root.removeAttribute(a));
     clearAll(); // a new page always starts with the full player
     if (!ENABLED || management) return;
@@ -113,6 +114,7 @@ export function PlayerAutoCompact(): null {
       lockUntil = performance.now() + LOCK_MS;
       timers.forEach(clearTimeout);
       timers = [];
+      root.setAttribute("data-sb-pc-moving", "1"); // the live glass is off while the bar glides (CSS: smooth glide, owner 2026-11-02) …
       root.setAttribute("data-sb-pc-swap", "1"); // the title block + timeline fade out …
       if (on) root.setAttribute("data-sb-player", "compact"); // … while the geometry starts gliding at once
       else root.removeAttribute("data-sb-player");
@@ -122,6 +124,7 @@ export function PlayerAutoCompact(): null {
         else root.removeAttribute("data-sb-pc-row");
       }, SWAP_OUT_MS);
       later(() => root.removeAttribute("data-sb-pc-swap"), on ? SWAP_IN_SHRINK_MS : SWAP_IN_GROW_MS);
+      later(() => root.removeAttribute("data-sb-pc-moving"), LOCK_MS); // … and comes back when the glide has finished
       later(() => {
         const el = pendingEl;
         pendingEl = null;

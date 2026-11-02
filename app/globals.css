@@ -8036,3 +8036,17 @@ html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-wi
   html[data-sb-boot-rail-left="collapsed"] .sb-rail-toggle--left svg { transform: rotate(180deg); }
   html[data-sb-boot-rail-right="collapsed"] .sb-rail-toggle--right svg { transform: rotate(180deg); }
 }
+
+/* ── the queue card does NOT tuck under the player in the transparent (song) look (owner 2026-11-02: "make it so this part of the song list under the player is not seen" — a lighter band with rounded ends,
+   the card's tucked part, showed through the player's glass). In this look the card sits BESIDE the player: no negative margin, no extra padding, a rounded card of its own, and the player's shadow
+   carrier is a plain rounded rectangle (it was cut flat on the card's side because the card used to take over there). The 8px between them is the cell's own inset. The black and white looks keep the tuck
+   (their player surface is solid, nothing shows through). ── */
+html[data-sb-display="song"] .library-deck-unified .library-deck-slot-aside { margin-inline-end: 0 !important; padding-inline-end: 0 !important; clip-path: none !important; border-radius: 16px !important; }
+html[data-sb-display="song"] .library-deck-unified .library-deck-player-cell::before { border-radius: 16px !important; clip-path: inset(-48px -48px -48px -48px) !important; }
+
+/* ── the slim-player glide (owner 2026-11-02: "when I scroll down and the player collapses it is jerky"). Measured (Full graphics, CPU ×4): 20 of 96 frames took > 24 ms, 14.8 ms on average, because every frame of the
+   700 ms glide re-laid-out the deck AND re-blurred all the live glass behind it. While it glides (`data-sb-pc-moving`, set by components/player-auto-compact.tsx for the glide only) the live blur is off — the same
+   trick the rails use — and comes back when it ends: 4 of 137 frames > 24 ms, 10.0 ms on average. ── */
+@media (min-width: 1024px) {
+  html[data-sb-pc-moving] *, html[data-sb-pc-moving] *::before, html[data-sb-pc-moving] *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+}
