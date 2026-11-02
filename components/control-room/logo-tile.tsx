@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { LOGO_AS_IS, useLogoFit } from "@/components/control-room/logo-fit";
+import { readableOn } from "@/lib/readable-color";
 
 /**
  * Control Room — the square logo tile of a branch / brand (the same drawing the list rows use): the logo trimmed and fitted on the colour it carries, or the brand colour + its initial.
@@ -13,8 +14,8 @@ export function LogoTile({ src, color, initial }: { src: string | null | undefin
   const asis = LOGO_AS_IS && !!logoSrc && fit !== null;
   return (
     <span
-      className={`cr-row-logo ${logoSrc ? "has-logo" : ""}${asis ? " is-asis" : fit ? " has-fit" : ""}${!asis && fit?.bleed ? " is-bleed" : ""}${logoSrc && fit === undefined ? " is-loading" : ""}`}
-      style={{ ["--cr-brand" as string]: color, ...(!asis && fit ? { background: fit.bg } : {}) } as CSSProperties}
+      className={`cr-row-logo ${logoSrc ? "has-logo" : "is-letter"}${asis ? " is-asis" : fit ? " has-fit" : ""}${!asis && fit?.bleed ? " is-bleed" : ""}${logoSrc && fit === undefined ? " is-loading" : ""}`}
+      style={{ ["--cr-brand" as string]: color, ["--cr-letter-on-white" as string]: readableOn(color, "#ffffff"), ["--cr-letter-on-black" as string]: readableOn(color, "#111111"), ...(!asis && fit ? { background: fit.bg } : {}) } as CSSProperties}
       aria-hidden
     >
       {logoSrc ? (
