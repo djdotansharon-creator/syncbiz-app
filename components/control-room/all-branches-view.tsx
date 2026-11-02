@@ -29,6 +29,7 @@ import { LOGO_AS_IS, useLogoFit } from "@/components/control-room/logo-fit";
 import { BrandStrip, type StripItem } from "@/components/control-room/brand-strip";
 import type { Mgmt } from "@/lib/i18n/management";
 import { isNewer } from "@/lib/desktop-version";
+import { readableOn } from "@/lib/readable-color";
 import { useTr } from "@/lib/i18n/use-tr";
 
 type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
@@ -663,7 +664,7 @@ function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine }: 
   return (
     <li data-branch-id={row.id} onClick={onSelect} dir={L.dir} className={`cr-row ${selected ? "is-selected" : ""}`}>
       {/* the logo: the brand's logo (Brands → logo) or its colour + initial — the branch's name beside it is never cut */}
-      <span className={`cr-row-logo ${logoSrc ? "has-logo" : ""}${asis ? " is-asis" : fit ? " has-fit" : ""}${!asis && fit?.bleed ? " is-bleed" : ""}${logoSrc && fit === undefined ? " is-loading" : ""}${asis && fit?.dark ? " is-dark" : ""}`} style={{ ["--cr-brand" as string]: color, ...(!asis && fit ? { background: fit.bg } : {}) } as CSSProperties} aria-hidden>
+      <span className={`cr-row-logo ${logoSrc ? "has-logo" : "is-letter"}${asis ? " is-asis" : fit ? " has-fit" : ""}${!asis && fit?.bleed ? " is-bleed" : ""}${logoSrc && fit === undefined ? " is-loading" : ""}${asis && fit?.dark ? " is-dark" : ""}`} style={{ ["--cr-brand" as string]: color, ["--cr-letter-on-white" as string]: readableOn(color, "#ffffff"), ["--cr-letter-on-black" as string]: readableOn(color, "#111111"), ...(!asis && fit ? { background: fit.bg } : {}) } as CSSProperties} aria-hidden>
         {logoSrc ? (
           fit === undefined ? null : (
             // eslint-disable-next-line @next/next/no-img-element

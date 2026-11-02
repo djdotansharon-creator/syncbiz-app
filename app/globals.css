@@ -7046,7 +7046,7 @@ html[data-sb-display="white"] .player-transport-secondary button[class][class][c
 .cr-row-main { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .cr-row-name { font-size: 15px; font-weight: 600; line-height: 1.25; color: var(--sb-text); text-align: start; unicode-bidi: plaintext; overflow-wrap: anywhere; }
 .cr-row-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; font-size: 12.5px; line-height: 1.3; color: var(--sb-text-secondary); }
-.cr-row-update { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 999px; background: #fbbf24; color: #1c1400; font-size: 11px; font-weight: 700; line-height: 1; }
+.cr-row-update { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 999px; background: #fbbf24; color: #1c1400; font-size: 11px; font-weight: 700; line-height: 1; }
 .cr-row-brand { display: inline-flex; align-items: center; gap: 6px; }
 .cr-row-brand i { width: 8px; height: 8px; border-radius: 50%; }
 .cr-row-now { display: flex; min-width: 0; align-items: center; gap: 7px; font-size: 12.5px; color: var(--sb-text-tertiary); }
@@ -8053,3 +8053,20 @@ html[data-sb-display="song"] .library-deck-unified .library-deck-player-cell::be
 @media (min-width: 1024px) {
   html[data-sb-pc-moving] *, html[data-sb-pc-moving] *::before, html[data-sb-pc-moving] *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 }
+
+/* ── Branch letter squares (owner 2026-11-02): a WHITE square on a dark surface (black look, transparent look, the control room) and a BLACK
+   square on a light surface (the white look); no frame; the letter keeps its brand colour (lib/readable-color.ts only nudges one that would not read).
+   Calm colours: a neutral letter instead. Logos are untouched (only tiles without a logo carry `is-letter`). ── */
+.cr-row-logo.is-letter { background: #ffffff !important; box-shadow: none; border: 0; }
+.cr-row-logo.is-letter .cr-row-initial { color: var(--cr-letter-on-white, var(--cr-brand, #3a3a3c)) !important; }
+.cr-stage[data-cr-colors="calm"] .cr-row-logo.is-letter .cr-row-initial { color: rgba(0, 0, 0, 0.72) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) .cr-row-logo.is-letter { background: #111111 !important; }
+html[data-sb-display="white"]:not([data-sb-control]) .cr-row-logo.is-letter .cr-row-initial { color: var(--cr-letter-on-black, var(--cr-brand, #f2f2f7)) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="calm"] .cr-row-logo.is-letter .cr-row-initial { color: rgba(255, 255, 255, 0.78) !important; }
+
+/* ── The "Update" ellipses: the word sat a little low (Hebrew letters have no ascenders, so the line box centre is not the ink centre) —
+   measured at 4x: English +1.0 px / Hebrew +2.0 px in the header, +0.5 / +1.5 in the control-room row. A bottom padding lifts the word (the row pill is 19 px tall: an odd height lands the text on whole pixels, 0 px off in both languages). ── */
+.sb-update-pill { padding-bottom: 2px; }
+html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
+.cr-row-update { padding-bottom: 2px; }
+[dir="rtl"] .cr-row-update { padding-bottom: 4px; }
