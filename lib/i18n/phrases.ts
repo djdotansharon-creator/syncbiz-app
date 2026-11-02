@@ -737,6 +737,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Business": "העסק",
   "Default branch": "סניף ברירת מחדל",
   "Choose a branch to control": "בחר סניף לשליטה",
+  "item": "פריט",
   "Connecting…": "מתחבר…",
   "Can't reach the branch": "לא מצליח להגיע לסניף",
   "Nothing plays on this computer until it is connected.": "שום דבר לא מתנגן במחשב הזה עד שהוא מחובר.",

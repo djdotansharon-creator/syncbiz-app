@@ -4317,7 +4317,7 @@ function SourcesManagerInner({
                       </span>
                       <span draggable={false} className="min-w-0 flex-1">
                         <span className="sb-pl-name block truncate text-[13px] font-semibold text-[#f5f5f7]">{p.label}</span>
-                        <span className="sb-pl-count block text-[11px] text-[#a1a1a6]">{p.itemCount} item</span>
+                        <span className="sb-pl-count block text-[11px] text-[#a1a1a6]">{p.itemCount} {tr(p.itemCount === 1 ? "item" : "items")}</span>
                       </span>
                     </button>
                     <button

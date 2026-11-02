@@ -37,9 +37,10 @@ function setLocaleCookie(locale: Locale) {
   document.cookie = `${LOCALE_COOKIE_NAME}=${locale};path=/;max-age=31536000;SameSite=Lax`;
 }
 
-export function LocaleProvider({ children }: { children: ReactNode }) {
+/** `initialLocale` = what the SERVER already rendered the page in (the locale cookie): the first paint is then in the saved language and nothing flips from English once the page wakes up (owner 2026-11-01: "check Hebrew"). Default "en" = the old behaviour for every other use. */
+export function LocaleProvider({ children, initialLocale = "en" }: { children: ReactNode; initialLocale?: Locale }) {
   const router = useRouter();
-  const [locale, setLocaleState] = useState<Locale>("en");
+  const [locale, setLocaleState] = useState<Locale>(initialLocale);
 
   useEffect(() => {
     const stored = readStoredLocale();
