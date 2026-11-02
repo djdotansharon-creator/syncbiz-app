@@ -48,6 +48,7 @@ const api: SyncBizDesktopMvp = {
   getConfig: () => ipcRenderer.invoke(MVP_IPC.GET_CONFIG),
   getStatus: () => ipcRenderer.invoke(MVP_IPC.GET_STATUS),
   getAppVersion: (): Promise<string> => ipcRenderer.invoke(MVP_IPC.GET_APP_VERSION),
+  startUpdate: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke(MVP_IPC.START_UPDATE),
   saveConfig: (patch) => ipcRenderer.invoke(MVP_IPC.SAVE_CONFIG, patch),
   connectCloud: () => ipcRenderer.invoke(MVP_IPC.WS_CONNECT),
   disconnectCloud: () => ipcRenderer.invoke(MVP_IPC.WS_DISCONNECT),

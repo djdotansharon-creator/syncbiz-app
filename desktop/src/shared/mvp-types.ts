@@ -44,6 +44,8 @@ export const MVP_IPC = {
   WHATSAPP_STATUS: "mvp:whatsapp-status",
   /** Running desktop app version (`app.getVersion()`) for the update-available check. */
   GET_APP_VERSION: "mvp:get-app-version",
+  /** The player's "Update" pill: download + verify (SHA-256) + silently install the newest published installer (Windows, packaged app). */
+  START_UPDATE: "mvp:start-update",
   /** Main process: list audio files in a directory (Desktop only). */
   SCAN_LOCAL_AUDIO_FOLDER: "mvp:scan-local-audio-folder",
   /** Read OS login-item state via app.getLoginItemSettings. LEGACY — not the VONO Protection control. */

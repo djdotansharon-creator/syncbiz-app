@@ -45,7 +45,7 @@ function desktopTagSortKey(tag: string): number {
   return parseInt(m[1]!, 10) * 1_000_000 + parseInt(m[2]!, 10) * 1_000 + parseInt(m[3]!, 10);
 }
 
-type GHAsset = { name: string; browser_download_url: string; size: number };
+type GHAsset = { name: string; browser_download_url: string; size: number; digest?: string | null };
 type GHRelease = { tag_name: string; draft: boolean; prerelease: boolean; published_at: string | null; assets: GHAsset[] };
 
 export type WindowsInstaller = {
@@ -53,9 +53,18 @@ export type WindowsInstaller = {
   fileName: string;
   version: string;
   sizeBytes: number;
+  /** SHA-256 (lower-case hex) GitHub publishes for the asset — the player's self-update refuses an installer that does not match it. null = not published. */
+  sha256: string | null;
   tag: string;
   publishedAt: string | null;
 };
+
+/** `sha256:<64 hex>` (GitHub's asset digest) → the lower-case hex, otherwise null. */
+export function sha256FromDigest(digest: unknown): string | null {
+  if (typeof digest !== "string") return null;
+  const m = digest.trim().match(/^sha256:([0-9a-f]{64})$/i);
+  return m ? m[1].toLowerCase() : null;
+}
 
 /** Latest published desktop release that actually has a `.exe` asset, or null. Network — server only. */
 export async function resolveLatestWindowsInstaller(): Promise<WindowsInstaller | null> {
@@ -87,6 +96,7 @@ export async function resolveLatestWindowsInstaller(): Promise<WindowsInstaller 
         fileName: asset.name,
         version: versionFromReleaseTag(r.tag_name),
         sizeBytes: asset.size,
+        sha256: sha256FromDigest(asset.digest),
         tag: r.tag_name,
         publishedAt: r.published_at,
       };
