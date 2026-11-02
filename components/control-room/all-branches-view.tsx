@@ -682,7 +682,7 @@ function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine }: 
           {row.branchNumber ? <span className="tabular-nums" dir="ltr">#{row.branchNumber}</span> : null}
           {row.regionReason === "no_location" ? <span className="text-amber-300/80">{L.t("cr.noLocation")}</span> : null}
           {row.stationVersion ? <span className="tabular-nums" dir="ltr" title={engineOld && latestEngine ? L.t("cr.updateTip").replace("{v}", row.stationVersion).replace("{w}", latestEngine) : undefined}>v{row.stationVersion}</span> : null}
-          {engineOld ? <span className="cr-row-update">{L.t("cr.update")}</span> : null}
+          {engineOld ? <span className="cr-row-update"><span className="sb-pill-t">{L.t("cr.update")}</span></span> : null}
         </span>
         <span className={`cr-row-status ${STATUS_TEXT_CLASS[status]}`}>
           <StatusLed status={status} size={11} />

@@ -113,7 +113,7 @@ export function DesktopUpdatePill() {
       aria-label={title}
       data-sb-update={target.required ? "required" : "available"}
     >
-      {text}
+      <span className="sb-pill-t">{text}</span>
     </a>
   );
 }
