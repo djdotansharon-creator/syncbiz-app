@@ -5,6 +5,9 @@
    applies, so the full design (app/globals.css) is exactly what it was. Remove this file + its import in app/layout.tsx and
    the product is back to a single look.
 
+   WHITE display mode (owner 2026-11-02: "the white look should carry less load than the glass, like the black") is drawn with these same flat rules whatever the Graphics switch says:
+   every selector below reads  :is(html[data-sb-fx="lite"], html[data-sb-display="white"])  — same weight as before, so nothing else changes.
+
    Same layout, colours, words and motion of the screens; what changes is what a SIMPLE graphics chip has to draw:
      · live backdrop blur (104 rules) .................. none — panels / menus / dialogs get a solid fill instead
      · blurred copies of every card picture (foot blur) . a plain dark gradient behind the title
@@ -28,44 +31,44 @@
 /* ═══════════════════════════════════════════════ LITE ═══════════════════════════════════════════════ */
 
 /* 1 · no live blur anywhere, no pinned GPU layers */
-html[data-sb-fx="lite"] *,
-html[data-sb-fx="lite"] *::before,
-html[data-sb-fx="lite"] *::after {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) *,
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) *::before,
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) *::after {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   will-change: auto !important;
 }
 
 /* 2 · panels, menus, dialogs: a solid fill (the glass was what made them readable over moving colour) */
-html[data-sb-fx="lite"] :is(.main-menu-popover, .sb-card-menu, .sb-shelf-menu, .sb-wz-panel, .sb-dj-save-card, .sb-toast, .sb-display-switch-menu, .sb-timeline-tip, .cr-colors, .cr-region-menu, .cr-density-menu, .cr-pop-menu, .cr-map-panel) {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) :is(.main-menu-popover, .sb-card-menu, .sb-shelf-menu, .sb-wz-panel, .sb-dj-save-card, .sb-toast, .sb-display-switch-menu, .sb-timeline-tip, .cr-colors, .cr-region-menu, .cr-density-menu, .cr-pop-menu, .cr-map-panel) {
   background: rgba(28, 28, 32, 0.97) !important;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.38) !important;
 }
 /* the dim behind a dialog: a flat veil instead of a blurred page */
-html[data-sb-fx="lite"] :is(.sb-wz-backdrop, .sb-dj-save) { background: rgba(8, 8, 12, 0.66) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) :is(.sb-wz-backdrop, .sb-dj-save) { background: rgba(8, 8, 12, 0.66) !important; }
 
 /* 3 · the cards of the library: the picture blurred a second time under the title → a plain dark gradient behind the title */
-html[data-sb-fx="lite"] .library-source-card-grid .library-source-card .sb-tile-blur { display: none !important; }
-html[data-sb-fx="lite"] .library-source-card-grid .library-source-card .sb-lbc-body {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-source-card-grid .library-source-card .sb-tile-blur { display: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-source-card-grid .library-source-card .sb-lbc-body {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.66) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0) 100%);
 }
-html[data-sb-fx="lite"][data-sb-display="white"] .library-source-card-grid .library-source-card .sb-lbc-body {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"] .library-source-card-grid .library-source-card .sb-lbc-body {
   background: linear-gradient(to top, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0) 100%);
 }
 /* a card answers the pointer with a small lift only — no 820 ms animated shadow */
-html[data-sb-fx="lite"] .library-source-card-grid .library-source-card { transition: transform 240ms ease !important; box-shadow: none !important; }
-html[data-sb-fx="lite"] .library-source-card-grid .library-source-card:hover { box-shadow: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-source-card-grid .library-source-card { transition: transform 240ms ease !important; box-shadow: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-source-card-grid .library-source-card:hover { box-shadow: none !important; }
 /* the little play glyph on a card: no drop-shadow filter (27 of them on the screen) */
-html[data-sb-fx="lite"] :is(.sb-card-art-play, .sb-card-art-play svg, .sb-shelf-play, .sb-jq-play, .jcl-play svg, .bcf-sw svg, .sb-alb-play, .sb-drop-plus) { filter: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) :is(.sb-card-art-play, .sb-card-art-play svg, .sb-shelf-play, .sb-jq-play, .jcl-play svg, .bcf-sw svg, .sb-alb-play, .sb-drop-plus) { filter: none !important; }
 
 /* 4 · the deck: no coloured blurred wash and no SECOND (muted, blurred) copy of the video. The real video on the side STAYS — in every display mode —
        exactly as in the full look (owner 2026-10-25: "make the video work no matter what"). */
-html[data-sb-fx="lite"] .sb-deck-glass::before { display: none !important; }
-html[data-sb-fx="lite"] .sb-deck-video-mirror { display: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-deck-glass::before { display: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-deck-video-mirror { display: none !important; }
 
 /* 5 · decoration that moves all the time and repaints: running border, glows, sparkles, sweeping title light */
 /* the playing card's RUNNING border (a rotating conic gradient re-painted every frame) → the same border, standing still */
-html[data-sb-fx="lite"] .library-playing-active::after {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-playing-active::after {
   animation: none !important;
   background: none !important;
   -webkit-mask: none !important;
@@ -73,37 +76,37 @@ html[data-sb-fx="lite"] .library-playing-active::after {
   padding: 0 !important;
   box-shadow: inset 0 0 0 2px rgba(245, 245, 247, 0.9) !important;
 }
-html[data-sb-fx="lite"] .sb-gst-hero::before,
-html[data-sb-fx="lite"] .sb-djl-spark,
-html[data-sb-fx="lite"] .sb-djl-title,
-html[data-sb-fx="lite"] .cr-dot-glow--live { animation: none !important; }
-html[data-sb-fx="lite"] .sb-gst-hero::before { display: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-gst-hero::before,
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-djl-spark,
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-djl-title,
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .cr-dot-glow--live { animation: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .sb-gst-hero::before { display: none !important; }
 
 /* 6 · big blurred filters left in single places */
-html[data-sb-fx="lite"] .library-list-shell--frameless.sb-drop-armed > *:not(.sb-drop-plus) { filter: none !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-list-shell--frameless.sb-drop-armed > *:not(.sb-drop-plus) { filter: none !important; }
 
 /* 7 · reduced-motion people get the lite motion too (nothing heavier than a short fade) */
 @media (prefers-reduced-motion: reduce) {
-  html[data-sb-fx="lite"] .library-source-card-grid .library-source-card { transition: none !important; }
+  :is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .library-source-card-grid .library-source-card { transition: none !important; }
 }
 
 /* 2b · the glass WINDOWS (Player / Remote details, the People windows, the live join card, the branch picker) — in Lite there is no blur to make the half-see-through fill readable, so they are PLAIN:
    dark in the black / transparent look, white with dark text in the white look (owner 2026-10-31: "plain white in lite, or black depending on the mode"). The control screens are always black, so they keep the dark one. */
-html[data-sb-fx="lite"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
   background: #1c1c20 !important;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.38) !important;
 }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
   background: #ffffff !important;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.18) !important;
 }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) * { color: #111111 !important; border-color: rgba(0, 0, 0, 0.09) !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(small, dt, .sb-devdet-x, .sb-pg-x, .sb-pg-left, .sb-pg-hint, .sb-jp-who small, .sb-jp-who span, .sb-jp-role, .sb-bp-main small, .sb-bp-note, .sb-bp-x, .sb-bp-skip, .sb-bp-search svg) { color: rgba(0, 0, 0, 0.56) !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn, .sb-jp-btn, .sb-jp-role select, .sb-pg-select, .sb-bp-row, .sb-bp-search, .sb-jp-avatar) { background: rgba(0, 0, 0, 0.06) !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-bp-row[aria-selected="true"], .sb-bp-row:hover, .sb-pg-btn:hover, .sb-jp-btn:hover) { background: rgba(0, 0, 0, 0.12) !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn--main, .sb-jp-btn--main) { background: #111111 !important; color: #ffffff !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(.sb-pg-btn--main, .sb-jp-btn--main) * { color: #ffffff !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="player"] .ic { color: #1f9d3f !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="remote"] .ic { color: #2f6fd0 !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-bp-row[data-live="1"] .sb-bp-dot { background: #1f9d3f !important; }
-html[data-sb-fx="lite"][data-sb-display="white"]:not([data-sb-control]) .sb-bp-search input::placeholder { color: rgba(0, 0, 0, 0.42) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) * { color: #111111 !important; border-color: rgba(0, 0, 0, 0.09) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(small, dt, .sb-devdet-x, .sb-pg-x, .sb-pg-left, .sb-pg-hint, .sb-jp-who small, .sb-jp-who span, .sb-jp-role, .sb-bp-main small, .sb-bp-note, .sb-bp-x, .sb-bp-skip, .sb-bp-search svg) { color: rgba(0, 0, 0, 0.56) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn, .sb-jp-btn, .sb-jp-role select, .sb-pg-select, .sb-bp-row, .sb-bp-search, .sb-jp-avatar) { background: rgba(0, 0, 0, 0.06) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-bp-row[aria-selected="true"], .sb-bp-row:hover, .sb-pg-btn:hover, .sb-jp-btn:hover) { background: rgba(0, 0, 0, 0.12) !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-pg-btn--main, .sb-jp-btn--main) { background: #111111 !important; color: #ffffff !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) :is(.sb-pg-btn--main, .sb-jp-btn--main) * { color: #ffffff !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="player"] .ic { color: #1f9d3f !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) .sb-devdet-hero[data-role="remote"] .ic { color: #2f6fd0 !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) .sb-bp-row[data-live="1"] .sb-bp-dot { background: #1f9d3f !important; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"])[data-sb-display="white"]:not([data-sb-control]) .sb-bp-search input::placeholder { color: rgba(0, 0, 0, 0.42) !important; }
