@@ -8024,8 +8024,9 @@ html :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
   backdrop-filter: none;
   box-shadow: 0 0 44px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
+/* owner 2026-11-02 ("the grey is not it — maybe black?"): in the transparent look the windows are a DARK frosted glass (near-black fill, same 48px blur) instead of the whitish one — still glass, but no grey wash */
 html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-win) {
-  background: rgba(255, 255, 255, 0.19);
+  background: rgba(20, 20, 24, 0.62);
   -webkit-backdrop-filter: blur(48px) saturate(1.2);
   backdrop-filter: blur(48px) saturate(1.2);
 }
