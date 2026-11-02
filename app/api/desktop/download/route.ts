@@ -141,9 +141,9 @@ function readWinInstallerFromEnv(): { url: string; fileName: string; version: st
     try {
       const uu = new URL(raw);
       const last = uu.pathname.split("/").filter(Boolean).pop();
-      fileName = last && /\.(exe|msi)$/i.test(last) ? last : "SyncBiz-Player-Setup-x64.exe";
+      fileName = last && /\.(exe|msi)$/i.test(last) ? last : "VONO-Player-Setup-x64.exe";
     } catch {
-      fileName = "SyncBiz-Player-Setup-x64.exe";
+      fileName = "VONO-Player-Setup-x64.exe";
     }
   }
   const version = (process.env.DESKTOP_WIN_INSTALLER_VERSION ?? "").trim() || "0.0.0";

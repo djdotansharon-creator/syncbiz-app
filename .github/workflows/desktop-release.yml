@@ -27,7 +27,7 @@ jobs:
         include:
           - os: windows-latest
             target: win
-            artifact: "SyncBiz-Player-Setup-*-x64.exe"
+            artifact: "VONO-Player-Setup-*-x64.exe"
           - os: macos-latest
             target: mac
             artifact: "SyncBiz-Player-*.dmg"

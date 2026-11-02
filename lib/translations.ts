@@ -209,7 +209,7 @@ const TRANSLATIONS = {
     enterControlRoom: "Full Screen",
     exitControlRoom: "Exit Full Screen",
     downloadDesktopApp: "Desktop",
-    downloadDesktopAppTitle: "Download SyncBiz Player",
+    downloadDesktopAppTitle: "Download VONO Player",
     downloadDesktopFromGitHub: "All installers on GitHub",
     /** Prominent CTA in the app header (browser only). */
     downloadDesktopCta: "Get the desktop player",
@@ -217,7 +217,7 @@ const TRANSLATIONS = {
     downloadDesktopCtaSubFallback: "Get the installer from GitHub",
     /** Interpolate {v} in the component. */
     downloadDesktopCtaSubWithVersion: "Version {v} · for desktop",
-    downloadDesktopModalTitle: "SyncBiz Player for desktop",
+    downloadDesktopModalTitle: "VONO Player for desktop",
     downloadDesktopModalBody:
       "The desktop player syncs with your library and is built for long sessions. Install on Windows, macOS, or Linux when a build is available.",
     downloadDesktopModalDownload: "Download installer",
@@ -227,7 +227,7 @@ const TRANSLATIONS = {
     downloadDesktopClose: "Close",
     downloadDesktopNotPublishedHeading: "Desktop installer is not published yet",
     downloadDesktopNotPublishedLead:
-      "This page targets SyncBiz Desktop version {expected}, but nothing is downloadable from GitHub/env/bundle for that version.",
+      "This page targets VONO Desktop version {expected}, but nothing is downloadable from GitHub/env/bundle for that version.",
     downloadDesktopMissingGithubReleaseExpected:
       "No GitHub Release matches that exact version yet (publish a tag like desktop-v{expected} or v{expected}, with installers attached).",
     downloadDesktopLatestPublishedLine: "Latest published desktop-release version seen on GitHub: {latest}.",
@@ -633,13 +633,13 @@ const TRANSLATIONS = {
     enterControlRoom: "מסך מלא",
     exitControlRoom: "צא ממסך מלא",
     downloadDesktopApp: "דסקטופ",
-    downloadDesktopAppTitle: "הורדת SyncBiz Player",
+    downloadDesktopAppTitle: "הורדת VONO Player",
     downloadDesktopFromGitHub: "כל קבצי ההתקנה ב-GitHub",
-    downloadDesktopCta: "הורד את נגן SyncBiz",
+    downloadDesktopCta: "הורד את נגן VONO",
     downloadDesktopCtaSub: "התקנה ב-Windows, Mac או Linux",
     downloadDesktopCtaSubFallback: "קבל את קובץ ההתקנה ב-GitHub",
     downloadDesktopCtaSubWithVersion: "גרסה {v} · לנגן שולחני",
-    downloadDesktopModalTitle: "נגן SyncBiz למחשב",
+    downloadDesktopModalTitle: "נגן VONO למחשב",
     downloadDesktopModalBody:
       "הנגן שולחני מסתנכרן עם הספרייה ובנוי לשימוש ממושך. אפשר להתקין ב-Windows, macOS או Linux כשיהיה build זמין.",
     downloadDesktopModalDownload: "הורדת קובץ התקנה",
@@ -649,7 +649,7 @@ const TRANSLATIONS = {
     downloadDesktopClose: "סגור",
     downloadDesktopNotPublishedHeading: "קובץ ההתקנה לדסקטופ עדיין לא פורסם",
     downloadDesktopNotPublishedLead:
-      "העמוד מציע את גרסת SyncBiz Desktop {expected}, אבל אין הורדה זמינה מ-GitHub / משתני סביבה / קובץ מקומי עבור הגרסה הזו.",
+      "העמוד מציע את גרסת VONO Desktop {expected}, אבל אין הורדה זמינה מ-GitHub / משתני סביבה / קובץ מקומי עבור הגרסה הזו.",
     downloadDesktopMissingGithubReleaseExpected:
       "אין ב-GitHub Release שתואם בדיוק לגרסה הזו (יש לפרסם תג כמו desktop-v{expected} או v{expected} עם קבצי התקנה מצורפים).",
     downloadDesktopLatestPublishedLine: "הגרסה האחרונה שזוהתה ב-GitHub לשחרורי דסקטופ: {latest}.",
