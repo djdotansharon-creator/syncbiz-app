@@ -28,6 +28,7 @@ import { DensityMenu } from "@/components/control-room/density-menu";
 import { LOGO_AS_IS, useLogoFit } from "@/components/control-room/logo-fit";
 import { BrandStrip, type StripItem } from "@/components/control-room/brand-strip";
 import type { Mgmt } from "@/lib/i18n/management";
+import { isNewer } from "@/lib/desktop-version";
 import { useTr } from "@/lib/i18n/use-tr";
 
 type BrandsData = { brands: BrandRow[]; defaultBrandId: string; branchBrand: Record<string, string> };
@@ -50,6 +51,8 @@ type DbBranch = {
   status?: string;
   locationCode?: string | null;
   hasStation?: boolean;
+  /** the engine version the branch's station last reported (null: unknown / no station) */
+  stationVersion?: string | null;
   formattedAddress?: string | null;
   googlePlaceId?: string | null;
   street?: string;
@@ -76,6 +79,8 @@ type Row = {
   latitude: number | null;
   longitude: number | null;
   hasStation: boolean;
+  /** the engine version its station last reported (null: unknown / no station) */
+  stationVersion: string | null;
   /** the branch's own logo — preferred over the brand's logo in the list */
   logoUrl: string | null;
   online: boolean;
@@ -108,6 +113,16 @@ export function AllBranchesView() {
   const { branches: liveBranches, remoteStateByDeviceId, status, refreshBranchList, sendCommandTo, sendCommandWithAck } = useRemoteOwner();
   const [dbBranches, setDbBranches] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  /** the newest player engine published on the site (owner 2026-11-02: each station shows its version + "Update" when it is older) */
+  const [latestEngine, setLatestEngine] = useState<string | null>(null);
+  useEffect(() => {
+    let off = false;
+    void fetch("/api/desktop/download", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { version?: string; expectedVersion?: string }) => { if (!off) setLatestEngine((d.version ?? d.expectedVersion ?? "").trim() || null); })
+      .catch(() => undefined);
+    return () => { off = true; };
+  }, []);
   /** bump to reload the branch list (after add / edit) */
   const [reloadKey, setReloadKey] = useState(0);
   /** owner: add / edit branch form in the right column */
@@ -209,6 +224,7 @@ export function AllBranchesView() {
         latitude: typeof b.latitude === "number" ? b.latitude : null,
         longitude: typeof b.longitude === "number" ? b.longitude : null,
         hasStation: b.hasStation !== false,
+        stationVersion: typeof b.stationVersion === "string" && b.stationVersion.trim() ? b.stationVersion.trim() : null,
         logoUrl: typeof b.logoUrl === "string" ? b.logoUrl : null,
         online: !!live,
         live,
@@ -233,6 +249,7 @@ export function AllBranchesView() {
         latitude: null,
         longitude: null,
         hasStation: true,
+        stationVersion: null,
         logoUrl: null,
         online: true,
         live,
@@ -494,6 +511,7 @@ export function AllBranchesView() {
                     brand={r.brandId ? brandById.get(r.brandId) ?? null : null}
                     status={rowStatus(r, liveKnown)}
                     L={L}
+                    latestEngine={latestEngine}
                     selected={r.id === selectedId}
                     onSelect={() => openBranch(r.id)}
                   />
@@ -629,7 +647,9 @@ const STATUS_TEXT_CLASS: Record<RowStatus, string> = {
   unknown: "text-[var(--sb-text-tertiary)]",
 };
 
-function BranchRow({ L, row, brand, status, selected, onSelect }: { L: Mgmt; row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void }) {
+function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine }: { L: Mgmt; row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void; latestEngine: string | null }) {
+  // the station's engine version; amber "Update" when a newer one is published (a flat ellipse, like the player's own pill)
+  const engineOld = !!row.stationVersion && !!latestEngine && isNewer(latestEngine, row.stationVersion);
   // what plays there, one line — a ticker when it is longer than its box
   const nowPlaying = status === "playing" ? row.state?.currentTrack?.title || row.state?.currentSource?.title || "" : "";
   // the whole row follows the language of the INTERFACE (Hebrew UI → every row right-to-left, even a Latin-lettered name) — owner 2026-10-20 (it used to follow each name)
@@ -660,6 +680,8 @@ function BranchRow({ L, row, brand, status, selected, onSelect }: { L: Mgmt; row
           {row.city ? <span>{row.city}</span> : null}
           {row.branchNumber ? <span className="tabular-nums" dir="ltr">#{row.branchNumber}</span> : null}
           {row.regionReason === "no_location" ? <span className="text-amber-300/80">{L.t("cr.noLocation")}</span> : null}
+          {row.stationVersion ? <span className="tabular-nums" dir="ltr" title={engineOld && latestEngine ? L.t("cr.updateTip").replace("{v}", row.stationVersion).replace("{w}", latestEngine) : undefined}>v{row.stationVersion}</span> : null}
+          {engineOld ? <span className="cr-row-update">{L.t("cr.update")}</span> : null}
         </span>
         <span className={`cr-row-status ${STATUS_TEXT_CLASS[status]}`}>
           <StatusLed status={status} size={11} />

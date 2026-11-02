@@ -7046,6 +7046,7 @@ html[data-sb-display="white"] .player-transport-secondary button[class][class][c
 .cr-row-main { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .cr-row-name { font-size: 15px; font-weight: 600; line-height: 1.25; color: var(--sb-text); text-align: start; unicode-bidi: plaintext; overflow-wrap: anywhere; }
 .cr-row-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; font-size: 12.5px; line-height: 1.3; color: var(--sb-text-secondary); }
+.cr-row-update { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: 999px; background: #fbbf24; color: #1c1400; font-size: 11px; font-weight: 700; line-height: 1; }
 .cr-row-brand { display: inline-flex; align-items: center; gap: 6px; }
 .cr-row-brand i { width: 8px; height: 8px; border-radius: 50%; }
 .cr-row-now { display: flex; min-width: 0; align-items: center; gap: 7px; font-size: 12.5px; color: var(--sb-text-tertiary); }

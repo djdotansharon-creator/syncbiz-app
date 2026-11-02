@@ -215,6 +215,16 @@ export const db = {
     return new Set(rows.map((r) => r.branchId));
   },
 
+  /** Control Room (info only): the engine version each branch's station last reported (the most recently seen station per branch). */
+  async getStationVersionByBranch(accountId?: string): Promise<Map<string, string>> {
+    const wsId = await resolveWorkspaceId(accountId);
+    const out = new Map<string, string>();
+    if (!wsId) return out;
+    const rows = await prisma.stationDevice.findMany({ where: { workspaceId: wsId }, select: { branchId: true, appVersion: true }, orderBy: { lastSeenAt: "desc" } });
+    for (const r of rows) if (!out.has(r.branchId) && r.appVersion) out.set(r.branchId, r.appVersion);
+    return out;
+  },
+
   async addBranch(
     input: Pick<Branch, "accountId" | "name"> &
       Partial<Pick<Branch, "id" | "code" | "timezone" | "city" | "country" | "status">>,

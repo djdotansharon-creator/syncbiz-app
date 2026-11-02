@@ -71,6 +71,8 @@ export const MGMT_EN = {
   "cr.noBranches": "No branches yet.",
   "cr.noMatch": "No branches match these filters.",
   "cr.noLocation": "No location",
+  "cr.update": "Update",
+  "cr.updateTip": "Player engine v{v} — the newest is v{w}",
   // map
   "map.aria": "Branch map",
   "map.allIsrael": "All Israel",
@@ -562,6 +564,8 @@ export const MGMT_HE: Record<MgmtKey, string> = {
   "cr.noBranches": "אין עדיין סניפים.",
   "cr.noMatch": "אין סניפים שמתאימים לסינון.",
   "cr.noLocation": "ללא מיקום",
+  "cr.update": "עדכון",
+  "cr.updateTip": "מנוע הנגן v{v} — הגרסה העדכנית היא v{w}",
   "map.aria": "מפת סניפים",
   "map.allIsrael": "כל ישראל",
   "map.regionsHint": "{branches} · {regions} אזורים · ריחוף מציג אזור, לחיצה מתמקדת בו",
