@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { FIRST_PAINT_BOOT_SCRIPT } from "../lib/fx-boot";
+import { CONTROL_SCREEN_ROUTE } from "../lib/control-screen";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean): void {
@@ -43,7 +44,7 @@ assert("F2 what the browser saved is applied before the first paint: display mod
 assert("F3 a stored value that is not one of the three modes falls back to 'song' (never an invented value)", run("/sources", { "syncbiz:displayMode": "banana" })["data-sb-display"] === "song");
 assert("F4 it does nothing on the pages that have no player: home, sign-in, sign-up, reset / forgot password, suspended, guest, admin, the API and the phone shell",
   ["/", "/login", "/signup", "/reset-password", "/forgot-password", "/suspended", "/guest", "/guest/x", "/admin", "/admin/users", "/api/health", "/mobile", "/mobile/library"].every((p) => Object.keys(run(p, { "syncbiz:displayMode": "white", "syncbiz-rail-right": "collapsed" })).length === 0)
-  && Object.keys(run("/settings", {})).length === 1 && Object.keys(run("/owner/control-room", {})).length === 1);
+  && Object.keys(run("/settings", {})).length === 2 && Object.keys(run("/owner/control-room", {})).length === 2); // display mode + (control area) the control attribute
 assert("F5 a storage that throws changes nothing (private window): no attribute, no error", (() => {
   const attrs: Record<string, string> = {};
   vm.runInNewContext(FIRST_PAINT_BOOT_SCRIPT, { location: { pathname: "/sources" }, document: { documentElement: { setAttribute: (k: string, v: string) => { attrs[k] = v; } } }, localStorage: { getItem: () => { throw new Error("denied"); } } });
@@ -60,6 +61,12 @@ assert("F10 the hint can never fight a later toggle: the sources manager removes
   /getAttribute\("data-left-rail"\) === "collapsed"\) html\.removeAttribute\("data-sb-boot-rail-left"\)/.test(sm) && /getAttribute\("data-right-rail"\) === "collapsed"\) html\.removeAttribute\("data-sb-boot-rail-right"\)/.test(sm) && /\}, \[leftRailOpen, rightRailOpen\]\);/.test(sm));
 assert("F11 nothing in playback is touched: no playback / device / socket code appears in what this change added", !/usePlayback|useDevicePlayer|WebSocket|sendCommand/.test(FIRST_PAINT_BOOT_SCRIPT));
 assert("F12 the box that stands where the library will be (on screen in the very first frame) is neutral grey, not the blue-tinted slate palette", /border-white\/\[0\.07\] bg-white\/\[0\.03\] p-12 text-center text-white\/40" aria-busy="true">\{t\.loadingSources\}/.test(read("components/sources-manager-client.tsx")) && !/slate-950\/60 p-12 text-center text-slate-500" aria-busy/.test(read("components/sources-manager-client.tsx")));
+
+assert("F13 the CONTROL area is marked in the very first frame (owner 2026-11-02, the light look keys off data-sb-control — it used to be set by the control bar after hydration: ~0.5 s of the dark page): on the four control routes only, same pattern as lib/control-screen.ts; the control bar sets it in a LAYOUT effect for client-side navigation",
+  ["/dashboard", "/access-control", "/access-control/display", "/owner/control-room", "/settings", "/settings/business"].every((p) => run(p, {})["data-sb-control"] === "1")
+  && ["/sources", "/", "/owner", "/owner/other", "/player", "/dashboardx"].every((p) => run(p, {})["data-sb-control"] === undefined)
+  && FIRST_PAINT_BOOT_SCRIPT.includes("/" + CONTROL_SCREEN_ROUTE.source + "/")
+  && /useLayoutEffect\(\(\) => \{\s*document\.documentElement\.setAttribute\("data-sb-control", "1"\);/.test(readFileSync(path.join(__dirname, "..", "components/control-screen/control-bar.tsx"), "utf-8")));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
