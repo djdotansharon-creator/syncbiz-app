@@ -1393,6 +1393,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="sb-brand flex shrink-0 items-center" role="img" aria-label="SyncBiz">
                 <span className="sb-brand-mark" aria-hidden />
               </span>
+              {/* "Update" / "עדכון" (owner 2026-11-02): desktop app only, right next to the logo — a flat ellipse, no frame */}
+              <DesktopUpdatePill />
               {/* MASTER / On Air / device mode indicators — hidden from the display (owner, 2026-10-14);
                   the component keeps running, see `.sb-device-indicators` in globals.css */}
               <span className="sb-device-indicators contents">
@@ -1610,7 +1612,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="sb-desktop-download contents">
                 <DesktopDownloadButton compact />
               </span>
-              <DesktopUpdatePill />
               {/* the way back to the control screen (owner 2026-10-29): the END-most corner of the bar — exactly where the control screen's "Player" button is (right in English, left in Hebrew). Browser managers only; the desktop station uses the gear. */}
               {canManage && !isDesktopApp && !isManagementRoute ? <ControlBackIcon /> : null}
               {/* who is signed in (owner 2026-11-01): the END-most corner of the bar — the first letter of the name on a soft white disc (right in English, left in Hebrew) */}

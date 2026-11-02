@@ -8004,6 +8004,8 @@ html[data-sb-display="white"] .sb-rad-btn-go { background: #1c1c1e; color: #fff;
 .sb-devdet-list > div { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); align-items: baseline; }
 .sb-devdet-list dt { font-size: 11.5px; color: rgba(255, 255, 255, 0.46); }
 .sb-devdet-list dd { margin: 0; font-size: 13px; font-weight: 550; line-height: 1.35; overflow-wrap: anywhere; }
+.sb-devdet-update { color: #fbbf24; font-weight: 700; text-decoration: none; }
+.sb-devdet-update:hover { color: #fcd34d; text-decoration: underline; }
 .sb-devdet-row { margin-top: 0; margin-bottom: 6px; font-weight: 600; }
 .sb-devdet-i { display: inline-flex; flex: none; width: 20px; height: 20px; color: rgba(255, 255, 255, 0.82); }
 

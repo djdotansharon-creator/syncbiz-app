@@ -241,6 +241,8 @@ const TRANSLATIONS = {
     downloadDesktopMissingGithubApi: "GitHub Releases could not be checked from the server.",
     /** Electron-only header pill; {v} = newer version advertised by /api/desktop/download. */
     desktopUpdateAvailable: "Update available v{v}",
+    desktopUpdatePill: "Update",
+    desktopUpdateRequiredPill: "Update required",
     pinToTop: "Pin to top",
     sidebarFooter: "Controller and scheduler. Does not store or host media.",
     newBreadcrumb: "New",
@@ -662,6 +664,8 @@ const TRANSLATIONS = {
       "השרת מגדיר DESKTOP_INSTALLER_BUNDLE_PATH, אבל אין .exe קריא בנתיב הזה.",
     downloadDesktopMissingGithubApi: "לא ניתן היה לבדוק את GitHub Releases מהשרת.",
     desktopUpdateAvailable: "עדכון זמין v{v}",
+    desktopUpdatePill: "עדכון",
+    desktopUpdateRequiredPill: "עדכון נדרש",
     pinToTop: "נעץ לסרגל העליון",
     sidebarFooter: "בקר ומתזמן. לא מאחסן ולא מארח מדיה.",
     newBreadcrumb: "חדש",

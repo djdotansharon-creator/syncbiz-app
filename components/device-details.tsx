@@ -13,6 +13,7 @@ import { useStationBranchId } from "@/lib/station-branch";
 import { detectDeviceLabel, getEnrollmentDeviceId } from "@/lib/enrollment-device-id";
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
 import { InfoIcon } from "@/components/info-icon";
+import { isNewer } from "@/lib/desktop-version";
 
 type Approval = { enforced: false } | { enforced: true; status: string; role?: "PLAYER" | "REMOTE"; playerClass?: string | null; branchIds?: string[] };
 type Me = { email?: string | null; accountName?: string | null; name?: string | null };
@@ -35,6 +36,9 @@ const HE = {
   controlsNone: "אין כרגע נגן מחובר בסניף",
   device: "מכשיר",
   desktop: "אפליקציית VONO",
+  version: "גרסה",
+  upToDate: "הגרסה העדכנית",
+  updateTo: "עדכון לגרסה {v}",
   approval: "אישור",
   approvalOff: "אישור מכשירים כבוי",
   approvedPlayer: "מאושר כנגן",
@@ -62,6 +66,9 @@ const EN: typeof HE = {
   controlsNone: "No player is connected in the branch right now",
   device: "Device",
   desktop: "VONO app",
+  version: "Version",
+  upToDate: "up to date",
+  updateTo: "Update to {v}",
   approval: "Approval",
   approvalOff: "Device approval is off",
   approvedPlayer: "Approved as a Player",
@@ -95,6 +102,7 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
   const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([]);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  const [engine, setEngine] = useState<{ current: string | null; latest: string | null; href: string | null } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -117,6 +125,21 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
         .catch(() => undefined);
     } else {
       setApproval({ enforced: false });
+    }
+    // the desktop app's own engine version next to the newest published one (owner 2026-11-02); a browser has no engine → no row
+    const bridge = (window as Window & { syncbizDesktop?: { getAppVersion?: () => Promise<string> } }).syncbizDesktop;
+    if (bridge) {
+      void (async () => {
+        try {
+          const current = typeof bridge.getAppVersion === "function" ? (await bridge.getAppVersion()).trim() || null : null;
+          const r = await fetch("/api/desktop/download", { cache: "no-store" });
+          const d = (await r.json().catch(() => ({}))) as { version?: string; expectedVersion?: string; url?: string | null };
+          if (off) return;
+          setEngine({ current, latest: (d.version ?? d.expectedVersion ?? "").trim() || null, href: typeof d.url === "string" && d.url.trim() ? d.url.trim() : null });
+        } catch {
+          if (!off) setEngine({ current: null, latest: null, href: null });
+        }
+      })();
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -156,6 +179,7 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
             ? t.approvedPlayer
             : t.approvedRemote
         : t.approvalOther;
+  const newer = !!engine?.current && !!engine.latest && isNewer(engine.latest, engine.current);
   const controlling = ctx && ctx.masterDeviceLabel ? `${ctx.masterDeviceLabel}${ctx.masterDeviceName ? ` · ${ctx.masterDeviceName}` : ""}` : t.controlsNone;
   const account = [me?.accountName, me?.email].filter(Boolean).join(" · ");
 
@@ -174,6 +198,21 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
           <div><dt>{t.branch}</dt><dd dir="auto">{branchText}</dd></div>
           <div><dt>{isPlayer ? t.plays : t.controls}</dt><dd dir="auto">{isPlayer ? t.thisComputer : controlling}</dd></div>
           <div><dt>{t.device}</dt><dd dir="auto">{deviceText}</dd></div>
+          {isDesktop ? (
+            <div>
+              <dt>{t.version}</dt>
+              <dd dir="auto">
+                {engine ? (engine.current ? `v${engine.current}` : "—") : "…"}
+                {engine?.current && engine.latest && !newer ? ` · ${t.upToDate}` : null}
+                {newer && engine?.latest ? (
+                  <>
+                    {" · "}
+                    <a className="sb-devdet-update" href={engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases"} target="_blank" rel="noopener noreferrer">{t.updateTo.replace("{v}", engine.latest)}</a>
+                  </>
+                ) : null}
+              </dd>
+            </div>
+          ) : null}
           <div><dt>{t.approval}</dt><dd>{approvalText}</dd></div>
           {account ? <div><dt>{t.account}</dt><dd dir="auto">{account}</dd></div> : null}
         </dl>
