@@ -83,8 +83,8 @@ assert("K13 the branch letter squares are BLACK in the light control area (the d
 assert("K14 the amber 'Update' ellipse is not touched (flat, #fbbf24 / #1c1400) — neither .cr-row-update nor the player's .sb-update-pill appear in the file", !/cr-row-update|sb-update-pill/.test(stripped));
 
 // ── 6 · the map ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-assert("K15 the Control Room map is light: pale land (the land gradient stops are re-painted), the neutral dot gradient + glow are a visible grey, region labels are ink with a white halo — CSS only (the component is unchanged)",
-  has(/#vono-land-fill stop:first-child \{ stop-color: #d9dce3; \}/) && has(/#vono-land-fill stop:last-child \{ stop-color: #c4c8d1; \}/) && has(/#vono-dot-229-229-234 stop:nth-child\(2\) \{ stop-color: #8e8e93; \}/)
+assert("K15 the Control Room map is light: pale land (the land gradient stops are re-painted), the neutral flat dot + glow are a visible grey, region labels are ink with a white halo — CSS only",
+  has(/#vono-land-fill stop:first-child \{ stop-color: #d9dce3; \}/) && has(/#vono-land-fill stop:last-child \{ stop-color: #c4c8d1; \}/) && has(/circle\[fill="#e5e5ea"\] \{ fill: #8e8e93; \}/)
   && has(/\.cr-map-panel text \{ fill: #1c1c1e; stroke: rgba\(255, 255, 255, 0\.92\); \}/) && /fill="#2e2e34"|stopColor="#2e2e34"/.test(read("components/control-room/branch-map-v2.tsx")));
 
 // ── 7 · hover (owner's standing rule): the controls that only had white-tint hovers answer on light ─────────────────────────

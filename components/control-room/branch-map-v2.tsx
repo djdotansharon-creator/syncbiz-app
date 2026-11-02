@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { LAND_RINGS } from "@/lib/control-room-land";
+import { MAP_OUTLINE, MAP_PIECES } from "@/lib/control-room-map-pieces";
 import { REGION_DRAW_ORDER, regionForPoint, type RegionId } from "@/lib/control-room-regions";
 import { cityLngLat } from "@/lib/control-room-geo";
 import { REGION_BORDERS } from "@/lib/control-room-region-borders";
-import { REGION_SHAPES } from "@/lib/control-room-region-shapes";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { markerLook, STATUS_KEY, LED_FILL, type MapBranch, type MapRegions } from "@/components/control-room/branch-map";
 import { Marquee } from "@/components/control-room/marquee";
@@ -39,7 +38,7 @@ type Pt = [number, number];
 
 function landBounds(): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const r of LAND_RINGS) for (const [x, y] of r) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  for (const r of MAP_OUTLINE) for (const [x, y] of r) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
   return [minX, minY, maxX, maxY];
 }
 function fitProjection(b: [number, number, number, number]) {
@@ -92,6 +91,11 @@ function simplify(ringIn: Pt[], tol: number): Pt[] {
 }
 
 /** closed ring → smooth blob: Douglas–Peucker (a coarse tolerance drops the fine coastline noise), then three rounds of Chaikin corner cutting — no needle tips, no hard corners anywhere (owner 2026-10-20: "no spikes") */
+/** a ring as a plain polygon path (no smoothing — the generated geometry is already smooth and its pieces share exact edges) */
+function rawPath(ring: Pt[]): string {
+  return ring.length < 3 ? "" : `M${ring.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join("L")}Z`;
+}
+
 function smoothPath(ringIn: Pt[]): string {
   let ring = simplify(ringIn, SMOOTH_TOL).filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 0.05);
   if (ring.length < 3) return "";
@@ -128,9 +132,6 @@ function parseHex(c: string): [number, number, number] | null {
   const h = m[1].length === 3 ? m[1].split("").map((x) => x + x).join("") : m[1];
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
-const mixHex = (c: [number, number, number], to: [number, number, number], t: number) =>
-  `rgb(${Math.round(c[0] + (to[0] - c[0]) * t)},${Math.round(c[1] + (to[1] - c[1]) * t)},${Math.round(c[2] + (to[2] - c[2]) * t)})`;
-
 type ViewBox = { x: number; y: number; w: number; h: number };
 const FULL_VIEW: ViewBox = { x: 0, y: 0, w: W, h: H };
 const ZOOM_MS = 1050;
@@ -186,7 +187,8 @@ export function BranchMapV2({
     return fitProjection([minX, minY, maxX, maxY]);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fitKey captures the positions
   }, [fit, fitKey]);
-  const landRings = useMemo(() => LAND_RINGS.map((r) => smoothPath(r.map((p) => project(p)))), [project]);
+  // ONE block (owner 2026-11-02): the outline and the region pieces are drawn RAW — the data is already a smooth sketch whose pieces tile it exactly; smoothing each piece again would open gaps between them
+  const landRings = useMemo(() => MAP_OUTLINE.map((r) => rawPath(r.map((p) => project(p)))), [project]);
   // the borders BETWEEN the regions (generated, see lib/control-room-region-borders.ts), projected and smoothed
   const borderPaths = useMemo(() => REGION_BORDERS.map((c) => smoothOpen(c.map((p) => project(p)))), [project]);
   const pulsing = placed.filter((d) => d.status === "playing").length <= MAX_PULSING;
@@ -194,9 +196,9 @@ export function BranchMapV2({
   const regionShapes = useMemo(() => {
     if (!regions) return [];
     return REGION_DRAW_ORDER.map((id) => {
-      // ONE soft blob per region (generated, see lib/control-room-region-shapes.ts) — the raw region polygons are unions of many pieces and read as lumps
-      const rings = (REGION_SHAPES[id] ?? []).map((ring) => ring.map((pt) => project(pt as [number, number])));
-      const d = rings.map((ring) => smoothPath(ring)).join("");
+      // one PIECE per region (generated, see lib/control-room-map-pieces.ts): the pieces complete each other like a puzzle — shared edges are identical, so there is no gap between them
+      const rings = (MAP_PIECES[id] ?? []).map((ring) => ring.map((pt) => project(pt as [number, number])));
+      const d = rings.map((ring) => rawPath(ring)).join("");
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const ring of rings) for (const [x, y] of ring) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
       const area = (ring: Pt[]) => { let a = 0; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]; return Math.abs(a); };
@@ -437,13 +439,6 @@ export function BranchMapV2({
         {/* the dashed region lines are clipped to the land (the smoothed coast can differ from the raw border ends by a hair) */}
         <clipPath id="vono-land-clip">{landRings.map((d, i) => <path key={i} d={d} />)}</clipPath>
         {[...dotGrads.entries()].map(([gid, c]) => (
-          <radialGradient key={gid} id={gid} cx="34%" cy="30%" r="80%">
-            <stop offset="0" stopColor={mixHex(c, [255, 255, 255], 0.62)} />
-            <stop offset="0.42" stopColor={mixHex(c, [255, 255, 255], 0.1)} />
-            <stop offset="1" stopColor={mixHex(c, [0, 0, 0], 0.22)} />
-          </radialGradient>
-        ))}
-        {[...dotGrads.entries()].map(([gid, c]) => (
           <radialGradient key={`${gid}-glow`} id={`${gid}-glow`}>
             <stop offset="0.3" stopColor={`rgb(${c[0]},${c[1]},${c[2]})`} stopOpacity="0.5" />
             <stop offset="1" stopColor={`rgb(${c[0]},${c[1]},${c[2]})`} stopOpacity="0" />
@@ -501,7 +496,7 @@ export function BranchMapV2({
         const s = 1 / k;
         const hidden = !!focus && d.region !== focus;
         const look = dotLooks[idx]!;
-        const fill = look.gid ? `url(#${look.gid})` : look.base;
+        const fill = look.base; // flat colour (owner 2026-11-02: an Apple-style dot — no glossy sphere)
         const R = dotRadius;
         return (
           <g
@@ -517,14 +512,14 @@ export function BranchMapV2({
             <circle r={Math.max(11, R + 6)} fill="transparent" />
             {/* the selected branch: a soft dark halo (no outline) */}
             {selected ? <circle r={R + 4.5} fill="rgba(14,14,18,0.28)" /> : null}
-            {/* the dot: a whole sphere — no outline, a soft shadow under it, a light from the upper left. Its size glides when the common radius changes; a NEW dot pops in with a soft ring. */}
+            {/* the dot (owner 2026-11-02: "an Apple look"): a FLAT disc in its colour with a thin white ring and a soft shadow — no gloss, no highlight; only a playing branch carries a soft breathing glow. Its size glides when the common radius changes; a NEW dot pops in with a soft ring. */}
             <g className="cr-dot-size" style={{ transform: `scale(${(R / DOT_REF_R).toFixed(4)})` }}>
               <g className="cr-dot-pop" style={{ ["--d" as string]: `${Math.min(idx, 14) * 70}ms` } as React.CSSProperties}>
                 <circle className="cr-dot-halo" r={DOT_REF_R} fill="none" stroke={look.base} style={{ ["--d" as string]: `${Math.min(idx, 14) * 70}ms` } as React.CSSProperties} />
-                {look.gid ? <circle r={DOT_REF_R * 2.3} fill={`url(#${look.gid}-glow)`} className={`cr-dot-glow${look.breathing && pulsing ? " cr-dot-glow--live" : ""}`} opacity={look.opacity} /> : null}
-                <circle cy={1.4} r={DOT_REF_R} fill="rgba(0,0,0,0.22)" opacity={look.opacity} />
-                <circle r={DOT_REF_R} fill={fill} fillOpacity={look.opacity} />
-                <ellipse cx={-2.3} cy={-2.8} rx={2.7} ry={1.8} fill="rgba(255,255,255,0.55)" opacity={look.opacity} />
+                {look.gid && look.breathing && pulsing ? <circle r={DOT_REF_R * 2.3} fill={`url(#${look.gid}-glow)`} className="cr-dot-glow cr-dot-glow--live" opacity={look.opacity} /> : null}
+                <circle cy={1.3} r={DOT_REF_R + 1.2} fill="rgba(0,0,0,0.20)" opacity={look.opacity} />
+                <circle r={DOT_REF_R + 1.2} fill="#ffffff" opacity={look.opacity} />
+                <circle r={DOT_REF_R - 0.6} fill={fill} fillOpacity={look.opacity} />
               </g>
             </g>
           </g>
