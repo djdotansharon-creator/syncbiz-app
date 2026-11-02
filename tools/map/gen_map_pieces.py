@@ -2,11 +2,11 @@
 CONTROL ROOM map geometry generator (owner 2026-11-02: the map is ONE smooth block; the regions are pieces that complete each other like a puzzle).
 Writes lib/control-room-map-pieces.ts. Needs shapely (pip install shapely numpy) and the two input files made by tools/map/export-map-inputs.ts:
     npx tsx tools/map/export-map-inputs.ts <dir>      # writes <dir>/land.json + <dir>/regions.json
-    cd <dir> && python3 <repo>/tools/map/gen_map_pieces.py 0.025 0.025 0.007 0.012 <repo>/lib/control-room-map-pieces.ts
+    cd <dir> && python3 <repo>/tools/map/gen_map_pieces.py 0.025 0.025 0.007 0.012 <repo>/lib/control-room-map-pieces.ts 3
 Steps: (1) land = union of the land rings, needles cut (opening), grown a little, simplified, every corner rounded (Chaikin) = the outline;
 (2) each region polygon is clipped to the outline; the land the regions do not cover (West Bank, Gaza, slivers) follows lib/control-room-regions.ts
 (north of 31.98 -> Sharon & Shomron, the rest -> the nearest region); (3) pieces are rounded a little, then re-tiled EXACTLY (overlaps removed by subtraction,
-gaps handed to the neighbour they touch most), so shared edges are identical and the union IS the outline.
+gaps handed to the neighbour they touch most), so shared edges are identical and the union IS the outline; (the inner borders are rounded by the same buffer rounding of each piece, with a radius large enough that a zoomed region has no staircase).
 """
 import json, sys, math
 from shapely.geometry import Polygon, MultiPolygon, MultiPoint, Point, LineString, box
@@ -34,7 +34,7 @@ def chaikin(coords, n):
 Lo = L.buffer(-OPEN_R, 16).buffer(OPEN_R, 16)
 Lg = Lo.buffer(CLOSE_R, 16).simplify(SIMP * 3, preserve_topology=True)
 if isinstance(Lg, MultiPolygon): Lg = max(Lg.geoms, key=lambda g: g.area)
-Ls = Polygon(chaikin(Lg.exterior.coords, 3)).buffer(0)
+Ls = Polygon(chaikin(Lg.exterior.coords, 5)).buffer(0)
 print("sketch holes", len(Ls.interiors) if hasattr(Ls, "interiors") else "multi")
 R = {r["id"]: unary_union([poly(x) for x in r["rings"]]) for r in regs}
 ids = list(R.keys())
@@ -80,9 +80,19 @@ for i in ids:
         P[i] = unary_union([x for x in parts if x.area > 0.0004])
 # 4. smooth + simplify each piece, then re-tile EXACTLY: overlaps are resolved by subtraction (shared edges become identical), gaps are given to the neighbour they touch most
 RS = float(sys.argv[4]) if len(sys.argv) > 4 else 0.012
+PIECE_ROUND = int(sys.argv[6]) if len(sys.argv) > 6 else 3
+def round_poly(g):
+    # Chaikin corner cutting on every exterior ring of a piece (the re-tiling below keeps the pieces exact)
+    gs = list(g.geoms) if hasattr(g, "geoms") else [g]
+    out = []
+    for p in gs:
+        if p.is_empty or p.geom_type != "Polygon" or len(p.exterior.coords) < 4: continue
+        out.append(Polygon(chaikin(p.exterior.coords, PIECE_ROUND)).buffer(0))
+    return unary_union(out) if out else Polygon()
 def soft(g):
     g = g.buffer(RS, 12).buffer(-2 * RS, 12).buffer(RS, 12)      # round corners, drop needles of a piece
     g = g.simplify(SIMP, preserve_topology=True)
+    if PIECE_ROUND > 0: g = round_poly(g)
     return g.intersection(Ls)
 S = {i: soft(P[i]) for i in ids}
 order = sorted(ids, key=lambda i: S[i].area)   # small pieces keep their shape, the biggest one takes the remainder
@@ -110,6 +120,7 @@ outline = unary_union(list(Q.values()))
 print("outline parts", len(outline.geoms) if hasattr(outline, "geoms") else 1, "area", round(outline.area, 4), "sketch", round(Ls.area, 4))
 overlap = sum(Q[a].intersection(Q[b]).area for k, a in enumerate(ids) for b in ids[k + 1:])
 print("overlap between pieces", round(overlap, 8))
+
 def rings_of(g):
     # exterior rings only (a hole smaller than a dot is dust from the clipping), tiny polygons dropped
     gs = list(g.geoms) if hasattr(g, "geoms") else [g]
