@@ -34,7 +34,11 @@ assert("T8 the letter keeps its brand colour (readable variant for the square it
 assert("T9 logos are untouched: no rule recolours `.has-logo` / `.is-asis` / `.has-fit` tiles", !/\.cr-row-logo\.(has-logo|is-asis|has-fit)[^{]*\{[^}]*#111111/.test(css));
 
 // ── the "Update" ellipses ──
-assert("T10 the control-room pill is 19 px tall (odd → the word lands on whole pixels) with the measured lift in both languages; the header pill likewise",
-  /\.cr-row-update \{ display: inline-flex; align-items: center; height: 19px;/.test(css) && /\.cr-row-update \{ padding-bottom: 2px; \}/.test(css) && /\[dir="rtl"\] \.cr-row-update \{ padding-bottom: 4px; \}/.test(css) && /\.sb-update-pill \{ padding-bottom: 2px; \}/.test(css) && /html\[dir="rtl"\] \.sb-update-pill \{ padding-bottom: 4px; \}/.test(css));
+assert("T10 the 'Update' word is centred on its LETTERS, not on the font's line box (owner 2026-11-02 'too high in its frame'): text-box-trim on the word's own span — capitals (English) / x-height (Hebrew) — so it is right on any font / OS; browsers without it keep the measured lift",
+  /\.cr-row-update \{ display: inline-flex; align-items: center; height: 19px;/.test(css)
+  && /@supports \(text-box: trim-both cap alphabetic\) \{\s*\.sb-pill-t \{ text-box: trim-both cap alphabetic; \}[^\n]*\n\s*\[dir="rtl"\] \.sb-pill-t \{ text-box-edge: ex alphabetic; \}/.test(css)
+  && /@supports not \(text-box: trim-both cap alphabetic\) \{\s*\.sb-update-pill \{ padding-bottom: 2px; \}\s*html\[dir="rtl"\] \.sb-update-pill \{ padding-bottom: 4px; \}\s*\.cr-row-update \{ padding-bottom: 2px; \}\s*\[dir="rtl"\] \.cr-row-update \{ padding-bottom: 4px; \}/.test(css)
+  && /<span className="sb-pill-t">\{text\}<\/span>/.test(readFileSync(path.join(__dirname, "..", "components/desktop-update-pill.tsx"), "utf-8"))
+  && /<span className="sb-pill-t">\{L\.t\("cr\.update"\)\}<\/span>/.test(view));
 
 console.log(`\n${pass} passed, ${fail} failed`);

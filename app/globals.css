@@ -8064,12 +8064,19 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-row-logo.is-letter { ba
 html[data-sb-display="white"]:not([data-sb-control]) .cr-row-logo.is-letter .cr-row-initial { color: var(--cr-letter-on-black, var(--cr-brand, #f2f2f7)) !important; }
 html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="calm"] .cr-row-logo.is-letter .cr-row-initial { color: rgba(255, 255, 255, 0.78) !important; }
 
-/* ── The "Update" ellipses: the word sat a little low (Hebrew letters have no ascenders, so the line box centre is not the ink centre) —
-   measured at 4x: English +1.0 px / Hebrew +2.0 px in the header, +0.5 / +1.5 in the control-room row. A bottom padding lifts the word (the row pill is 19 px tall: an odd height lands the text on whole pixels, 0 px off in both languages). ── */
-.sb-update-pill { padding-bottom: 2px; }
-html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
-.cr-row-update { padding-bottom: 2px; }
-[dir="rtl"] .cr-row-update { padding-bottom: 4px; }
+/* ── The "Update" ellipses: the word is centred on its LETTERS, not on the font's line box (owner 2026-11-02: "the update text is too high in its frame"). The first fix lifted the word by a measured bottom padding
+   (centring the INK box, which counts the "p" that hangs below — so the capitals sat visibly high; tuned on one machine's rendering). Now `text-box: trim-both cap alphabetic` cuts the word's own box to cap-height … baseline, so the flex centring puts the letters exactly in the middle whatever the font or the
+   operating system (English and Hebrew alike). Browsers without it (Firefox, Electron <= 132) keep the old measured lift. ── */
+@supports (text-box: trim-both cap alphabetic) {
+  .sb-pill-t { text-box: trim-both cap alphabetic; }   /* English: the capital letters are centred (the "p" hangs below, as in any button label) */
+  [dir="rtl"] .sb-pill-t { text-box-edge: ex alphabetic; } /* Hebrew has no capitals: the body of the letters (x-height to baseline) is centred */
+}
+@supports not (text-box: trim-both cap alphabetic) {
+  .sb-update-pill { padding-bottom: 2px; }
+  html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
+  .cr-row-update { padding-bottom: 2px; }
+  [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
+}
 
 /* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
    a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */
