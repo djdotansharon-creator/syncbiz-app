@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
@@ -36,6 +37,7 @@ import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 import { wsTokenUrl } from "@/lib/enrollment-device-id";
+import { readEmergencyPlayer, subscribeEmergencyPlayer } from "@/lib/emergency-player";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -881,12 +883,19 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // 2. Reclaim in flight — server said CONTROL while we were playing; we answered SET_MASTER.
   //    Hold MASTER until the server grants (SET_DEVICE_MODE MASTER), denies (onMasterClaimDenied
   //    stops playback), or the 10s timeout fires. The engine never sees the transient CONTROL.
+  //
+  // What a screen is BEFORE the server has decided anything (owner 2026-11-02: "the browser first opened as a Player and after loading became a Remote — we said Remote is the
+  // default, this is just a double load"): a plain BROWSER starts as a REMOTE, so it never shows (or acts as) a Player for a moment and nothing is mounted just to be torn down.
+  // The Electron app, the dedicated streamer and the deliberate "use this browser as the Player (emergency)" choice keep the old MASTER default; the server's answer
+  // (SET_DEVICE_MODE) still decides once connected, and a mode seen while connected is remembered across reconnect blips exactly as before.
+  const emergencyPlayer = useSyncExternalStore(subscribeEmergencyPlayer, readEmergencyPlayer, () => false);
+  const beforeServerMode: DeviceMode = isElectronShell === false && !isStreamerDevice && !emergencyPlayer ? "CONTROL" : "MASTER";
   const effectiveDeviceMode =
     status === "connected"
       ? !modeAssigned || (deviceMode === "CONTROL" && masterReclaimInFlight)
-        ? (lastConnectedModeRef.current ?? "MASTER")
+        ? (lastConnectedModeRef.current ?? beforeServerMode)
         : deviceMode
-      : (lastConnectedModeRef.current ?? "MASTER");
+      : (lastConnectedModeRef.current ?? beforeServerMode);
 
   const isBranchConnected = isActive && authLoaded && !!effectiveUserId && status === "connected";
 

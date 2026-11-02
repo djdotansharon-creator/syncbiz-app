@@ -8040,12 +8040,12 @@ html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-wi
   html[data-sb-boot-rail-right="collapsed"] .sb-rail-toggle--right svg { transform: rotate(180deg); }
 }
 
-/* ── the queue card does NOT tuck under the player in the transparent (song) look (owner 2026-11-02: "make it so this part of the song list under the player is not seen" — a lighter band with rounded ends,
-   the card's tucked part, showed through the player's glass). In this look the card sits BESIDE the player: no negative margin, no extra padding, a rounded card of its own, and the player's shadow
-   carrier is a plain rounded rectangle (it was cut flat on the card's side because the card used to take over there). The 8px between them is the cell's own inset. The black and white looks keep the tuck
-   (their player surface is solid, nothing shows through). ── */
-html[data-sb-display="song"] .library-deck-unified .library-deck-slot-aside { margin-inline-end: 0 !important; padding-inline-end: 0 !important; clip-path: none !important; border-radius: 16px !important; }
-html[data-sb-display="song"] .library-deck-unified .library-deck-player-cell::before { border-radius: 16px !important; clip-path: inset(-48px -48px -48px -48px) !important; }
+/* ── the queue card in the transparent (song) look (owner 2026-11-02). With a song in the blurred background (html[data-sb-ambient="on"]) the card is tucked BEHIND the player, as designed on 2026-10-13
+   (and as the black and white looks always have it). It sits BESIDE the player (no negative margin, no extra padding, a rounded card of its own, the player's shadow carrier a plain rounded rectangle —
+   so the tucked part cannot show through the player's glass as a lighter band) only in CONTROLLER mode (html[data-sb-remote-view], the Remote strip) or when there is no song in the background. The 8px between
+   them is the cell's own inset. (The first version, 2026-11-02 morning, separated it in every transparent look; the owner: "only in controller mode, or when there is no song — with a song make it behind the player".) ── */
+html[data-sb-display="song"]:is([data-sb-remote-view], :not([data-sb-ambient="on"])) .library-deck-unified .library-deck-slot-aside { margin-inline-end: 0 !important; padding-inline-end: 0 !important; clip-path: none !important; border-radius: 16px !important; }
+html[data-sb-display="song"]:is([data-sb-remote-view], :not([data-sb-ambient="on"])) .library-deck-unified .library-deck-player-cell::before { border-radius: 16px !important; clip-path: inset(-48px -48px -48px -48px) !important; }
 
 /* ── the slim-player glide (owner 2026-11-02: "when I scroll down and the player collapses it is jerky"). Measured (Full graphics, CPU ×4): 20 of 96 frames took > 24 ms, 14.8 ms on average, because every frame of the
    700 ms glide re-laid-out the deck AND re-blurred all the live glass behind it. While it glides (`data-sb-pc-moving`, set by components/player-auto-compact.tsx for the glide only) the live blur is off — the same
@@ -8074,3 +8074,16 @@ html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
 /* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
    a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */
 html[data-sb-control] .sb-ctl-bar .sb-enr-dot { box-shadow: 0 0 0 2px #000000; }
+
+/* ── The Player screen has NO resting frames (owner 2026-11-02: "make there be no frame — only what I am standing on gets a tiny white line around it"). Resting: the library screen's hairline frames are
+   invisible (the search box's three rings, the nav-link / button borders, the cards' border, the section canvas, the deck's border in the white look). Hover / keyboard focus: ONE thin 1px line — white on the
+   dark looks, ink on the white look — drawn as an outline (it never moves anything and keeps the existing shadows and glass). Not in the control area (data-sb-control), which has its own look. ── */
+html:not([data-sb-control]) .library-sources-input-shell { outline-color: transparent !important; }
+html:not([data-sb-control]) .library-sources-input-shell::before { border-color: transparent !important; }
+html:not([data-sb-control]) .library-sources-input-shell .sb-library-ingest-shell { border-color: transparent !important; }
+html:not([data-sb-control]) :is(.library-nav-link, .library-source-card, .library-sections-canvas) { border-color: transparent !important; }
+html[data-sb-display="white"]:not([data-sb-control]) :is(.library-deck-unified, .library-nav-link, .library-source-card, .library-sections-canvas) { border-color: transparent !important; }
+html:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .library-source-card, .sb-pl-row, .sb-pl-add, .sb-djl, .library-command-rail-guest-my button, .library-command-rail-browse button):is(:hover, :focus-visible) { outline: 1px solid rgba(255, 255, 255, 0.62) !important; outline-offset: -1px; }
+html:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(255, 255, 255, 0.62) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .library-source-card, .sb-pl-row, .sb-pl-add, .sb-djl, .library-command-rail-guest-my button, .library-command-rail-browse button):is(:hover, :focus-visible) { outline-color: rgba(28, 28, 30, 0.42) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(28, 28, 30, 0.42) !important; }
