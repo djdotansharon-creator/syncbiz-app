@@ -18,9 +18,11 @@ export async function GET() {
   if (existing.length > 0) {
     // Control Room (info only): does a station (StationDevice) belong to the branch? No → "Needs installation".
     const withStation = await db.getBranchIdsWithStation(accountId);
+    // Control Room (info only): the engine version the branch's station last reported
+    const versions = await db.getStationVersionByBranch(accountId);
     // Control Room (info only): the branch's own logo file, when it has one (file-backed — lib/branch-logo.ts)
     const logos = branchLogoVersions();
-    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id), logoUrl: logos.has(b.id) ? branchLogoUrl(b.id, logos.get(b.id) ?? 0) : null })));
+    return NextResponse.json(existing.map((b) => ({ ...b, hasStation: withStation.has(b.id), stationVersion: versions.get(b.id) ?? null, logoUrl: logos.has(b.id) ? branchLogoUrl(b.id, logos.get(b.id) ?? 0) : null })));
   }
   return NextResponse.json([
     {
