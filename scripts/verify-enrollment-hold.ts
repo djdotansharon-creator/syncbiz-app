@@ -32,7 +32,7 @@ const countRoute = read("app/api/control-room/enrollments/pending-count/route.ts
 const branchRoute = read("app/api/devices/enrollment/branches/route.ts");
 const shell = read("components/app-shell.tsx");
 
-assert("H1 the (app) layout wraps the WHOLE provider tree in the hold, so nothing of the app mounts until approval", /<EnrollmentHold enforced=\{enrollmentEnforced\}>\s*<AppProviders>/.test(layout) && /<\/AppProviders>\s*<\/EnrollmentHold>/.test(layout));
+assert("H1 the (app) layout wraps the WHOLE provider tree in the hold, so nothing of the app mounts until approval", /<EnrollmentHold enforced=\{enrollmentEnforced\}>\s*<AppProviders( locale=\{locale\})?>/.test(layout) && /<\/AppProviders>\s*<\/EnrollmentHold>/.test(layout));
 assert("H2 the decision is made on the server, only for a signed-in caller, only when it is not the desktop app, and is read from the env-first config", /if \(user\) \{\s*try \{/.test(layout) && layout.indexOf("isDesktopShellUserAgent(ua)") > -1 && layout.indexOf("isDesktopShellUserAgent(ua)") < layout.indexOf("getEnrollmentConfig(user.tenantId)"));
 assert("H3 a failure while deciding never holds the app (fail open, logged)", /catch \(e\) \{\s*console\.error\("\[device-enrollment\] layout check failed — not holding the app"/.test(layout) && /let enrollmentEnforced = false;/.test(layout));
 assert("H4 a switched-off workspace renders its children untouched (no hook, no request)", /if \(!enforced\) return <>\{children\}<\/>;/.test(hold));
