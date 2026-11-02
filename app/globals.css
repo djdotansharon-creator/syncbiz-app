@@ -7426,8 +7426,8 @@ html[dir="rtl"] body *, html[dir="rtl"] body *::before, html[dir="rtl"] body *::
 .cr-list[data-density="s"] .cr-row { gap: 10px; padding-block: 8px; padding-inline: 8px 10px; border-radius: 20px; }
 .cr-list[data-density="s"] .cr-row-now { display: none; }
 .cr-row { gap: 14px; padding-block: 10px; padding-inline: 10px 16px; border-radius: 24px; background: transparent; box-shadow: none; }
-.cr-row:hover { background: rgba(255, 255, 255, 0.065); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
-.cr-row.is-selected, .cr-row.is-selected:hover { background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cr-row:hover { background: rgba(255, 255, 255, 0.065); }
+.cr-row.is-selected, .cr-row.is-selected:hover { background: rgba(255, 255, 255, 0.1); } /* no 1px frame on hover / selected (owner 2026-11-02: "I see the square but also a frame — remove it"): the fill alone says where you are */
 .cr-row-main { min-height: var(--cr-logo); justify-content: center; }
 .cr-row-name { font-size: var(--cr-name); unicode-bidi: isolate; } /* the name follows the ROW (= interface) direction — a Hebrew name in the English UI no longer jumps to the far side */
 .cr-row-sub, .cr-row-status, .cr-row-now { font-size: var(--cr-sub); }
@@ -8070,3 +8070,7 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
 html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
 .cr-row-update { padding-bottom: 2px; }
 [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
+
+/* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
+   a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */
+html[data-sb-control] .sb-ctl-bar .sb-enr-dot { box-shadow: 0 0 0 2px #000000; }

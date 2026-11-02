@@ -591,6 +591,8 @@ html[data-sb-display="white"][data-sb-control] :is([data-control-screen="true"],
 html[data-sb-display="white"][data-sb-control] :is([data-control-screen="true"], [class*="inset-0"]) :is(code, kbd)[class*="bg-black/"] { background-color: rgba(0, 0, 0, 0.07); }
 /* the red circle on a tab (pending approvals / people): one step darker so its white digit reads (4.5:1) */
 html[data-sb-display="white"][data-sb-control] .sb-enr-dot { background: #d70015; color: #ffffff; }
+/* its ring = the pearl bar it sits on (rgb(236,238,241)), so it reads as a clean cut-out, not a black frame (owner 2026-11-02) */
+html[data-sb-display="white"][data-sb-control] .sb-ctl-bar .sb-enr-dot { box-shadow: 0 0 0 2px #eceef1; }
 /* avatar discs carry a JS-chosen mid-tone with a white letter: a soft dark veil on top keeps every tone at ≥ 3:1 for the large letter */
 html[data-sb-display="white"][data-sb-control] .sb-pg-avatar { background-image: linear-gradient(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.16)) !important; }
 /* the Studio's glass tokens (fields / icon buttons draw with var(--jc-glass) !important) */
