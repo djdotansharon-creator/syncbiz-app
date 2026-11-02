@@ -9,9 +9,10 @@
 .sb-bp-search input::placeholder { color: rgba(255, 255, 255, 0.45); }
 .sb-bp-list { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; min-height: 0; max-height: min(52vh, 420px); overflow-y: auto; padding-inline-end: 2px; }
 .sb-bp-note { margin: 6px 4px; font-size: 13.5px; color: rgba(255, 255, 255, 0.6); text-align: center; }
-.sb-bp-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border: 0; border-radius: 16px; background: rgba(255, 255, 255, 0.06); color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color 0.15s; }
-.sb-bp-row:hover { background: rgba(255, 255, 255, 0.16); }
-.sb-bp-row[aria-selected="true"] { background: rgba(255, 255, 255, 0.2); }
+/* the rows have NO frame (owner 2026-11-02): text on the glass, a soft fill only under the pointer; the branch being controlled has a check mark at the end */
+.sb-bp-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border: 0; border-radius: 16px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color 0.15s; }
+.sb-bp-row:hover { background: rgba(255, 255, 255, 0.1); }
+.sb-bp-row[aria-selected="true"]::after { content: ""; flex: none; margin-inline-start: auto; width: 16px; height: 16px; background: currentColor; opacity: 0.85; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.2 3.2L13 4.8'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5l3.2 3.2L13 4.8'/%3E%3C/svg%3E") center / contain no-repeat; }
 .sb-bp-row[data-live="0"] { opacity: 0.6; }
 .sb-bp-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.35); }
 .sb-bp-row[data-live="1"] .sb-bp-dot { background: #30d158; box-shadow: 0 0 0 4px rgba(48, 209, 88, 0.18); }
