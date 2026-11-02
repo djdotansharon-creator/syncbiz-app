@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import { useTr } from "@/lib/i18n/use-tr";
 import { AnyPendingDot } from "@/components/control-screen/pending-dots";
@@ -90,7 +90,8 @@ export function ControlBar({ canManage = true }: { canManage?: boolean }) {
   if (pending && pending.from !== pathname) setPending(null);
   const current = pending && pending.from === pathname ? pending.href : pathname;
   // the windows that open on a click are portals outside the page root — this marks the whole document so the control skin (control-skin.css) reaches them too
-  useEffect(() => {
+  // a LAYOUT effect: the light look keys off this attribute, so on a client-side navigation it is set before the first paint (the boot script in lib/fx-boot.ts covers a full load)
+  useLayoutEffect(() => {
     document.documentElement.setAttribute("data-sb-control", "1");
     return () => document.documentElement.removeAttribute("data-sb-control");
   }, []);
