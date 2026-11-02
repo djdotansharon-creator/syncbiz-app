@@ -98,5 +98,10 @@ const globals = read("app/globals.css");
 assert("K17 the existing 'light surface' letter-square rule (white look, NOT the control area) is still there and still excludes the control area — this file only adds the control-area twin", /html\[data-sb-display="white"\]:not\(\[data-sb-control\]\) \.cr-row-logo\.is-letter \{ background: #111111 !important; \}/.test(globals));
 assert("K18 the layout imports exactly one new stylesheet and keeps every other import (globals, lite-fx, white-look, kiosk-display, flag-icons)", ["./globals.css", "./lite-fx.css", "./white-look.css", "./control-white.css", "./kiosk-display.css"].every((f) => layout.includes(`import "${f}";`)) && /import "flag-icons\/css\/flag-icons\.min\.css";/.test(layout));
 
+assert("B1 the red count badge on the control bar's tabs: its ring is the colour of the bar (owner 2026-11-02, 'the 2 has a black frame') — pearl on the light control area, pure black on the dark looks",
+  /html\[data-sb-display="white"\]\[data-sb-control\] \.sb-ctl-bar \.sb-enr-dot \{ box-shadow: 0 0 0 2px #eceef1; \}/.test(readFileSync(path.join(__dirname, "..", "app/control-white.css"), "utf-8"))
+  && /html\[data-sb-control\] \.sb-ctl-bar \.sb-enr-dot \{ box-shadow: 0 0 0 2px #000000; \}/.test(readFileSync(path.join(__dirname, "..", "app/globals.css"), "utf-8")));
+assert("B2 a control-room row has no 1px frame on hover / selected in any look — the fill alone says where you are",
+  /\.cr-row:hover \{ background: rgba\(255, 255, 255, 0\.065\); \}/.test(readFileSync(path.join(__dirname, "..", "app/globals.css"), "utf-8")) && !/\.cr-row(\.is-selected)?(, \.cr-row\.is-selected:hover)?(:hover)? \{[^}]*inset 0 0 0 1px/.test(readFileSync(path.join(__dirname, "..", "app/globals.css"), "utf-8")));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
