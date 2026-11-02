@@ -8040,12 +8040,12 @@ html[data-sb-display="song"] :is(.sb-devdet-panel, .sb-pg-win, .sb-jp, .sb-bp-wi
   html[data-sb-boot-rail-right="collapsed"] .sb-rail-toggle--right svg { transform: rotate(180deg); }
 }
 
-/* ── the queue card does NOT tuck under the player in the transparent (song) look (owner 2026-11-02: "make it so this part of the song list under the player is not seen" — a lighter band with rounded ends,
-   the card's tucked part, showed through the player's glass). In this look the card sits BESIDE the player: no negative margin, no extra padding, a rounded card of its own, and the player's shadow
-   carrier is a plain rounded rectangle (it was cut flat on the card's side because the card used to take over there). The 8px between them is the cell's own inset. The black and white looks keep the tuck
-   (their player surface is solid, nothing shows through). ── */
-html[data-sb-display="song"] .library-deck-unified .library-deck-slot-aside { margin-inline-end: 0 !important; padding-inline-end: 0 !important; clip-path: none !important; border-radius: 16px !important; }
-html[data-sb-display="song"] .library-deck-unified .library-deck-player-cell::before { border-radius: 16px !important; clip-path: inset(-48px -48px -48px -48px) !important; }
+/* ── the queue card in the transparent (song) look (owner 2026-11-02). With a song in the blurred background (html[data-sb-ambient="on"]) the card is tucked BEHIND the player, as designed on 2026-10-13
+   (and as the black and white looks always have it). It sits BESIDE the player (no negative margin, no extra padding, a rounded card of its own, the player's shadow carrier a plain rounded rectangle —
+   so the tucked part cannot show through the player's glass as a lighter band) only in CONTROLLER mode (html[data-sb-remote-view], the Remote strip) or when there is no song in the background. The 8px between
+   them is the cell's own inset. (The first version, 2026-11-02 morning, separated it in every transparent look; the owner: "only in controller mode, or when there is no song — with a song make it behind the player".) ── */
+html[data-sb-display="song"]:is([data-sb-remote-view], :not([data-sb-ambient="on"])) .library-deck-unified .library-deck-slot-aside { margin-inline-end: 0 !important; padding-inline-end: 0 !important; clip-path: none !important; border-radius: 16px !important; }
+html[data-sb-display="song"]:is([data-sb-remote-view], :not([data-sb-ambient="on"])) .library-deck-unified .library-deck-player-cell::before { border-radius: 16px !important; clip-path: inset(-48px -48px -48px -48px) !important; }
 
 /* ── the slim-player glide (owner 2026-11-02: "when I scroll down and the player collapses it is jerky"). Measured (Full graphics, CPU ×4): 20 of 96 frames took > 24 ms, 14.8 ms on average, because every frame of the
    700 ms glide re-laid-out the deck AND re-blurred all the live glass behind it. While it glides (`data-sb-pc-moving`, set by components/player-auto-compact.tsx for the glide only) the live blur is off — the same
