@@ -8070,3 +8070,16 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
 html[dir="rtl"] .sb-update-pill { padding-bottom: 4px; }
 .cr-row-update { padding-bottom: 2px; }
 [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
+
+/* ── The Player screen has NO resting frames (owner 2026-11-02: "make there be no frame — only what I am standing on gets a tiny white line around it"). Resting: the library screen's hairline frames are
+   invisible (the search box's three rings, the nav-link / button borders, the cards' border, the section canvas, the deck's border in the white look). Hover / keyboard focus: ONE thin 1px line — white on the
+   dark looks, ink on the white look — drawn as an outline (it never moves anything and keeps the existing shadows and glass). Not in the control area (data-sb-control), which has its own look. ── */
+html:not([data-sb-control]) .library-sources-input-shell { outline-color: transparent !important; }
+html:not([data-sb-control]) .library-sources-input-shell::before { border-color: transparent !important; }
+html:not([data-sb-control]) .library-sources-input-shell .sb-library-ingest-shell { border-color: transparent !important; }
+html:not([data-sb-control]) :is(.library-nav-link, .library-source-card, .library-sections-canvas) { border-color: transparent !important; }
+html[data-sb-display="white"]:not([data-sb-control]) :is(.library-deck-unified, .library-nav-link, .library-source-card, .library-sections-canvas) { border-color: transparent !important; }
+html:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .library-source-card, .sb-pl-row, .sb-pl-add, .sb-djl, .library-command-rail-guest-my button, .library-command-rail-browse button):is(:hover, :focus-visible) { outline: 1px solid rgba(255, 255, 255, 0.62) !important; outline-offset: -1px; }
+html:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(255, 255, 255, 0.62) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .library-source-card, .sb-pl-row, .sb-pl-add, .sb-djl, .library-command-rail-guest-my button, .library-command-rail-browse button):is(:hover, :focus-visible) { outline-color: rgba(28, 28, 30, 0.42) !important; }
+html[data-sb-display="white"]:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(28, 28, 30, 0.42) !important; }
