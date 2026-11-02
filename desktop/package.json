@@ -72,7 +72,7 @@
           ]
         }
       ],
-      "artifactName": "SyncBiz-Player-Setup-${version}-${arch}.${ext}",
+      "artifactName": "VONO-Player-Setup-${version}-${arch}.${ext}",
       "extraResources": [
         {
           "from": "resources/7zr.exe",
@@ -96,8 +96,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "SyncBiz Player",
-      "uninstallDisplayName": "SyncBiz Player",
+      "shortcutName": "VONO Player",
+      "uninstallDisplayName": "VONO Player",
       "include": "build/installer.nsh"
     },
     "mac": {
