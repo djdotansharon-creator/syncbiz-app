@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PlaybackOrchestrator } from "../src/main/playback-orchestrator";
 import { DeviceWsManager, setUrlPlaybackPrefs } from "../src/device-websocket-client/device-ws-manager";
-import { nextAutoIndex, PREPARE_LEAD_SEC } from "../src/device-websocket-client/url-auto-advance";
+import { nextAutoIndex, PREPARE_LEAD_SEC, PREPARE_EARLY_AFTER_SEC } from "../src/device-websocket-client/url-auto-advance";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -19,7 +19,7 @@ function assert(name: string, cond: boolean, detail = ""): void {
 }
 type Deck = { handleEvent: (m: Record<string, unknown>) => void; st: { engineReady: boolean }; play: (u: string, id?: number) => void; preloadPaused: (u: string, id?: number) => void; resume: () => void; stop: () => void; pause: () => void; setVolume: (v: number) => void };
 type O = { musicDeckA: Deck; musicDeckB: Deck; activeMusicDeck: "A" | "B"; currentAttemptDeck: "A" | "B"; xfadeRampId: unknown; musicStA: { status: string }; musicStB: { status: string } };
-type Mirror = { currentSource?: { id?: string } | null; currentTrack?: { title?: string } | null; currentTrackIndex?: number; status: string };
+type Mirror = { currentSource?: { id?: string } | null; currentTrack?: { title?: string } | null; currentTrackIndex?: number; status: string; playNextQueue?: Array<{ id: string; title: string }> };
 const urlOf = (i: number) => `https://www.youtube.com/watch?v=auto${String(i).padStart(7, "0")}`;
 const N = 5;
 const tracks = Array.from({ length: N }, (_, i) => ({ id: `t${i}`, title: `Track ${i}`, cover: null, url: urlOf(i) }));
@@ -40,8 +40,8 @@ function world() {
     d.pause = () => { calls.push(`${id}:pause`); pa(); };
   }
   const mgr = new DeviceWsManager({ deviceId: "dsk-test", branchId: "default", wsUrl: "", wsToken: "" } as never, orch);
-  const m = mgr as unknown as { runTransportCommand: (c: string, p: unknown, s: string) => void; mock: { getState: () => Mirror } };
-  const toMain = (cmd: string, p?: unknown) => m.runTransportCommand(cmd, p, "ws");
+  const m = mgr as unknown as { runTransportCommand: (c: string, p: unknown, s: string) => void; handleRemoteStep: (c: "NEXT" | "PREV") => void; mock: { getState: () => Mirror } };
+  const toMain = (cmd: string, p?: unknown) => { if (cmd === "NEXT" || cmd === "PREV") m.handleRemoteStep(cmd); else m.runTransportCommand(cmd, p, "ws"); };
   const deck = (id: "A" | "B") => (id === "A" ? o.musicDeckA : o.musicDeckB);
   const active = () => deck(o.activeMusicDeck);
   const standby = () => deck(o.activeMusicDeck === "A" ? "B" : "A");
@@ -64,11 +64,13 @@ const prepCount = (w: ReturnType<typeof world>) => w.calls.filter((c) => c.inclu
   setUrlPlaybackPrefs({ autoMix: true, repeatMode: "playlist" });
   const w = world(); w.start(0);
   const A = w.o.activeMusicDeck;
+  w.at(w.active(), PREPARE_EARLY_AFTER_SEC - 3);
+  assert(`P1 only ${PREPARE_EARLY_AFTER_SEC - 3} s into the track (< ${PREPARE_EARLY_AFTER_SEC} s) → nothing prepared yet (the track's own start stays undisturbed)`, prepCount(w) === 0);
   w.at(w.active(), 130);
-  assert("P1 70 s before the end → nothing prepared yet", prepCount(w) === 0);
-  w.at(w.active(), 141);
-  assert(`P2 ≤${PREPARE_LEAD_SEC} s before the end → item 1 prepared on the STANDBY deck, PAUSED (preloadPaused), active untouched`,
+  assert(`P2 70 s before the end (early prepare, owner 2026-11-02) → item 1 already prepared on the STANDBY deck, PAUSED (preloadPaused), active untouched`,
     prepCount(w) === 1 && w.calls.some((c) => c.endsWith(`:prepare:${urlOf(1)}`) && !c.startsWith(A)) && w.o.activeMusicDeck === A && w.shownIdx() === 0);
+  w.at(w.active(), 141);
+  assert(`P2b entering the ≤${PREPARE_LEAD_SEC} s lead window → still ONE prepare (no duplicate load, a fresh early item is not re-resolved)`, prepCount(w) === 1);
   assert("P3 MAIN declares it owns the automatic progression (renderer must not also step at EOF)", w.mgr.snapshot().mainUrlAutoAdvance === true);
   w.preparedLoads(w.standby());
   assert("P4 prepared item loaded + duration known → ready (still silent, not the current attempt)", w.orch.getPrepared()?.ready === true && w.shownIdx() === 0);
@@ -181,6 +183,100 @@ const h3 = (async () => {
   w.orch.kill();
 }
 
+
+// ── 9. owner 2026-11-02: NEXT in the middle of a song hands over the item prepared EARLY (no discard, no re-resolve) ──
+const h4 = (async () => {
+  setUrlPlaybackPrefs({ autoMix: true, repeatMode: "playlist" });
+  const stops = (w: ReturnType<typeof world>, deckId: string) => w.calls.filter((c) => c === `${deckId}:stop`).length;
+  // N1 — prepared early + ready → manual NEXT reuses it
+  {
+    const w = world(); w.start(0);
+    const S = w.o.activeMusicDeck === "A" ? "B" : "A", A = w.o.activeMusicDeck;
+    w.at(w.active(), 20); w.preparedLoads(w.standby());
+    assert("N0 20 s into a 200 s track → item 1 is prepared and ready", prepCount(w) === 1 && w.orch.getPrepared()?.ready === true);
+    w.toMain("NEXT");
+    assert("N1 NEXT with item 1 prepared + ready → the PREPARED deck is resumed (handed over); item 1 is NOT loaded again",
+      w.calls.filter((c) => c === `${S}:resume`).length === 1 && !w.calls.some((c) => c.includes(`:play:${urlOf(1)}`)) && prepCount(w) === 1);
+    assert("N2 session now shows item 1; the prepared standby deck was not stopped/discarded; the audible deck was not stopped",
+      w.shownIdx() === 1 && w.mirror().currentTrack?.title === "Track 1" && stops(w, S) === 0 && stops(w, A) === 0 && w.orch.getPrepared() === null);
+    w.resumes(w.standby());
+    assert("N3 incoming shows real progress → the EXISTING crossfade ramp runs (outgoing stays audible until then)", w.o.xfadeRampId !== null && (A === "A" ? w.o.musicStA : w.o.musicStB).status === "playing");
+    // after the swap the NEXT item (2) is prepared early again
+    w.o.xfadeRampId && w.orch.kill();
+  }
+  // N4 — reused hand-over fails → same manual rule as before: the audible track is kept, session rolls back, ONE more item is tried
+  {
+    const w = world(); w.start(0);
+    const A = w.o.activeMusicDeck;
+    w.at(w.active(), 20); w.preparedLoads(w.standby());
+    w.toMain("NEXT");
+    assert("N4a reused hand-over started (item 1 shown)", w.shownIdx() === 1);
+    w.standby().handleEvent({ event: "end-file", reason: "error", file_error: "stream died" });
+    assert("N4b incoming failed → the audible track keeps playing (never silence) and the session moves on to try the FOLLOWING item (2) once more (unchanged Gate 1b rule)",
+      (A === "A" ? w.o.musicStA : w.o.musicStB).status === "playing" && w.o.activeMusicDeck === A && w.shownIdx() === 2 && w.calls.some((c) => c.includes(`:play:${urlOf(2)}`)) && stops(w, A) === 0, `idx=${w.shownIdx()}`);
+    w.orch.kill();
+  }
+  // N5 — not ready yet (still resolving) → the existing path loads it (nothing touched before)
+  {
+    const w = world(); w.start(0);
+    w.at(w.active(), 20); // prepared but not loaded yet
+    w.toMain("NEXT");
+    assert("N5 NEXT while item 1 is still resolving → fallback: item 1 loaded the existing way (A/B overlap), session item 1", w.calls.some((c) => c.includes(`:play:${urlOf(1)}`)) && w.shownIdx() === 1 && !w.calls.some((c) => c.endsWith(":resume")));
+    w.orch.kill();
+  }
+  // N6 — quick skipping (before the early-prepare time) → exactly today's behaviour, nothing prepared
+  {
+    const w = world(); w.start(0);
+    w.at(w.active(), 4);
+    w.toMain("NEXT");
+    assert("N6 NEXT 4 s into the track → nothing was prepared; item 1 loaded the existing way", prepCount(w) === 0 && w.calls.some((c) => c.includes(`:play:${urlOf(1)}`)) && w.shownIdx() === 1);
+    w.orch.kill();
+  }
+  // N7 — target mismatch (loop "track": the AUTO target is the same item, a manual NEXT goes to the next one) → fallback
+  {
+    setUrlPlaybackPrefs({ repeatMode: "track" });
+    const w = world(); w.start(0);
+    w.at(w.active(), 20); w.preparedLoads(w.standby());
+    w.toMain("NEXT");
+    assert("N7 loop 'track': prepared item is not the manual NEXT target → NEXT loads item 1 the existing way (never the wrong song)", w.calls.some((c) => c.includes(`:play:${urlOf(1)}`)) && w.shownIdx() === 1 && !w.calls.some((c) => c.endsWith(":resume")));
+    w.orch.kill();
+    setUrlPlaybackPrefs({ repeatMode: "playlist" });
+  }
+  // N8 — a Play Next (queue) head prepared early is what NEXT plays, and it leaves the queue
+  {
+    const w = world(); w.start(0);
+    w.toMain("QUEUE_NEXT", { source: { id: "url-9", title: "Dropped 9", url: urlOf(9), type: "youtube", origin: "source" } });
+    w.at(w.active(), 20); w.preparedLoads(w.standby());
+    assert("N8a the queue head (not playlist item 1) is the prepared item", w.calls.some((c) => c.endsWith(`:prepare:${urlOf(9)}`)) && !w.calls.some((c) => c.endsWith(`:prepare:${urlOf(1)}`)));
+    w.toMain("NEXT");
+    assert("N8b NEXT → the prepared queue item is handed over, not loaded again; the queue is empty and the playlist position is kept (0)",
+      w.calls.filter((c) => c.endsWith(":resume")).length === 1 && !w.calls.some((c) => c.includes(`:play:${urlOf(9)}`)) && (w.mirror().playNextQueue ?? []).length === 0 && w.mirror().currentTrack?.title === "Dropped 9" && (w.mgr as unknown as { urlSession: { index: number } }).urlSession.index === 0);
+    w.orch.kill();
+  }
+  // N9 — an early-prepared item that idled too long is re-prepared ONCE when the lead window starts (natural end stays as fresh as before)
+  {
+    const realNow = Date.now; const T = realNow.call(Date);
+    try {
+      Date.now = () => T;
+      const w = world(); w.start(0);
+      w.at(w.active(), 20); w.preparedLoads(w.standby());
+      Date.now = () => T + 60_000;
+      w.at(w.active(), 141);
+      assert("N9a a 60 s old prepared item at the lead window → kept (not stale)", prepCount(w) === 1);
+      w.orch.kill();
+      Date.now = () => T;
+      const w2 = world(); w2.start(0);
+      w2.at(w2.active(), 20); w2.preparedLoads(w2.standby());
+      Date.now = () => T + 200_000;
+      w2.at(w2.active(), 141); w2.at(w2.active(), 142);
+      assert("N9b a 200 s old prepared item when the lead window starts → discarded and prepared again (fresh connection)", prepCount(w2) === 2 && w2.calls.some((c) => c.endsWith(":stop")));
+      w2.at(w2.active(), 143); w2.at(w2.active(), 144);
+      assert("N9c … only once per track (no refresh loop)", prepCount(w2) === 2);
+      w2.orch.kill();
+    } finally { Date.now = realNow; }
+  }
+})();
+
 // ── static pins ──
 const rd = (p: string) => readFileSync(path.join(__dirname, "..", "..", p), "utf-8").replace(/\r\n/g, "\n");
 const mpv = rd("desktop/src/main/mpv-manager.ts");
@@ -192,7 +288,7 @@ assert("S3 renderer pushes AUTOMIX + loop to MAIN and rebases its session baseli
   /desktop\.setPlaybackPrefs\(\{ autoMix: getAutoMix\(\), repeatMode: getRepeatMode\(\) \}\)/.test(dpc) && /lastSentUrlLeafRef\.current = leaf;/.test(dpc));
 assert("S4 default mix length 9 s (renderer + MAIN)", /const DEFAULT_MIX_DURATION: MixDuration = 9;/.test(rd("lib/mix-preferences.ts")) && new PlaybackOrchestrator().getCrossfadeSec() === 9);
 
-void h3.then(() => {
+void Promise.all([h3, h4]).then(() => {
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(process.exitCode ?? 0);
 });

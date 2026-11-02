@@ -10,6 +10,13 @@
 
 /** Prepare the next item this many seconds before the current one ends. */
 export const PREPARE_LEAD_SEC = 60;
+/** Owner 2026-11-02 ("only the next song, on the computer"): prepare the next item as soon as the current one has really
+ *  played this long, so a manual / remote NEXT in the middle of a song finds it ready instead of resolving it from zero.
+ *  Waiting this long keeps the current track's own start undisturbed and never prepares during quick NEXT-NEXT skipping. */
+export const PREPARE_EARLY_AFTER_SEC = 8;
+/** A prepared item that has idled longer than this when the lead window starts is re-prepared once (its paused network
+ *  connection may have gone stale), so the natural-end hand-over is exactly as fresh as it was before early preparing. */
+export const PREPARE_REFRESH_AFTER_MS = 150_000;
 /** Consecutive automatic failures before MAIN stops skipping (the current audible track is never touched). */
 export const MAX_AUTO_FAILURES = 3;
 

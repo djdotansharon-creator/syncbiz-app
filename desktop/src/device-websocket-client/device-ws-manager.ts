@@ -8,7 +8,7 @@ import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
 import type { StationSessionMeta } from "../playback-agent/mock-playback-session";
 import {
-  MAX_AUTO_FAILURES, PREPARE_LEAD_SEC, buildQueueItems, buildUrlSession, nextAutoIndex, sourceIdFor,
+  MAX_AUTO_FAILURES, PREPARE_EARLY_AFTER_SEC, PREPARE_LEAD_SEC, PREPARE_REFRESH_AFTER_MS, buildQueueItems, buildUrlSession, nextAutoIndex, sourceIdFor,
   type QueueItem, type RepeatMode, type UrlSession,
 } from "./url-auto-advance";
 import { isMainWsAttemptId } from "../main/main-attempt-id";
@@ -161,7 +161,9 @@ export class DeviceWsManager {
   // ── P0 Gate 2c: MAIN owns the AUTOMATIC progression of the URL session it is playing (url-auto-advance.ts) ──
   private urlSession: UrlSession | null = null;
   /** the next item prepared (paused + silent) on the standby deck for the attempt now playing */
-  private autoPrep: { forAttempt: number; target: AutoTarget; preparedAttemptId: number } | null = null;
+  private autoPrep: { forAttempt: number; target: AutoTarget; preparedAttemptId: number; preparedAtMs: number } | null = null;
+  /** the attempt whose stale early-prepared item was already re-prepared once at the lead window (never twice) */
+  private prepRefreshedFor = 0;
   /** the last hand-over / MAIN navigation, kept until its attempt is proven — a failure rolls the session back */
   private autoCommit: { prevAttemptId: number; prevIndex: number; prevQueuedNow: QueueItem | null; attemptId: number; target: AutoTarget; manual?: boolean } | null = null;
   // ── P0 Drop Next: MAIN's Play Next queue (URLs only) ──
@@ -656,15 +658,16 @@ export class DeviceWsManager {
     }
     if (m.status !== "playing" || !(typeof m.duration === "number" && m.duration > 0) || orch.isMusicAttemptPending()) return;
     const remaining = m.duration - (m.position ?? 0);
-    // (d) prepare the next item ~PREPARE_LEAD_SEC before the end (paused + silent → resolved + buffered)
+    // (d) prepare the next item (paused + silent → resolved + buffered): once the current one has really played
+    //     PREPARE_EARLY_AFTER_SEC (so a manual / remote NEXT can reuse it), and at the latest PREPARE_LEAD_SEC before the end
     if (!this.autoPrep || this.autoPrep.forAttempt !== id) {
-      if (remaining <= PREPARE_LEAD_SEC && this.autoFailures < MAX_AUTO_FAILURES) {
+      if ((remaining <= PREPARE_LEAD_SEC || (m.position ?? 0) >= PREPARE_EARLY_AFTER_SEC) && this.autoFailures < MAX_AUTO_FAILURES) {
         const t = this.nextTarget(false);
         const url = t ? this.targetUrl(t) : "";
         if (t && url) {
           const pid = nextMainWsAttemptId();
           if (orch.prepareStandby(url, pid)) {
-            this.autoPrep = { forAttempt: id, target: t, preparedAttemptId: pid };
+            this.autoPrep = { forAttempt: id, target: t, preparedAttemptId: pid, preparedAtMs: Date.now() };
             this.rememberAutoAttempt(pid);
             fileLog("INFO", "URL_AUTO_PREPARE", { forAttempt: id, target: t.kind, nextIndex: t.kind === "playlist" ? t.index : null, attemptId: pid, remainingSec: Math.round(remaining) });
           }
@@ -689,6 +692,15 @@ export class DeviceWsManager {
       orch.discardPrepared();
       this.autoPrep = null; // the following item is prepared on the next tick (capped)
       if (this.restoreVerifying && this.autoFailures >= MAX_AUTO_FAILURES) this.restoreGiveUp("prepared items failed"); // P0 Gate 2d
+      return;
+    }
+    // an item prepared long ago (early prepare) whose lead window starts now → re-prepare it ONCE, so the hand-over at
+    // the end never relies on a connection that idled for minutes (a failed take-over would skip that song)
+    if (remaining <= PREPARE_LEAD_SEC && this.prepRefreshedFor !== id && Date.now() - this.autoPrep.preparedAtMs > PREPARE_REFRESH_AFTER_MS) {
+      this.prepRefreshedFor = id;
+      fileLog("INFO", "URL_AUTO_PREPARE_REFRESH", { forAttempt: id, attemptId: prep.attemptId, ageSec: Math.round((Date.now() - this.autoPrep.preparedAtMs) / 1000) });
+      orch.discardPrepared();
+      this.autoPrep = null; // prepared again on the next tick (block d)
       return;
     }
     // (e) mix point → hand the prepared item over (AUTOMIX on: the user's mix length; off: a quick 1 s change at the end)
@@ -755,7 +767,36 @@ export class DeviceWsManager {
     if (this.restoreVerifying && !this.restoreDormant) { this.restoreVerifying = false; this.clearRestoreFallbackTimer(); } // P0 Gate 2d: the user navigates
     this.autoFailures = 0;
     this.autoFailed.clear();
+    if (cmd === "NEXT" && this.navReusePrepared(orch, t)) return true;
     this.navLoad(orch, t, cmd, "user");
+    return true;
+  }
+
+  /**
+   * Owner 2026-11-02: a manual / remote NEXT whose target is EXACTLY the item already prepared (paused + silent, ready)
+   * on the standby deck hands that item over instead of discarding it and resolving it again from zero. Same manual
+   * bookkeeping as navLoad (rollback target, pre-load metadata, one-more-try on failure). false = not reusable →
+   * the caller loads the target the existing way (nothing was touched).
+   */
+  private navReusePrepared(orch: PlaybackOrchestrator, t: AutoTarget): boolean {
+    const ap = this.autoPrep;
+    const cur = orch.getState().music;
+    if (!ap || ap.forAttempt !== cur.attemptId || cur.status !== "playing" || !this.sameTarget(ap.target, t)) return false;
+    const prep = orch.getPrepared();
+    if (!prep || prep.attemptId !== ap.preparedAttemptId || !prep.ready || prep.failed) return false;
+    const before = this.mock.captureSession();
+    const prev = { prevAttemptId: this.watchedAttempt(), prevIndex: this.urlSession?.index ?? 0, prevQueuedNow: this.queuedNow };
+    if (!orch.commitPreparedCrossfade(orch.getCrossfadeSec())) return false;
+    const pid = ap.preparedAttemptId;
+    this.autoPrep = null;
+    this.autoEofHandledFor = 0;
+    this.autoCommit = null;
+    this.applyTarget(t, pid);
+    // registered only AFTER the hand-over call (same rule as navLoad): its first push still names the OLD attempt as watched
+    this.autoCommit = { ...prev, attemptId: pid, target: t, manual: true };
+    const m = orch.getState().music;
+    this.preLoadSession = m.attemptMode === "crossfade" && m.attemptId === pid ? { attemptId: pid, session: before } : null;
+    fileLog("INFO", "URL_NAV", { cmd: "NEXT", why: "user", reused: true, target: t.kind, index: t.kind === "playlist" ? t.index : null, attemptId: pid });
     return true;
   }
 
