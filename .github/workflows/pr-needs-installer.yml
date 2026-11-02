@@ -1,0 +1,37 @@
+name: PR needs installer
+
+# Owner 2026-11-02: anything under desktop/ (the player's engine, watchdog, installer config) reaches stations ONLY through a
+# new installer; the web screen and the server update by themselves. So a pull request that touches desktop/ gets the
+# label `needs-installer` and one explanatory comment, so nobody has to remember. It only labels and comments.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "desktop/**"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to flag (manual run / test)"
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  flag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label and comment (once)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          gh label create needs-installer --color FBCA04 --description "Touches desktop/ - reaches players only through a new installer" --repo "$REPO" 2>/dev/null || true
+          gh pr edit "$PR" --add-label needs-installer --repo "$REPO"
+          if ! gh pr view "$PR" --repo "$REPO" --json comments --jq '.comments[].body' | grep -q "needs-installer-marker"; then
+            gh pr comment "$PR" --repo "$REPO" --body "<!-- needs-installer-marker -->
+          **Needs a new installer.** This pull request changes \`desktop/\` (the player engine / watchdog / installer config). Merging it does **not** update any player by itself: it reaches stations only after a new installer is built and published and installed (today by hand). Web-screen and server changes do not need this."
+          fi
