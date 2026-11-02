@@ -1,41 +1,59 @@
 /**
  * Player self-update — Electron wiring for self-update-core.ts (owner 2026-11-02). See the core for the rules.
- * The small white "VONO <version>" window with a moving black bar (no frame, no percentage) is shown while the installer is downloaded and verified,
- * and stays until the installer stops this player (or a 5-minute safety timeout closes it).
+ * Like a normal app updater: when "Update" is clicked the player's windows are HIDDEN and only the small white "VONO <version>" window (a separate PowerShell/WPF
+ * process, self-update-splash.ts) stays on the desktop — through the download, the installer stopping the player, and until the new player's window is up.
+ * If anything fails before the installer takes over, the splash is cancelled and the player is shown again.
  */
-import { app, BrowserWindow, screen, shell } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { createReadStream, mkdirSync, rmSync, writeFileSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { downloadToFile, fetchJson } from "./runtime-binaries/net";
 import { SYNCBIZ_HOSTED_WEB_APP_URL } from "./hosted-url";
 import { fileLog } from "./file-logger";
-import { updateWindowHtml } from "./self-update-window-html";
+import { splashScript } from "./self-update-splash";
 import { INSTALLER_ARGS, performSelfUpdate, resetSelfUpdateBusy, type SelfUpdateDeps, type SelfUpdateResult, type UpdateInfo } from "./self-update-core";
 
 const INSTALL_SAFETY_TIMEOUT_MS = 5 * 60_000;
-let win: BrowserWindow | null = null;
+/** the splash dying this soon after it started means it could not show (blocked PowerShell / WPF) — the player must not stay hidden */
+const SPLASH_EARLY_EXIT_MS = 3_000;
+let hiddenWindows: BrowserWindow[] = [];
 
-function showWindow(version: string): void {
-  if (win && !win.isDestroyed()) return;
-  const wa = screen.getPrimaryDisplay().workArea;
-  const w = 340, h = 112;
-  win = new BrowserWindow({
-    width: w, height: h, x: Math.round(wa.x + (wa.width - w) / 2), y: Math.round(wa.y + (wa.height - h) / 2),
-    frame: false, transparent: true, resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
-    skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, backgroundColor: "#00000000",
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
-  });
-  win.setAlwaysOnTop(true, "screen-saver");
-  void win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(updateWindowHtml(version)));
-  win.once("ready-to-show", () => win?.showInactive());
-  win.on("closed", () => { win = null; });
+const updateDir = (): string => path.join(app.getPath("temp"), "vono-update");
+const cancelFile = (): string => path.join(updateDir(), "cancel");
+
+function hidePlayer(): void {
+  hiddenWindows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible());
+  for (const w of hiddenWindows) w.hide();
 }
 
+function showPlayer(): void {
+  for (const w of hiddenWindows) if (!w.isDestroyed()) w.show();
+  hiddenWindows = [];
+}
+
+/** Start the small window; the player is hidden only once it really started (if it cannot start, the update still works with the player visible). */
+function showWindow(version: string): void {
+  try {
+    mkdirSync(updateDir(), { recursive: true });
+    rmSync(cancelFile(), { force: true });
+    const script = path.join(updateDir(), "vono-update-window.ps1");
+    writeFileSync(script, splashScript(), "utf8");
+    const startedAt = Date.now();
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-STA", "-WindowStyle", "Hidden", "-File", script, "-Version", version, "-OldPid", String(process.pid), "-Cancel", cancelFile()], { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", (e) => fileLog("WARN", "SELF_UPDATE_SPLASH_FAILED", { message: e.message }));
+    child.once("spawn", () => { child.unref(); hidePlayer(); });
+    child.once("exit", () => { if (Date.now() - startedAt < SPLASH_EARLY_EXIT_MS) { fileLog("WARN", "SELF_UPDATE_SPLASH_EXITED_EARLY"); showPlayer(); } });
+  } catch (e) {
+    fileLog("WARN", "SELF_UPDATE_SPLASH_FAILED", { message: (e as Error)?.message });
+  }
+}
+
+/** The update failed before the installer took over: the splash goes away and the player comes back. */
 function closeWindow(): void {
-  if (win && !win.isDestroyed()) win.destroy();
-  win = null;
+  try { writeFileSync(cancelFile(), "x"); } catch { /* the splash also has its own safety limit */ }
+  showPlayer();
 }
 
 function sha256File(file: string): Promise<string> {

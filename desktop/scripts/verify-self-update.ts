@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { INSTALLER_ARGS, isNewerVersion, performSelfUpdate, resetSelfUpdateBusy, type SelfUpdateDeps, type UpdateInfo } from "../src/main/self-update-core";
-import { updateWindowHtml } from "../src/main/self-update-window-html";
+import { PLAYER_PROCESS_NAMES, SPLASH_SAFETY_SECONDS, splashScript } from "../src/main/self-update-splash";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -76,11 +76,17 @@ function fake(over: Partial<SelfUpdateDeps> = {}, info: UpdateInfo | null = { ve
   { resetSelfUpdateBusy(); const { deps } = fake({ sha256File: async () => HASH.toUpperCase() }, { version: "2.3.2", installerUrl: URL_, sha256: ` ${HASH.toUpperCase()} ` }); const r = await performSelfUpdate(deps, "2.3.1");
     assert("S9 upper / lower case and spaces in the hash do not matter", r.ok === true); resetSelfUpdateBusy(); }
 
-  // ── the window ──
-  const html = updateWindowHtml("2.3.2");
-  assert("W1 the window: white rounded card, 'VONO' + the version, one black moving bar — no percentage, no border, no extra text",
-    /background:#fff;border-radius:18px/.test(html) && />VONO<\/b><span>2\.3\.2<\/span>/.test(html) && /background:#111;animation:run/.test(html) && !/%</.test(html.replace(/width:38%|width:100%|height:100%|left:-40%|left:102%|0%\{|100%\{/g, "")) && !/border:/.test(html) && !/<(p|h1|h2|button|a)\b/.test(html));
-  assert("W2 the version is escaped (nothing a site could send runs inside the window)", !/<script|<img/.test(updateWindowHtml('<img src=x onerror=1>')) && /&lt;img/.test(updateWindowHtml('<img src=x onerror=1>')));
+  // ── the window (a separate PowerShell/WPF process; the real look is proven only on Windows) ──
+  const ps = splashScript();
+  const textBlocks = (ps.match(/<TextBlock /g) ?? []).length;
+  assert("W1 the window: white rounded card (340x112, radius 18), 'VONO' + the version, ONE black bar that keeps moving — no frame, no percentage, no other text",
+    /Width="340" Height="112"/.test(ps) && /Background="White" CornerRadius="18"/.test(ps) && /Text="VONO"/.test(ps) && /x:Name="Ver"/.test(ps) && textBlocks === 2
+    && /Background="#111111" Canvas\.Left="-120"/.test(ps) && /RepeatBehavior\]::Forever/.test(ps) && !/BorderBrush|BorderThickness|%|ProgressBar/.test(ps.replace(/\$_\.[A-Za-z]+/g, "")));
+  assert("W2 transparent, always on top, no taskbar button, no chrome (it must look like a small card floating on the desktop)", /WindowStyle="None" AllowsTransparency="True" Background="Transparent"/.test(ps) && /ShowInTaskbar="False"/.test(ps) && /Topmost="True"/.test(ps) && /WindowStartupLocation="CenterScreen"/.test(ps));
+  assert("W3 it stays through the download and the install: closes only on the cancel file, the safety limit, or when a NEW player window exists (the old process is gone)",
+    /Test-Path -LiteralPath \$script:cancelFile/.test(ps) && new RegExp(`TotalSeconds -gt ${SPLASH_SAFETY_SECONDS}`).test(ps) && /Get-Process -Id \$script:oldPid/.test(ps) && /\$_\.Id -ne \$script:oldPid/.test(ps) && /MainWindowHandle -ne 0/.test(ps) && PLAYER_PROCESS_NAMES.every((n) => ps.includes(`'${n}'`)));
+  assert("W4 any problem inside the script ends it quietly (the update itself never depends on it); plain ASCII; the here-string is well-formed",
+    /\} catch \{ exit 0 \}\s*$/.test(ps) && /[^\x00-\x7F]/.test(ps) === false && /\$xaml = @'\n/.test(ps) && /\n'@\n/.test(ps) && /^param\(\[string\]\$Version, \[int\]\$OldPid, \[string\]\$Cancel\)/.test(ps));
 
   // ── static pins on the wiring ──
   const rd = (p: string) => readFileSync(path.join(__dirname, "..", "..", p), "utf-8").replace(/\r\n/g, "\n");
@@ -90,5 +96,8 @@ function fake(over: Partial<SelfUpdateDeps> = {}, info: UpdateInfo | null = { ve
   assert("P3 the update source is the site the player is pinned to and must be https", /SYNCBIZ_HOSTED_WEB_APP_URL/.test(wiring) && /\^https:\\\/\\\/\/i\.test\(installerUrl\)/.test(wiring));
   assert("P4 IPC: START_UPDATE constant → handler → preload → renderer API type", /START_UPDATE: "mvp:start-update"/.test(rd("desktop/src/shared/mvp-types.ts")) && /MVP_IPC\.START_UPDATE, \(\) => startSelfUpdate\(\)/.test(rd("desktop/src/main/ipc-mvp.ts")) && /startUpdate: \(\)/.test(rd("desktop/src/preload/index.ts")) && /startUpdate: \(\) => Promise/.test(rd("desktop/src/shared/mvp-desktop-api.ts")));
   assert("P5 nothing in the update touches playback / MPV / the WS manager", !/orchestrator|mpv|device-ws|playback/i.test((rd("desktop/src/main/self-update-core.ts") + wiring).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")));
+  assert("P6 the player is only HIDDEN (never closed / quit) and only once the window really started; a window that dies in the first seconds brings the player back; a failure writes the cancel file and shows the player",
+    /child\.once\("spawn", \(\) => \{ child\.unref\(\); hidePlayer\(\); \}\)/.test(wiring) && /w\.hide\(\)/.test(wiring) && !/w\.close\(|w\.destroy\(|app\.quit|app\.exit/.test(wiring) && /SPLASH_EARLY_EXIT_MS\) \{[^}]*showPlayer\(\)/.test(wiring) && /writeFileSync\(cancelFile\(\), "x"\)[\s\S]*showPlayer\(\)/.test(wiring));
+  assert("P7 the window is a separate hidden PowerShell process (-STA, -File, the old pid, the cancel file), detached", /spawn\("powershell\.exe", \["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-STA", "-WindowStyle", "Hidden", "-File", script, "-Version", version, "-OldPid", String\(process\.pid\), "-Cancel", cancelFile\(\)\], \{ detached: true, stdio: "ignore", windowsHide: true \}\)/.test(wiring));
   console.log(`\n${pass} passed, ${fail} failed`);
 })();
