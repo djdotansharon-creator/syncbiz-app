@@ -29,14 +29,18 @@ jobs:
         run: npm ci
 
       # 7zr.exe is needed by fetch-mpv (extracts the mpv archive) and ships in the installer.
-      - name: Fetch 7zr.exe
+      # Source: the official 7-Zip release on GitHub (www.7-zip.org was unreachable from the runner: "No such host"),
+      # pinned to release 26.05 and verified against that asset's published SHA-256.
+      - name: Fetch 7zr.exe (pinned + verified)
         shell: pwsh
         working-directory: desktop
         run: |
           New-Item -ItemType Directory -Force -Path resources | Out-Null
-          if (-not (Test-Path resources/7zr.exe)) {
-            Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile resources/7zr.exe
-          }
+          $expected = "9bf582b894dfa665f852d7e9112b02290a1c303c2d95a21fcdc41ffcb03143b7"
+          Invoke-WebRequest -Uri "https://github.com/ip7z/7zip/releases/download/26.05/7zr.exe" -OutFile resources/7zr.exe
+          $actual = (Get-FileHash resources/7zr.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { throw "7zr.exe SHA-256 mismatch: expected $expected, got $actual" }
+          "7zr.exe 26.05 SHA256 $actual" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       # Same chain as `dist:win` in desktop/package.json, with an explicit `--publish never`.
       - name: Build installer (no publish)
