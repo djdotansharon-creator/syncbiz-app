@@ -132,9 +132,8 @@ html[data-sb-display="white"][data-sb-control] .cr-map-panel { background: linea
 html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-land-fill stop:first-child { stop-color: #d9dce3; }
 html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-land-fill stop:last-child { stop-color: #c4c8d1; }
 html[data-sb-display="white"][data-sb-control] .cr-map-panel path[fill="rgba(255,255,255,0.17)"] { fill: rgba(0, 0, 0, 0.1); }
-html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-dot-229-229-234 stop:nth-child(1) { stop-color: #c7c7cc; }
-html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-dot-229-229-234 stop:nth-child(2) { stop-color: #8e8e93; }
-html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-dot-229-229-234 stop:nth-child(3) { stop-color: #5c5c61; }
+/* a dot with no brand colour is the pale neutral #e5e5ea — on the light land it needs a visible grey (the dots are flat discs now, no gradient) */
+html[data-sb-display="white"][data-sb-control] .cr-map-panel circle[fill="#e5e5ea"] { fill: #8e8e93; }
 html[data-sb-display="white"][data-sb-control] .cr-map-panel #vono-dot-229-229-234-glow stop { stop-color: #8e8e93; }
 html[data-sb-display="white"][data-sb-control] .cr-map-panel text { fill: #1c1c1e; stroke: rgba(255, 255, 255, 0.92); }
 html[data-sb-display="white"][data-sb-control] .cr-map-panel g > text + text { fill: #48484a; }
