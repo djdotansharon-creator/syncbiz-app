@@ -1,7 +1,7 @@
 """
 CONTROL ROOM map geometry generator (owner 2026-11-02: the map is ONE smooth block; the regions are pieces that complete each other like a puzzle).
 Writes lib/control-room-map-pieces.ts. Needs shapely (pip install shapely numpy) and the two input files made by tools/map/export-map-inputs.ts:
-    npx tsx tools/map/export-map-inputs.ts <dir>      # writes <dir>/land.json + <dir>/regions.json
+    npx tsx tools/map/export-map-inputs.ts <dir>      # writes <dir>/land.json + <dir>/regions.json + <dir>/overrides.json
     cd <dir> && python3 <repo>/tools/map/gen_map_pieces.py 0.025 0.025 0.007 0.012 <repo>/lib/control-room-map-pieces.ts 3
 Steps: (1) land = union of the land rings, needles cut (opening), grown a little, simplified, every corner rounded (Chaikin) = the outline;
 (2) each region polygon is clipped to the outline; the land the regions do not cover (West Bank, Gaza, slivers) follows lib/control-room-regions.ts
@@ -38,6 +38,14 @@ Ls = Polygon(chaikin(Lg.exterior.coords, 5)).buffer(0)
 print("sketch holes", len(Ls.interiors) if hasattr(Ls, "interiors") else "multi")
 R = {r["id"]: unary_union([poly(x) for x in r["rings"]]) for r in regs}
 ids = list(R.keys())
+# municipal exceptions (lib/control-room-regions.ts checks them BEFORE the sub-districts): the city is drawn in the region its branches belong to, so a branch's dot never floats outside its region
+import os
+if os.path.exists("overrides.json"):
+    for o in json.load(open("overrides.json")):
+        O = unary_union([poly(x) for x in o["rings"]])
+        for i in ids:
+            R[i] = R[i].union(O) if i == o["region"] else R[i].difference(O)
+        print("exception", o["name"], "->", o["region"])
 # 1. exact region parts inside the sketch
 P = {i: R[i].intersection(Ls) for i in ids}
 # resolve overlaps between regions (should be none) by order
@@ -95,6 +103,23 @@ def soft(g):
     if PIECE_ROUND > 0: g = round_poly(g)
     return g.intersection(Ls)
 S = {i: soft(P[i]) for i in ids}
+# the municipal exceptions are laid onto the smoothed pieces (a gentler rounding than the pieces get: a city is only ~3 km wide, the piece smoothing would erase it) — the city goes to its region and is cut out of every other piece,
+# BEFORE the re-tiling, so the neighbour's smoothing (it closes narrow notches) can never hand a city back. A city that touches its region's body leaves a notch in the neighbour, never a hole.
+if os.path.exists("overrides.json"):
+    from shapely.ops import nearest_points
+    by_region = {}
+    for o in json.load(open("overrides.json")):
+        by_region.setdefault(o["region"], []).append(unary_union([poly(x) for x in o["rings"]]))
+    for region, cities in by_region.items():
+        # neighbouring cities (Ra'anana, Kfar Saba, Hod HaSharon) are fused into one block first (their separately-drawn borders leave slivers), then rounded gently and tied to the region's body
+        block = unary_union(cities).buffer(0.003, 12).buffer(-0.003, 12)
+        Os = round_poly(block.buffer(0.004, 12).buffer(-0.008, 12).buffer(0.004, 12).simplify(SIMP / 2, preserve_topology=True)).intersection(Ls)
+        for comp in (list(Os.geoms) if hasattr(Os, "geoms") else [Os]):
+            if comp.is_empty or comp.intersects(S[region]): continue
+            a, b = nearest_points(comp, S[region])   # a block that does not touch the body would leave a hole in its old neighbour
+            Os = Os.union(LineString([a, b]).buffer(0.006, 8))
+        for i in ids:
+            S[i] = S[i].union(Os) if i == region else S[i].difference(Os)
 order = sorted(ids, key=lambda i: S[i].area)   # small pieces keep their shape, the biggest one takes the remainder
 taken = Polygon(); Q = {}
 for i in order:
@@ -116,6 +141,9 @@ for gp in (list(dust.geoms) if hasattr(dust, "geoms") else [dust]):
     if gp.is_empty or gp.area < 1e-9: continue
     best = max(ids, key=lambda i: gp.boundary.intersection(Q[i].buffer(1e-7)).length)
     Q[best] = unary_union([Q[best], gp])
+for i in ids:
+    holes = sum(len(p.interiors) for p in (Q[i].geoms if hasattr(Q[i], "geoms") else [Q[i]]))
+    if holes: print("WARNING piece", i, "has", holes, "hole(s) — the output keeps exterior rings only")
 outline = unary_union(list(Q.values()))
 print("outline parts", len(outline.geoms) if hasattr(outline, "geoms") else 1, "area", round(outline.area, 4), "sketch", round(Ls.area, 4))
 overlap = sum(Q[a].intersection(Q[b]).area for k, a in enumerate(ids) for b in ids[k + 1:])
@@ -153,7 +181,8 @@ ts_header = """/**
  * (lib/control-room-regions-data.ts) — do not hand-edit. [longitude, latitude].
  *  - MAP_OUTLINE: the smooth sketch of the land (needles cut, bays closed a little, every corner rounded) — one ring.
  *  - MAP_PIECES: the seven regions as pieces that tile MAP_OUTLINE exactly (no gaps, no overlaps; the West Bank follows the same rule as lib/control-room-regions.ts: north of 31.98 -> Sharon & Shomron,
- *    the rest -> the nearest region). Display only: which region a branch BELONGS to is still decided by the real polygons in lib/control-room-regions.ts.
+ *    the rest -> the nearest region). The municipal exceptions of lib/control-room-regions.ts (Ra'anana, Kfar Saba, Hod HaSharon -> Sharon & Shomron; Rishon LeZion -> Gush Dan; Modi'in -> Jerusalem & Modi'in)
+ *    are drawn in the region their branches belong to, so a dot is always inside its own piece. Display only: which region a branch BELONGS to is still decided by lib/control-room-regions.ts.
  */
 export type MapRing = ReadonlyArray<readonly [number, number]>;
 """
