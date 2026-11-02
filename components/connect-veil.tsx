@@ -17,16 +17,17 @@ import { isControlScreenPath } from "@/lib/control-screen";
 import { getControlBranch } from "@/lib/control-branch";
 import { BranchPicker } from "@/components/remote-bar/branch-picker";
 import { useTr } from "@/lib/i18n/use-tr";
+import { EMERGENCY_PLAYER_KEY, clearEmergencyPlayer, readEmergencyPlayer, setEmergencyPlayer } from "@/lib/emergency-player";
 import "@/components/connect-veil.css";
 
-/** the deliberate "use this browser as the Player" choice — kept only until the browser connects */
-export const EMERGENCY_PLAYER_KEY = "vono_emergency_player";
+/** the deliberate "use this browser as the Player" choice — kept only until the browser connects (lib/emergency-player.ts) */
+export { EMERGENCY_PLAYER_KEY };
 /** how long a screen may stay "connecting" before the small window explains */
 export const VEIL_WINDOW_AFTER_MS = 5000;
 const FADE_MS = 260;
 
 function readEmergency(): boolean {
-  try { return window.localStorage.getItem(EMERGENCY_PLAYER_KEY) === "1"; } catch { return false; }
+  return readEmergencyPlayer();
 }
 
 export function ConnectVeil({ canManage }: { canManage: boolean }): ReactElement | null {
@@ -49,7 +50,7 @@ export function ConnectVeil({ canManage }: { canManage: boolean }): ReactElement
   if (connected && !everConnected) setEverConnected(true);
   useEffect(() => {
     // an emergency choice is forgotten once the browser is really connected
-    if (connected) { try { window.localStorage.removeItem(EMERGENCY_PLAYER_KEY); } catch { /* ignore */ } }
+    if (connected && readEmergencyPlayer()) clearEmergencyPlayer();
   }, [connected]);
 
   // the small window explains after a few seconds of "connecting"; it resets whenever the veil is not up
@@ -90,7 +91,7 @@ export function ConnectVeil({ canManage }: { canManage: boolean }): ReactElement
   const branch = chosen && chosen !== "null" ? (JSON.parse(chosen) as { branchId: string }) : null;
   const needPicker = active && slow && canManage && !branch && !pickerOff;
   const useAsPlayer = () => {
-    try { window.localStorage.setItem(EMERGENCY_PLAYER_KEY, "1"); } catch { /* the choice still holds for this page */ }
+    setEmergencyPlayer(); // stored + announced: the device context turns this browser into a Player at once
     setEmergency(true);
   };
 
