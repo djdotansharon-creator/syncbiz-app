@@ -1,0 +1,76 @@
+name: Desktop Windows installer (build only)
+
+# Builds the Windows installer exactly like `npm run dist:win` (icons, mpv, watchdog Node runtime, watchdog bundle,
+# electron-builder) on a GitHub-hosted Windows runner and uploads it as a workflow ARTIFACT.
+# It NEVER publishes: no tag, no GitHub Release, no upload to the site. Publishing a release is a separate, deliberate step.
+# Run: Actions -> "Desktop Windows installer (build only)" -> Run workflow (branch: main).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm ci
+
+      # 7zr.exe is needed by fetch-mpv (extracts the mpv archive) and ships in the installer.
+      - name: Fetch 7zr.exe
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          New-Item -ItemType Directory -Force -Path resources | Out-Null
+          if (-not (Test-Path resources/7zr.exe)) {
+            Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile resources/7zr.exe
+          }
+
+      # Same chain as `dist:win` in desktop/package.json, with an explicit `--publish never`.
+      - name: Build installer (no publish)
+        working-directory: desktop
+        run: |
+          npm run build-icons
+          node scripts/fetch-mpv.cjs
+          node scripts/fetch-node-runtime.cjs
+          npm run build
+          npm run build:watchdog
+          npx electron-builder --win --publish never
+
+      - name: Installer facts (name, size, SHA256)
+        shell: pwsh
+        working-directory: desktop/dist-installer
+        run: |
+          Get-ChildItem -Filter *.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            "$($_.Name)  $($_.Length) bytes  SHA256 $h" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: vono-win-installer
+          path: desktop/dist-installer/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      # The packed app code, so the installer can be verified (which environment it points at) without installing it.
+      - name: Upload app.asar (for verification)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vono-win-app-asar
+          path: desktop/dist-installer/win-unpacked/resources/app.asar
+          if-no-files-found: warn
+          retention-days: 14
