@@ -1121,7 +1121,7 @@ export class DeviceWsManager {
       return;
     }
     console.log("[SyncBiz:desktop-mpv:route] command → PlaybackOrchestrator (music Ch-A)", { cmd });
-    type P = { url?: string; volume?: number; source?: { url?: string } };
+    type P = { url?: string; volume?: number; position?: number; source?: { url?: string } };
     const p = payload as P | null | undefined;
 
     switch (cmd) {
@@ -1303,6 +1303,14 @@ export class DeviceWsManager {
         if (typeof vol === "number" && Number.isFinite(vol)) {
           orch.setVolume(vol);
         }
+        break;
+      }
+      case "SEEK": {
+        // 2026-11-03 (owner: "the time bar jumps back"): a controller's time-bar drag — a phone / browser (the station's own window seeks MPV through
+        // the desktop bridge). Absolute position in seconds into the audible deck. Until now MAIN had no SEEK case, so the command was dropped and the
+        // bar returned to MPV's real position. A missing / non-numeric / negative position does nothing.
+        const pos = p?.position;
+        if (typeof pos === "number" && Number.isFinite(pos) && pos >= 0) orch.seekMusic(pos);
         break;
       }
       case "PLAY_INTERRUPT": {
