@@ -98,6 +98,7 @@ export function BranchPanel({
   onBack,
   onEdit,
   onDelete,
+  onStationRemoved,
   sendCommandTo,
   children,
 }: {
@@ -108,6 +109,8 @@ export function BranchPanel({
   onEdit?: () => void;
   /** owner: delete the branch (asks first; refused while a station is installed) */
   onDelete?: () => void;
+  /** the owner took the player off this branch — reload the list (the branch stays) */
+  onStationRemoved?: () => void;
   sendCommandTo: (targetBranchId: string, command: RemoteCommand, payload?: { volume?: number }) => boolean;
 }) {
   const L = useMgmt();
@@ -193,7 +196,7 @@ export function BranchPanel({
               </ul>
             </section>
           ) : null}
-          <StationActivation branchId={branch.id} hasMainStation={branch.hasStation} />
+          <StationActivation branchId={branch.id} branchName={branch.name} hasMainStation={branch.hasStation} onStationRemoved={onStationRemoved} />
         </div>
         <div className="cr-bp-col">{children}</div>
       </div>

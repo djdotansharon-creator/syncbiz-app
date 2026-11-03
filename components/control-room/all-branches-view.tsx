@@ -478,6 +478,7 @@ export function AllBranchesView() {
                     onBack={() => { setOpenId(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
                     onEdit={() => setForm({ mode: "edit", id: open.id })}
                     onDelete={() => setDeleting({ id: open.id, name: open.name, dbName: open.dbName })}
+                    onStationRemoved={() => setReloadKey((k) => k + 1)}
                     sendCommandTo={sendCommandTo}
                   >
                   {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
