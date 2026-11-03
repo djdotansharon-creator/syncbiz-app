@@ -14,6 +14,7 @@ import { PlayerAutoCompact } from "@/components/player-auto-compact";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 import { MasterMediaSession } from "@/components/master-media-session";
+import { DesktopPerfDiag } from "@/components/desktop-perf-diag";
 
 /**
  * Single client boundary for all app providers.
@@ -40,6 +41,8 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <PocOfflineLauncher />
                 {/* Stage A.1 — MASTER acquires + refreshes its own Media Session Token (renders null). */}
                 <MasterMediaSession />
+                {/* READ-ONLY performance diagnostic (renders null): slow clicks / long frames / hardware → the desktop main.log. Desktop shell or localStorage "syncbiz-perfdiag"="1" only. */}
+                <DesktopPerfDiag />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>
