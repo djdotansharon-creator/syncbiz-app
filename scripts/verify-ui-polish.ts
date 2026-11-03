@@ -37,5 +37,10 @@ assert("P8 the primary buttons are white pills with dark text, the inputs are so
 const infoIcon = read("components/info-icon.tsx");
 assert("P9 the 'i in a circle' is a drawn icon (a ring, a stem and a dot), not a text glyph, in the gear row and on the approvals switch", /<circle cx="12" cy="12" r="9\.2"/.test(infoIcon) && /<InfoIcon size=\{20\} \/>/.test(read("components/device-details.tsx")) && /<InfoIcon size=\{22\} \/>/.test(read("components/control-room/device-enrollment-panel.tsx")) && !/font: italic/.test(css.slice(css.indexOf(".sb-devdet-i {"), css.indexOf(".sb-devdet-i {") + 200)));
 
+// ── 2026-11-03: the "New branch" tile's plus stands alone (no ring), in every look ──
+const enrCss = read("components/control-room/device-enrollment.css");
+const whiteCss = read("app/control-white.css");
+assert("P10 the 'New branch' tile's plus has no ring in any look (resting and hovered) — only that tile, the shared tile-logo ring is untouched", /\[data-new-branch-tile\] \.cr-enr-tile-logo, \[data-new-branch-tile\]:hover \.cr-enr-tile-logo \{ box-shadow: none; \}/.test(enrCss) && /\[data-new-branch-tile\] \.cr-enr-tile-logo, html\[data-sb-display="white"\]\[data-sb-control\] \[data-new-branch-tile\]:hover \.cr-enr-tile-logo \{ box-shadow: none; \}/.test(whiteCss) && /\.cr-enr-tile-logo \{[^}]*box-shadow: inset 0 0 0 1\.6px/.test(enrCss));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

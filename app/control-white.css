@@ -110,6 +110,7 @@ html[data-sb-display="white"][data-sb-control] .cr-row.is-selected, html[data-sb
 html[data-sb-display="white"][data-sb-control] .cr-row--requests:focus-visible { outline-color: rgba(0, 0, 0, 0.55); }
 html[data-sb-display="white"][data-sb-control] .cr-enr-tile-logo, html[data-sb-display="white"][data-sb-control] .cr-enr-plus { color: #48484a; box-shadow: inset 0 0 0 1.6px rgba(0, 0, 0, 0.3); }
 html[data-sb-display="white"][data-sb-control] .cr-row--requests:hover .cr-enr-tile-logo { color: #1c1c1e; box-shadow: inset 0 0 0 1.6px rgba(0, 0, 0, 0.55); }
+html[data-sb-display="white"][data-sb-control] [data-new-branch-tile] .cr-enr-tile-logo, html[data-sb-display="white"][data-sb-control] [data-new-branch-tile]:hover .cr-enr-tile-logo { box-shadow: none; }
 html[data-sb-display="white"][data-sb-control] .cr-row-logo { background: color-mix(in srgb, var(--cr-brand, #8e8e93) 24%, rgba(0, 0, 0, 0.03)); }
 html[data-sb-display="white"][data-sb-control] .cr-row-logo.has-logo { background: #ffffff; }
 html[data-sb-display="white"][data-sb-control] .cr-row-logo.is-loading { background: rgba(0, 0, 0, 0.05) !important; }
