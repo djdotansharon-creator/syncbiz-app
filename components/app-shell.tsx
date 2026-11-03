@@ -16,6 +16,7 @@ import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
 import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId, inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
+import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
 import { urlTimingMark, urlTimingStart, urlTimingSummary } from "@/lib/url-startup-timing";
 import { radioToUnified } from "@/lib/radio-utils";
 import { fetchUnifiedSourcesWithFallback, savePlaylistToLocal, saveRadioToLocal } from "@/lib/unified-sources-client";
@@ -947,7 +948,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       const apiType = ["youtube", "soundcloud", "spotify", "winamp", "local", "stream-url"].includes(typeCandidate)
         ? typeCandidate
         : inferredType;
-      const isRadio = parsed?.isRadio || apiType === "winamp" || /\.(m3u8?|pls|aac|mp3)(\?|$)/i.test(trimmed);
+      // A Droploud audio file is a track, never a radio station — the playlist save resolves it server-side.
+      const isRadio =
+        (parsed?.isRadio || apiType === "winamp" || /\.(m3u8?|pls|aac|mp3)(\?|$)/i.test(trimmed)) &&
+        !isDroploudUrl(trimmed);
 
       if (parsed?.type === "shazam") {
         const searchQuery =
@@ -1034,18 +1038,25 @@ export function AppShell({ children }: { children: ReactNode }) {
       });
       urlTimingMark("create_playlist_start");
       const createStarted = typeof performance !== "undefined" ? performance.now() : 0;
-      const created = await createPlaylistFromUrl(playableUrl, {
-        title: parsed?.title || "Untitled",
-        genre: parsed?.genre || "Mixed",
-        cover: parsed?.cover || null,
-        type: apiType,
-        viewCount: parsed?.viewCount,
-        durationSeconds: parsed?.durationSeconds,
-      });
+      let createErrorCode: string | undefined;
+      const created = await createPlaylistFromUrl(
+        playableUrl,
+        {
+          title: parsed?.title || "Untitled",
+          genre: parsed?.genre || "Mixed",
+          cover: parsed?.cover || null,
+          type: apiType,
+          viewCount: parsed?.viewCount,
+          durationSeconds: parsed?.durationSeconds,
+        },
+        { onError: (info) => { createErrorCode = info.code; } },
+      );
       if (!created) {
         clearUrlPrepare("playlist_create_failed");
         urlTimingSummary({ outcome: "create_failed" });
-        setLastMessage("Failed to add URL");
+        setLastMessage(
+          createErrorCode === DROPLOUD_UNPLAYABLE_CODE ? t.urlErrorDroploudUnplayable : "Failed to add URL",
+        );
         return;
       }
       const createMs =

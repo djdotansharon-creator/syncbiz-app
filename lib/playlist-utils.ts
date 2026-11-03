@@ -1,6 +1,7 @@
 import { getPlaylistTracks, type Playlist, type PlaylistTrack, type PlaylistType } from "./playlist-types";
 import type { UnifiedSource } from "./source-types";
 import type { MusicStreamingProvider, MusicUrlIngestClassification, MusicUrlIngestIntent } from "./source-types";
+import { isDroploudUrl } from "./droploud";
 
 function ingestIntentForProvider(provider: MusicStreamingProvider, intent: MusicUrlIngestIntent): MusicUrlIngestClassification {
   return { provider, intent };
@@ -263,6 +264,12 @@ export function classifyMusicUrlIngest(raw: string): MusicUrlIngestClassificatio
   // SoundCloud
   if (host.includes("soundcloud.com")) {
     return ingestIntentForProvider("soundcloud", "direct_playable");
+  }
+
+  // Droploud page / Droploud audio file — directly playable for the user; the server resolves it at save time
+  // to its SoundCloud track or Droploud audio file (lib/droploud-resolve.ts). Never a YouTube conversion.
+  if (isDroploudUrl(u.href)) {
+    return ingestIntentForProvider("droploud", "direct_playable");
   }
 
   // Spotify

@@ -37,6 +37,8 @@ export type MusicStreamingProvider =
   | "bandcamp"
   | "shazam"
   | "soundcloud"
+  /** Droploud page / Droploud audio file — resolved server-side to SoundCloud or direct audio (never YouTube). */
+  | "droploud"
   | "youtube"
   | "youtube_music"
   | "generic_music_url";

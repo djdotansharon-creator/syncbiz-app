@@ -22,6 +22,8 @@ export type CreatePlaylistFromSearchMeta = {
 
 export type CreatePlaylistFromUrlOptions = {
   playlistOwnershipScope?: "branch" | "owner_personal";
+  /** Called when the save is rejected (e.g. 422 `DROPLOUD_UNPLAYABLE`) so the caller can show the real reason. */
+  onError?: (info: { status: number; code?: string; error?: string }) => void;
 };
 
 /** Resolve search/playlist YouTube URLs to a watch URL with `v=` for embed + persistence. */
@@ -68,6 +70,16 @@ export async function createPlaylistFromUrl(
         : {}),
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    if (options?.onError) {
+      const data = (await res.json().catch(() => ({}))) as { code?: unknown; error?: unknown };
+      options.onError({
+        status: res.status,
+        code: typeof data.code === "string" ? data.code : undefined,
+        error: typeof data.error === "string" ? data.error : undefined,
+      });
+    }
+    return null;
+  }
   return res.json();
 }

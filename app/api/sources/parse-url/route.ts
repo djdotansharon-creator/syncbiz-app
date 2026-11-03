@@ -10,6 +10,8 @@ import { inferGenre } from "@/lib/infer-genre";
 import { resolveYouTubeMetadata } from "@/lib/youtube-metadata-resolver";
 import type { MusicStreamingProvider, ParseUrlJson } from "@/lib/source-types";
 import { parseUrlFoundationHints } from "@/lib/source-types";
+import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
+import { resolveDroploudUrl } from "@/lib/droploud-resolve";
 
 /** Stage 6C: try noembed for storefront track URLs typed as generic `stream-url`. */
 const NOEMBED_FOR_EXTERNAL_RESOLVE_PROVIDERS = new Set<MusicStreamingProvider>([
@@ -410,6 +412,31 @@ export async function POST(req: NextRequest) {
     const raw = typeof url === "string" ? url.trim() : "";
     if (!raw || !isValidUrl(raw)) {
       return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+    }
+
+    // Droploud: preview what the save will really play (resolved server-side, never YouTube). An unplayable link
+    // fails here with the same clear code the save path returns, so the user sees why before anything is saved.
+    if (isDroploudUrl(raw)) {
+      const droploud = await resolveDroploudUrl(raw);
+      if (droploud.kind === "unsupported") {
+        return NextResponse.json({ error: droploud.reason, code: DROPLOUD_UNPLAYABLE_CODE }, { status: 422 });
+      }
+      const droploudType = droploud.kind === "soundcloud" ? "soundcloud" : "stream-url";
+      const title = droploud.title || "Droploud";
+      return NextResponse.json({
+        title,
+        cover: droploud.cover ?? null,
+        genre: droploud.title ? inferGenre(droploud.title) : DEFAULT_GENRE,
+        type: droploudType,
+        isRadio: false,
+        musicUrlIngest: classifyMusicUrlIngest(raw),
+        ...parseUrlFoundationHints({
+          rawUrl: droploud.playUrl,
+          inferredType: droploudType,
+          isRadio: false,
+          isShazam: false,
+        }),
+      });
     }
 
     const type = inferPlaylistType(raw);
