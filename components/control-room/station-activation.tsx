@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
+import { ConfirmDelete, deleteRefusalText, type DeleteRefusal } from "@/components/control-room/confirm-delete";
 
 /**
  * CONTROL ROOM — station activation for one branch (owner; Step A = management side only).
@@ -28,8 +29,9 @@ function useCountdown(iso: string | null): string | null {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function StationActivation({ branchId, hasMainStation }: { branchId: string; hasMainStation: boolean }) {
+export function StationActivation({ branchId, branchName, hasMainStation, onStationRemoved }: { branchId: string; /** the stored name the owner types to confirm taking the player off */ branchName: string; hasMainStation: boolean; /** the player was taken off — the host reloads the branch list */ onStationRemoved?: () => void }) {
   const L = useMgmt();
+  const [removing, setRemoving] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [fresh, setFresh] = useState<Fresh | null>(null);
   const [busy, setBusy] = useState(false);
@@ -140,6 +142,40 @@ export function StationActivation({ branchId, hasMainStation }: { branchId: stri
 
       {hasMainStation && (status?.active || showFresh) ? (
         <p className="mt-3 text-xs text-[var(--sb-text-tertiary)]">{L.t("act.keepsPlaying")}</p>
+      ) : null}
+      {/* take the player off the branch (owner 2026-11-03) — audited, asks for the branch name; the branch itself stays */}
+      {hasMainStation ? (
+        <div className="mt-4">
+          <button type="button" disabled={busy} onClick={() => setRemoving(true)} className="cr-bp-btn cr-bp-btn--quiet disabled:opacity-40">{L.t("act.removeStation")}</button>
+        </div>
+      ) : null}
+      {removing ? (
+        <ConfirmDelete
+          kind="station"
+          name={branchName}
+          typeToConfirm={branchName}
+          onClose={() => setRemoving(false)}
+          onConfirm={async (typed) => {
+            try {
+              const res = await fetch(`/api/control-room/branches/${encodeURIComponent(branchId)}/station`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ confirmName: typed }),
+              });
+              if (!res.ok) {
+                const d = (await res.json().catch(() => ({}))) as DeleteRefusal;
+                return d.code === "default" ? L.t("del.err.stationDefault") : deleteRefusalText(L, d);
+              }
+            } catch {
+              return L.t("common.serverRetry");
+            }
+            setRemoving(false);
+            setFresh(null);
+            void load();
+            onStationRemoved?.();
+            return null;
+          }}
+        />
       ) : null}
       {error ? <p className="mt-3 text-sm text-amber-200" role="alert">{error}</p> : null}
     </section>

@@ -41,6 +41,8 @@ export type TenantAuditAction =
   | "jingle.audience_change"
   /** Control Room (2026-10-23): a branch was deleted (who / when; entityId = the branch id, metadata = its name / number). */
   | "branch.delete"
+  /** Control Room (2026-11-03): the owner took the player (station) off a branch — its registered station + designated MASTER were removed (entityId = the branch id, metadata = counts + device-id fingerprints). */
+  | "branch.station_remove"
   /** Device enrollment (2026-10-27): a device asked to be a Player / Remote, and the manager's decision (entityId = the DeviceEnrollment id). */
   | "device.enroll_request"
   | "device.enroll_approve"
@@ -72,6 +74,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.platform_remove",
   "jingle.audience_change",
   "branch.delete",
+  "branch.station_remove",
   "device.enroll_request",
   "device.enroll_approve",
   "device.enroll_reject",

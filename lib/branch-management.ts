@@ -257,3 +257,60 @@ export async function deleteBranch(workspaceId: string, branchId: string, ctx: D
   }
   try { removeBranchLogo(branchId); } catch { /* no logo file */ }
 }
+
+/**
+ * Take the PLAYER (station) off a branch (owner 2026-11-03: "let me separate them and delete the branch"). `deleteBranch` refuses while a station is bound, so a branch whose
+ * player is gone / offline / a test could never be deleted. This is the explicit, audited way out — the only place a designated MASTER is removed (CLAUDE.md §11: a designation changes
+ * only by an explicit, audited admin action):
+ *   - the owner must type the branch's name (`confirm`), exactly as for a deletion;
+ *   - the legacy default branch (the accepted pilot's branch and its Lenovo) is REFUSED (`default`);
+ *   - in ONE transaction: the branch row and its activation codes are locked FOR UPDATE, the branch's BranchMasterDesignation and StationDevice rows are deleted, any unused activation
+ *     code is revoked, and ONE AuditLog row (`branch.station_remove`: who / when / counts / device-id fingerprints — never a full device id) is written. Nothing references StationDevice by a
+ *     foreign key, so no other row changes. A branch with no player answers with zeros and writes no audit row.
+ * The machine that ran it keeps its app, but a signed token minted from now on carries no designation for the branch, so it stops being the branch's player; to set a player up again the
+ * owner makes a new activation code. Removing the player does NOT delete the branch — `deleteBranch` is a separate, later step.
+ */
+export async function removeBranchStation(workspaceId: string, branchId: string, ctx: DeleteBranchContext): Promise<{ stations: number; designations: number }> {
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+        const rows = await tx.$queryRaw<Array<{ id: string; name: string; legacyKey: string | null; locationCode: string | null }>>`
+          SELECT "id", "name", "legacyKey", "locationCode" FROM "Branch" WHERE "id" = ${branchId} AND "workspaceId" = ${workspaceId} FOR UPDATE`;
+        const cur = rows[0];
+        if (!cur) throw new BranchInputError("Branch not found.", 404, "not_found");
+        await tx.$queryRaw`SELECT "id" FROM "BranchActivationCode" WHERE "branchId" = ${cur.id} FOR UPDATE`;
+        if (cur.legacyKey) throw new BranchInputError("The default branch's player cannot be removed.", 409, "default");
+        if (typeof ctx.confirmName !== "string" || ctx.confirmName.trim() !== cur.name.trim()) throw new BranchInputError("Type the branch's name exactly to confirm.", 400, "confirm");
+        const stationRows = await tx.stationDevice.findMany({ where: { workspaceId, branchId: cur.id }, select: { durableDeviceId: true } });
+        const designations = await tx.branchMasterDesignation.deleteMany({ where: { workspaceId, branchId: cur.id } });
+        const stations = await tx.stationDevice.deleteMany({ where: { workspaceId, branchId: cur.id } });
+        await tx.branchActivationCode.updateMany({ where: { branchId: cur.id, usedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
+        if (stations.count > 0 || designations.count > 0) {
+          await writeTenantAuditLog(tx, {
+            action: "branch.station_remove",
+            entity: "branch",
+            actorUserId: ctx.userId,
+            workspaceId,
+            targetUserId: cur.id, // = the entity id (same convention as branch.delete)
+            ipAddress: ctx.ipAddress ?? null,
+            metadata: {
+              branchName: cur.name,
+              branchNumber: cur.locationCode,
+              stations: stations.count,
+              designations: designations.count,
+              deviceFingerprints: stationRows.map((s) => s.durableDeviceId.slice(0, 12)),
+              removedAt: new Date().toISOString(),
+            },
+          });
+        }
+        return { stations: stations.count, designations: designations.count };
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+  } catch (e) {
+    if (e instanceof BranchInputError) throw e;
+    if (/lock timeout|55P03/i.test(e instanceof Error ? e.message : String(e))) throw new BranchInputError("The branch is being changed at this moment — try again in a few seconds.", 409, "busy");
+    throw e;
+  }
+}

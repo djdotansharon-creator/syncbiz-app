@@ -25,7 +25,7 @@ export function deleteRefusalText(L: ReturnType<typeof useMgmt>, d: DeleteRefusa
   }
 }
 
-export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }: { kind: "branch" | "brand"; name: string; /** the name the owner must type (a branch — the server checks it too) */ typeToConfirm?: string; onConfirm: (typed: string) => Promise<string | null>; onClose: () => void }) {
+export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }: { kind: "branch" | "brand" | "station"; name: string; /** the name the owner must type (a branch — the server checks it too) */ typeToConfirm?: string; onConfirm: (typed: string) => Promise<string | null>; onClose: () => void }) {
   const L = useMgmt();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }:
   };
   return (
     <GlassModal
-      title={L.t(kind === "branch" ? "del.branchTitle" : "del.brandTitle")}
+      title={L.t(kind === "branch" ? "del.branchTitle" : kind === "station" ? "del.stationTitle" : "del.brandTitle")}
       subtitle={name}
       showInitial
       width={460}
@@ -51,11 +51,11 @@ export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }:
         <>
           <button type="button" className="sb-wz-btn" onClick={onClose} disabled={busy}>{L.t("common.cancel")}</button>
           <span className="sb-wz-spacer" />
-          <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy || !ready}>{busy ? "…" : L.t("common.delete")}</button>
+          <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy || !ready}>{busy ? "…" : L.t(kind === "station" ? "del.stationRemove" : "common.delete")}</button>
         </>
       }
     >
-      <p className="cr-del-body" dir="auto">{L.t(kind === "branch" ? "del.branchBody" : "del.brandBody", { name })}</p>
+      <p className="cr-del-body" dir="auto">{L.t(kind === "branch" ? "del.branchBody" : kind === "station" ? "del.stationBody" : "del.brandBody", { name })}</p>
       {typeToConfirm !== undefined ? (
         <input
           className="sb-wz-input"
