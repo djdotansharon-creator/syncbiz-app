@@ -603,6 +603,20 @@ function isDesktopStationShell(): boolean {
 }
 
 /**
+ * READ-ONLY diagnostic (2026-11-03, no behavior): the desktop's main.log keeps only the renderer's warn / error lines, so the
+ * restart-restore decisions below (console.info / log) never reached it — a station that "opens but does not play" left no
+ * trace of WHY. One warn line per decision point, only inside the desktop shell. Grep: [VONO restore-diag]
+ */
+function restoreDiag(step: string, data?: Record<string, unknown>): void {
+  if (!isDesktopStationShell()) return;
+  try {
+    console.warn("[VONO restore-diag] " + step + (data ? " " + JSON.stringify(data) : ""));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
  * Appliance auto-resume signal via the load URL (only the streamer/appliance sends it):
  *   ?autoresume=1 → ALWAYS resume + play on load if the last session was playing,
  *                   bypassing the 30-min window (a dedicated 24/7 player should just
@@ -1011,6 +1025,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const persistRecoverySnapshot = useCallback((overridePositionSeconds?: number) => {
     const src = state.currentSource;
     if (!src || (state.status !== "playing" && state.status !== "paused")) {
+      // READ-ONLY diagnostic: a snapshot that existed and is deleted here is a restart that will have nothing to restore
+      if (isDesktopStationShell()) {
+        try {
+          if (localStorage.getItem(RECOVERY_STORAGE_KEY)) restoreDiag("snapshot cleared", { hasSource: !!src, status: state.status });
+        } catch {
+          /* ignore */
+        }
+      }
       clearPersistedPlaybackV2();
       return;
     }
@@ -1563,6 +1585,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hasRestoredRef.current || state.currentSource) {
       // Nothing to do (already restored, or something else populated state).
+      restoreDiag("skip: already restored or a source is set", { restored: hasRestoredRef.current, hasSource: !!state.currentSource });
       if (isRestoring) setIsRestoring(false);
       return;
     }
@@ -1572,6 +1595,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       ? (window as unknown as { syncbizDesktop?: { onStatus?: unknown } }).syncbizDesktop
       : undefined;
     if (typeof desktopBridge?.onStatus === "function" && (!localExecResolved.current || mainBootSource.current === "deciding")) {
+      restoreDiag("wait: MAIN decision", { resolved: localExecResolved.current, bootSource: mainBootSource.current });
       const unsub = subscribeLocalSourceExec(() => {
         unsub();
         setRestoreTick((t) => t + 1);
@@ -1583,6 +1607,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // Not final: if that URL fails before it ever plays, MAIN switches to "url-pending" / "url-failed" and this restore
       // re-runs to start LOCAL (owner rule: a failed URL restore → LOCAL, never silence).
       console.info("[VONO restore] MAIN restores the remembered URL source — renderer LOCAL restore on hold");
+      restoreDiag("hold: MAIN restores the remembered URL source");
       setIsRestoring(false);
       const unsub = subscribeLocalSourceExec(() => {
         if (mainBootSource.current === "url") return;
@@ -1596,6 +1621,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       // Offline boot, remembered source = URL: play the station's last LOCAL session until MAIN brings the URL back.
       const fallback = loadPersistedPlaybackV2(LAST_LOCAL_STORAGE_KEY);
       console.info("[VONO restore] URL source unavailable — LOCAL fallback " + (fallback?.local ? "found" : "missing"));
+      restoreDiag("url source unavailable", { bootSource: mainBootSource.current, lastLocalFound: !!fallback?.local });
       if (!fallback?.local) {
         // nothing LOCAL to play here — never replay the remembered URL from the renderer (MAIN owns its retries)
         hasRestoredRef.current = true;
@@ -1606,6 +1632,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     }
     const persistedV1 = loadPersistedPlayback();
     if (!persistedV2 && !persistedV1) {
+      restoreDiag("nothing to restore: no recovery snapshot", { bootSource: mainBootSource.current });
       setIsRestoring(false);
       return;
     }
@@ -1616,6 +1643,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     const restoringLocalPending = !!persistedV2?.local && typeof window !== "undefined" && "syncbizDesktop" in window;
     const permittedNow = deviceModeAllowsLocalPlayback.current || (localSourceExecAllowed.current && !!persistedV2?.local);
     if (restoringLocalPending && !permittedNow && !localExecResolved.current) {
+      restoreDiag("wait: local permission", { deviceMode: deviceModeAllowsLocalPlayback.current, localExec: localSourceExecAllowed.current });
       const unsub = subscribeLocalSourceExec(() => {
         unsub();
         setRestoreTick((t) => t + 1); // re-run once the permission has resolved; isRestoring stays true meanwhile
@@ -1623,6 +1651,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       return () => unsub();
     }
     hasRestoredRef.current = true;
+    restoreDiag("restoring", {
+      bootSource: mainBootSource.current,
+      hasLocalBlock: !!persistedV2?.local,
+      status: persistedV2?.status ?? null,
+      ageSec: persistedV2 ? Math.round((Date.now() - persistedV2.updatedAt) / 1000) : null,
+      deviceMode: deviceModeAllowsLocalPlayback.current,
+      localExec: localSourceExecAllowed.current,
+    });
     let cancelled = false;
     const done = () => {
       if (!cancelled) setIsRestoring(false);
@@ -1634,6 +1670,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         // designated-MASTER machine; a non-local recovery stays on the existing (CONTROL-blocked) path.
         const restoringLocal = !!persistedV2?.local;
         if (!deviceModeAllowsLocalPlayback.current && !(localSourceExecAllowed.current && restoringLocal)) {
+          restoreDiag("blocked: not permitted to play here", { deviceMode: deviceModeAllowsLocalPlayback.current, localExec: localSourceExecAllowed.current, restoringLocal });
           done();
           return;
         }
@@ -1740,6 +1777,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             const rcU = rc || rcE ? null : reconstructUrlSource(persistedV2.urlSource);
             const chosen = rc ?? rcE ?? rcU;
             if (!chosen) {
+              restoreDiag("gave up: the saved source cannot be rebuilt", { sourceId: persistedV2.currentSourceId, hasLocalBlock: !!persistedV2.local, sourcesKnown: items.length });
               clearPersistedPlaybackV2();
               done();
               return;
@@ -1788,6 +1826,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             (autoresume === "1" ||
               isDesktopStation ||
               Date.now() - persistedV2.updatedAt <= RECOVERY_AUTOPLAY_WINDOW_MS);
+          restoreDiag("autoplay decision", { shouldAutoplay, bootSource: mainBootSource.current, autoresume, status: persistedV2.status, sourceId: source.id });
           // Music Bank (/api/media) sources need a live media token before dispatch, or /api/media 401s →
           // silence. On cold restore the token is fetched async by master-media-session; wait (bounded) so
           // getPlayUrl can append a valid `mt`. Non-media sources (URL / local / YouTube) skip instantly.
@@ -1832,7 +1871,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
         done();
       })
-      .catch(() => {
+      .catch((err) => {
+        restoreDiag("restore failed (exception)", { err: String(err) });
         done();
       });
     return () => {
