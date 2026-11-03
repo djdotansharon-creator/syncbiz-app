@@ -1808,7 +1808,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const seekOrSend = useCallback(
     (seconds: number) => {
       if (useLocalDeviceTransport) seekTo(seconds);
-      else sendCommandToMaster("SEEK", { position: seconds });
+      else if (canLocalExecRef.current && typeof window !== "undefined" && typeof (window as unknown as { syncbizDesktop?: { mpvSeekTo?: unknown } }).syncbizDesktop?.mpvSeekTo === "function") {
+        // 2026-11-03 (owner: "the time bar jumps back"): the designated station's own window on a URL / YouTube track. MAIN's WS command
+        // handler has no SEEK (PLAY / PLAY_SOURCE / PAUSE / STOP / SET_VOLUME / queue / NEXT / PREV only), so a SEEK sent over the cloud was
+        // dropped and the bar snapped back to MPV's real position. MAIN (MPV) is on THIS machine — seek it directly, exactly as the LOCAL
+        // path does (audio-player onSeekChange). `canLocalExec` = this machine IS the branch's designated station, so a window that only
+        // controls another station never seeks its own MPV.
+        void (window as unknown as { syncbizDesktop: { mpvSeekTo: (s: number) => Promise<void> } }).syncbizDesktop.mpvSeekTo(seconds);
+      } else sendCommandToMaster("SEEK", { position: seconds });
     },
     [useLocalDeviceTransport, seekTo, sendCommandToMaster]
   );
