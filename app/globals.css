@@ -26,6 +26,13 @@ body {
   overflow-x: hidden;
 }
 
+/* 2026-11-04 (owner): scrolling up past the top must never drag the whole page down or start the browser's pull-to-refresh (white screen + spinner) — VONO is a control
+   surface, not a document you refresh by pulling it. Inner scrollers keep their own `overscroll-behavior: contain`. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 /* ─── Smooth interactions everywhere ───
    Every control responds instantly: soft color transitions and a gentle
    press-down. `scale` is its own property so it never fights translate/rotate
