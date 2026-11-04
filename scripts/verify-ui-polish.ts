@@ -49,5 +49,8 @@ const enrCss = read("components/control-room/device-enrollment.css");
 const whiteCss = read("app/control-white.css");
 assert("P10 the 'New branch' tile's plus has no ring in any look (resting and hovered) — only that tile, the shared tile-logo ring is untouched", /\[data-new-branch-tile\] \.cr-enr-tile-logo, \[data-new-branch-tile\]:hover \.cr-enr-tile-logo \{ box-shadow: none; \}/.test(enrCss) && /\[data-new-branch-tile\] \.cr-enr-tile-logo, html\[data-sb-display="white"\]\[data-sb-control\] \[data-new-branch-tile\]:hover \.cr-enr-tile-logo \{ box-shadow: none; \}/.test(whiteCss) && /\.cr-enr-tile-logo \{[^}]*box-shadow: inset 0 0 0 1\.6px/.test(enrCss));
 
+// ── 2026-11-04: pulling the page down at the top does nothing (no rubber band, no pull-to-refresh) ──
+assert("P11 the page does not overscroll at the top: html and body carry overscroll-behavior-y: none (no pull-to-refresh, no bounce)", /(^|\n)html,\s*\nbody \{\s*overscroll-behavior-y:\s*none;\s*\}/.test(css));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
