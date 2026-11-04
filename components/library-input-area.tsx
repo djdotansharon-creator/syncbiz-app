@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
+import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
 import { usePlayback } from "@/lib/playback-provider";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
@@ -1346,7 +1347,9 @@ export function LibraryInputArea({
             : trimmed;
 
         const type = inferPlaylistType(trimmed);
-        const isRadio = type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i);
+        // A Droploud audio file is a track, never a radio station — the playlist save resolves it server-side.
+        const isRadio =
+          (type === "winamp" || !!trimmed.match(/\.(m3u8?|pls|aac|mp3)(\?|$)/i)) && !isDroploudUrl(trimmed);
         const isShazam = isShazamUrl(trimmed);
 
         /** Fallback only when `/api/sources/parse-url` fails — must not replace full resolve for normal ingest. */
@@ -1496,7 +1499,10 @@ export function LibraryInputArea({
               ...pickUnifiedFoundationFields(parsed as Record<string, unknown>),
             });
             setUrlValue("");
-          } else setUrlError(tx.urlErrorFailedAdd);
+          } else {
+            const err = (await res.json().catch(() => ({}))) as { code?: unknown };
+            setUrlError(err.code === DROPLOUD_UNPLAYABLE_CODE ? tx.urlErrorDroploudUnplayable : tx.urlErrorFailedAdd);
+          }
         }
       } catch {
         setUrlError(tx.urlErrorFailedAdd);

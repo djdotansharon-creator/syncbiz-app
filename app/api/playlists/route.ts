@@ -13,6 +13,8 @@ import {
 import { EntitlementLimitError } from "@/lib/entitlement-limits";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
+import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl, isPlaceholderSourceName } from "@/lib/droploud";
+import { resolveDroploudUrl } from "@/lib/droploud-resolve";
 import {
   PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT,
   type PlaylistCreateInput,
@@ -66,11 +68,11 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = (await req.json()) as Partial<PlaylistCreateInput>;
-    const name = (body.name ?? "").trim();
-    const url = (body.url ?? "").trim();
-    const type = body.type ?? "stream-url";
+    let name = (body.name ?? "").trim();
+    let url = (body.url ?? "").trim();
+    let type = body.type ?? "stream-url";
     const genre = (body.genre ?? "").trim();
-    const thumbnail = ((body.cover ?? body.thumbnail) ?? "").trim();
+    let thumbnail = ((body.cover ?? body.thumbnail) ?? "").trim();
     const branchId = (body.branchId ?? DEFAULT_BRANCH_ID).trim() || DEFAULT_BRANCH_ID;
     const rawScope = (body as { playlistOwnershipScope?: unknown }).playlistOwnershipScope;
     const playlistOwnershipScope: "branch" | "owner_personal" | undefined =
@@ -94,6 +96,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
     }
     shadowAuthorize("playlists:POST", { userId: user.id, workspaceId: user.tenantId }, "content.manage", [branchId]); // Gate 3A shadow: log only, never blocks
+
+    // Droploud: every add path funnels here, so resolve the pasted page / file ONCE, server-side, into what it
+    // really plays — its SoundCloud track ("soundcloud") or a Droploud audio file ("stream-url"). Nothing playable
+    // → a clear 422; a silent item is never saved. Already-resolved URLs are not Droploud URLs, so this is idempotent.
+    if (isDroploudUrl(url)) {
+      const droploud = await resolveDroploudUrl(url);
+      if (droploud.kind === "unsupported") {
+        return NextResponse.json({ error: droploud.reason, code: DROPLOUD_UNPLAYABLE_CODE }, { status: 422 });
+      }
+      const pastedUrl = url;
+      url = droploud.playUrl;
+      type = droploud.kind === "soundcloud" ? "soundcloud" : "stream-url";
+      if (droploud.title && isPlaceholderSourceName(name, pastedUrl)) name = droploud.title;
+      if (!thumbnail && droploud.cover) thumbnail = droploud.cover;
+    }
 
     if (!VALID_TYPES.includes(type)) {
       return NextResponse.json(

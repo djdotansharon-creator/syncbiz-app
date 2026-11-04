@@ -361,6 +361,8 @@ const TRANSLATIONS = {
       "Adding a folder of audio files is only supported in the SyncBiz Desktop app. Paste a single file path here, or open Desktop and add the folder there.",
     urlErrorYoutubeNotFound: "Could not find that track on YouTube",
     urlErrorFailedAdd: "Could not add item",
+    urlErrorDroploudUnplayable:
+      "This Droploud link has no playable audio (supported: Droploud track pages and Droploud audio files).",
     defaultUntitled: "Untitled",
     defaultGenreMixed: "Mixed",
     defaultLiveRadioGenre: "Live radio",
@@ -784,6 +786,8 @@ const TRANSLATIONS = {
       "הוספת תיקיית קבצי אודיו נתמכת רק באפליקציית SyncBiz לשולחן העבודה. הדבק כאן נתיב לקובץ בודד, או הוסף את התיקייה מהדסקטופ.",
     urlErrorYoutubeNotFound: "לא נמצאה רצועה כזו ביוטיוב",
     urlErrorFailedAdd: "לא ניתן להוסיף את הפריט",
+    urlErrorDroploudUnplayable:
+      "בקישור ה-Droploud הזה אין אודיו שניתן לנגן (נתמכים: עמודי טראק של Droploud וקבצי אודיו של Droploud).",
     defaultUntitled: "ללא כותרת",
     defaultGenreMixed: "מעורב",
     defaultLiveRadioGenre: "רדיו חי",
