@@ -235,6 +235,9 @@ export function useDevicePlayer() {
   return ctx;
 }
 
+/** 2026-11-04: the longest a desktop-app selection made before the server ever decided this screen's role is held. */
+const EARLY_SELECT_MAX_MS = 12_000;
+
 export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { mobileRole } = useMobileRole();
@@ -1276,9 +1279,27 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const useLocalDeviceTransport =
     (effectiveDeviceMode === "MASTER" && !isNativeShellStreamer) || isMobileLocalPlayback;
 
+  // 2026-11-04 (owner, Dev-PC 21:27Z, PROVEN BY RUNTIME): a click in the first seconds after the desktop app opens — before
+  // the server has EVER decided this screen's role — met the Electron "MASTER" default, so the renderer played the URL
+  // itself and stopped MAIN's session (display = MAIN's old title, then silence at that song's end). Until the first real
+  // decision, a NON-local selection inside the desktop app is HELD and released through the normal routing the moment
+  // the role is known (CONTROL → MAIN; a real MASTER → plays here as before). Never longer than EARLY_SELECT_MAX_MS:
+  // then it plays the old way (e.g. no cloud connection at all). LOCAL sources, browsers, phones, reconnect blips: unchanged.
+  const roleDecided = lastConnectedModeRef.current !== null || (status === "connected" && modeAssigned);
+  const holdEarlySelect = isElectronShell === true && !isMobileLocalPlayback && !roleDecided;
+  const earlySelectRef = useRef<{ source: UnifiedSource; trackIndex?: number; at: number } | null>(null);
+  const releasingEarlySelectRef = useRef(false); // true only while a held selection is being released (never re-held)
+  const [earlySelectTick, setEarlySelectTick] = useState(0);
+
   const playSourceOrSend = useCallback(
     // P0 Gate 2a: trackIndex stays OPTIONAL — an omitted index must not become "row 0" for a URL leaf (LOCAL: ?? 0).
     (source: UnifiedSource, trackIndex?: number) => {
+      if (useLocalDeviceTransport && holdEarlySelect && !releasingEarlySelectRef.current && source?.type !== "local") {
+        earlySelectRef.current = { source, trackIndex, at: Date.now() }; // the newest click wins
+        console.warn("[VONO MetaSync] select held — role not decided yet " + JSON.stringify({ type: source?.type ?? null, id: source?.id ?? null, trackIndex }));
+        setEarlySelectTick((t) => t + 1);
+        return;
+      }
       if (useLocalDeviceTransport) {
         localSessionOwnedRef.current = true;
         lastLocalPushKeyRef.current = null; // force a fresh MAIN session commit for the new local selection
@@ -1325,8 +1346,31 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [useLocalDeviceTransport, canLocalExec, playSource, sendCommandToMaster, setUrlTransition, beginUrlTransition]
+    [useLocalDeviceTransport, holdEarlySelect, canLocalExec, playSource, sendCommandToMaster, setUrlTransition, beginUrlTransition]
   );
+
+  // Release a held early selection once the role is decided (CONTROL also needs the MASTER's id to send to), or after
+  // EARLY_SELECT_MAX_MS the old way. One pending selection at most; a newer click replaced it above.
+  const playSourceOrSendRef = useRef(playSourceOrSend);
+  useEffect(() => { playSourceOrSendRef.current = playSourceOrSend; }, [playSourceOrSend]);
+  useEffect(() => {
+    const held = earlySelectRef.current;
+    if (!held) return;
+    const release = (why: string) => {
+      if (earlySelectRef.current !== held) return;
+      earlySelectRef.current = null;
+      console.warn("[VONO MetaSync] held select released — " + why + " " + JSON.stringify({ id: held.source?.id ?? null, mode: effectiveDeviceMode }));
+      releasingEarlySelectRef.current = true;
+      try {
+        playSourceOrSendRef.current(held.source, held.trackIndex);
+      } finally {
+        releasingEarlySelectRef.current = false;
+      }
+    };
+    if (roleDecided && (effectiveDeviceMode === "MASTER" || !!masterDeviceId)) { release("role decided"); return; }
+    const t = setTimeout(() => release("timeout"), Math.max(0, EARLY_SELECT_MAX_MS - (Date.now() - held.at)));
+    return () => clearTimeout(t);
+  }, [earlySelectTick, roleDecided, effectiveDeviceMode, masterDeviceId]);
 
   // Add to queue — local when we ARE the player; otherwise send QUEUE_NEXT to
   // the MASTER (existing command; no local audio on a CONTROL). Symmetric with
