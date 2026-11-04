@@ -52,6 +52,12 @@ const read = (f: string) => fs.readFileSync(path.resolve(__dirname, "..", f), "u
   assert("C9 the list view reloads after the player was taken off, and the panel hands the callback to the activation block", /onStationRemoved=\{\(\) => setReloadKey\(\(k\) => k \+ 1\)\}/.test(view) && /onStationRemoved=\{onStationRemoved\}/.test(panel));
   const i18n = read("lib/i18n/management.ts");
   assert("C10 the words exist in English and Hebrew (title, body, button, the default-branch refusal, the action label)", ["del.stationTitle", "del.stationBody", "del.stationRemove", "del.err.stationDefault", "act.removeStation"].every((k) => (i18n.match(new RegExp(`"${k}":`, "g")) ?? []).length === 2));
+  const cd = read("components/control-room/confirm-delete.tsx");
+  const hostSrc = read("components/control-room/all-branches-view.tsx");
+  const store = read("lib/store.ts");
+  assert("C12 the delete dialog can offer a second way out (an `extra` button with the same typed-name guard) — only the host decides when", /extra\?: \{ label: string; run: \(typed: string\) => Promise<string \| null> \}/.test(cd) && /onClick=\{\(\) => void runExtra\(\)\} disabled=\{busy \|\| !ready\}/.test(cd));
+  assert("C13 the host offers 'remove the player and delete the branch' ONLY after the server refused with `station`, and runs the two steps in order (remove the player, then delete) — each re-checked by the server", /setPlayerBlocksDelete\(d\.code === "station"\)/.test(hostSrc) && /extra=\{playerBlocksDelete \?/.test(hostSrc) && hostSrc.indexOf("/station`") > 0 && hostSrc.indexOf("/station`") < hostSrc.indexOf("const res = await call(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`)"));
+  assert("C14 the list's 'a player is registered' counts a designated MASTER as well as a StationDevice (the delete rule counts both)", /branchMasterDesignation\.findMany\(\{ where: \{ workspaceId: wsId \}/.test(store) && /\.\.\.designated\.map/.test(store));
   assert("C11 the deletion rule itself is unchanged: deleteBranch still REFUSES a bound station (`station`) — removing the player is a separate, explicit step", /if \(stations > 0 \|\| designations > 0\) throw new BranchInputError\("This branch has a station installed\.", 409, "station"\)/.test(src));
 }
 
@@ -120,8 +126,17 @@ async function dbPart(): Promise<void> {
       && md.stations === 1 && md.designations === 1 && md.branchName === "Player branch" && md.deviceFingerprints?.[0] === durable.slice(0, 12) && !JSON.stringify(rows[0]!.metadata).includes(durable));
   assert("D10 other branches' players are untouched", (await counts(ws.id, bKeep.id))[0] === 1 && (await counts(ws.id, legacy.id))[0] === 1);
 
+  // a designation WITHOUT a station row (the list must still say "a player is registered", and removal must clear it)
+  const bd = await mk(ws.id, "Designation only");
+  await prisma.branchMasterDesignation.create({ data: { workspaceId: ws.id, branchId: bd.id, durableDeviceId: `dsk-sr-${t}-orphan`, designatedBy: actor } });
+  const { db } = await import("../lib/store");
+  const withPlayer = await db.getBranchIdsWithStation(ws.id);
+  assert("D10b a branch that has ONLY a designated MASTER is listed as having a player (so the screen shows it and offers the removal)", withPlayer.has(bd.id) && withPlayer.has(bKeep.id) && !withPlayer.has(b.id));
+  r = await attempt(ws.id, bd.id, "Designation only");
+  assert("D10c removing the player clears the designation-only branch (answer 0 stations / 1 designation) and it can be deleted", r.ok && r.res?.stations === 0 && r.res?.designations === 1 && (await (async () => { try { await bm.deleteBranch(ws.id, bd.id, { userId: actor, confirmName: "Designation only" }); return true; } catch { return false; } })()));
+
   r = await attempt(ws.id, b.id, "Player branch");
-  assert("D11 a branch with no player answers 0 / 0, no error and writes NO second audit row", r.ok && r.res?.stations === 0 && r.res?.designations === 0 && (await audits()).length === 1);
+  assert("D11 a branch with no player answers 0 / 0, no error and writes NO second audit row", r.ok && r.res?.stations === 0 && r.res?.designations === 0 && (await audits()).filter((a) => a.entityId === b.id).length === 1);
 
   let deleted = false;
   try { await bm.deleteBranch(ws.id, b.id, { userId: actor, confirmName: "Player branch" }); deleted = true; } catch { /* asserted below */ }

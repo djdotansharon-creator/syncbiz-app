@@ -135,6 +135,8 @@ export function AllBranchesView() {
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string; dbName: string } | null>(null);
+  /** the server refused the deletion because a player is registered to the branch — the dialog then offers 'remove the player and delete the branch' (owner 2026-11-04) */
+  const [playerBlocksDelete, setPlayerBlocksDelete] = useState(false);
   const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setRequestsOpen(false); setBackToRequests(false); };
   const openRequests = () => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsOpen(false); setBrandsNew(false); setBackToRequests(false); setRequestsOpen(true); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
@@ -584,7 +586,32 @@ export function AllBranchesView() {
           kind="branch"
           name={deleting.name}
           typeToConfirm={deleting.name}
-          onClose={() => setDeleting(null)}
+          onClose={() => { setDeleting(null); setPlayerBlocksDelete(false); }}
+          extra={playerBlocksDelete ? {
+            label: L.t("del.removeAndDelete"),
+            run: async (typed) => {
+              const confirmName = typed.trim() === deleting.name.trim() ? deleting.dbName : typed;
+              const call = (url: string) => fetch(url, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmName }) });
+              try {
+                // 1) take the player off the branch (explicit + audited on the server), 2) delete the branch — the server re-checks everything at each step
+                const removed = await call(`/api/control-room/branches/${encodeURIComponent(deleting.id)}/station`);
+                if (!removed.ok) {
+                  const d = (await removed.json().catch(() => ({}))) as DeleteRefusal;
+                  return d.code === "default" ? L.t("del.err.stationDefault") : deleteRefusalText(L, d);
+                }
+                const res = await call(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`);
+                if (!res.ok) return deleteRefusalText(L, (await res.json().catch(() => ({}))) as DeleteRefusal);
+              } catch {
+                return L.t("common.serverRetry");
+              }
+              setDeleting(null);
+              setPlayerBlocksDelete(false);
+              setOpenId(null);
+              setSelectedId(null);
+              setReloadKey((k) => k + 1);
+              return null;
+            },
+          } : undefined}
           onConfirm={async (typed) => {
             try {
               const res = await fetch(`/api/control-room/branches/${encodeURIComponent(deleting.id)}`, {
@@ -593,11 +620,16 @@ export function AllBranchesView() {
                 // the owner types the name he SEES ("You" for his own default branch); the server compares with the STORED name — so the shown name is swapped for the stored one (the guard stays: he must still type what the screen shows)
                 body: JSON.stringify({ confirmName: typed.trim() === deleting.name.trim() ? deleting.dbName : typed }),
               });
-              if (!res.ok) return deleteRefusalText(L, (await res.json().catch(() => ({}))) as DeleteRefusal);
+              if (!res.ok) {
+                const d = (await res.json().catch(() => ({}))) as DeleteRefusal;
+                setPlayerBlocksDelete(d.code === "station");
+                return deleteRefusalText(L, d);
+              }
             } catch {
               return L.t("common.serverRetry");
             }
             setDeleting(null);
+            setPlayerBlocksDelete(false);
             setOpenId(null);
             setSelectedId(null);
             setReloadKey((k) => k + 1);

@@ -25,7 +25,7 @@ export function deleteRefusalText(L: ReturnType<typeof useMgmt>, d: DeleteRefusa
   }
 }
 
-export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }: { kind: "branch" | "brand" | "station"; name: string; /** the name the owner must type (a branch — the server checks it too) */ typeToConfirm?: string; onConfirm: (typed: string) => Promise<string | null>; onClose: () => void }) {
+export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, extra, onClose }: { kind: "branch" | "brand" | "station"; name: string; /** a second way out offered after a refusal (the host decides when): its own button, same typed-name guard, answers an error text or null */ extra?: { label: string; run: (typed: string) => Promise<string | null> }; /** the name the owner must type (a branch — the server checks it too) */ typeToConfirm?: string; onConfirm: (typed: string) => Promise<string | null>; onClose: () => void }) {
   const L = useMgmt();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +39,14 @@ export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }:
     if (err) { setError(err); setBusy(false); return; }
     // success: the host closes everything (the row is gone)
   };
+  const runExtra = async () => {
+    if (busy || !ready || !extra) return;
+    setBusy(true);
+    setError(null);
+    const err = await extra.run(typed);
+    if (err) { setError(err); setBusy(false); return; }
+    // success: the host closes everything
+  };
   return (
     <GlassModal
       title={L.t(kind === "branch" ? "del.branchTitle" : kind === "station" ? "del.stationTitle" : "del.brandTitle")}
@@ -51,7 +59,9 @@ export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }:
         <>
           <button type="button" className="sb-wz-btn" onClick={onClose} disabled={busy}>{L.t("common.cancel")}</button>
           <span className="sb-wz-spacer" />
-          <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy || !ready}>{busy ? "…" : L.t(kind === "station" ? "del.stationRemove" : "common.delete")}</button>
+          {extra ? <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void runExtra()} disabled={busy || !ready}>{busy ? "…" : extra.label}</button> : null}
+          {/* after a refusal the plain Delete would be refused again — the `extra` button replaces it (and keeps the dialog narrow) */}
+          {!extra ? <button type="button" className="sb-wz-btn cr-del-btn" onClick={() => void run()} disabled={busy || !ready}>{busy ? "…" : L.t(kind === "station" ? "del.stationRemove" : "common.delete")}</button> : null}
         </>
       }
     >
@@ -62,7 +72,7 @@ export function ConfirmDelete({ kind, name, typeToConfirm, onConfirm, onClose }:
           style={{ marginTop: 14 }}
           value={typed}
           onChange={(e) => { setTyped(e.target.value); setError(null); }}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void run(); } }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void (extra ? runExtra() : run()); } }}
           placeholder={L.t("del.typeName")}
           aria-label={L.t("del.typeName")}
           dir="auto"
