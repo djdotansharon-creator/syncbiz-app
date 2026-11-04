@@ -37,6 +37,13 @@ assert("P8 the primary buttons are white pills with dark text, the inputs are so
 const infoIcon = read("components/info-icon.tsx");
 assert("P9 the 'i in a circle' is a drawn icon (a ring, a stem and a dot), not a text glyph, in the gear row and on the approvals switch", /<circle cx="12" cy="12" r="9\.2"/.test(infoIcon) && /<InfoIcon size=\{20\} \/>/.test(read("components/device-details.tsx")) && /<InfoIcon size=\{22\} \/>/.test(read("components/control-room/device-enrollment-panel.tsx")) && !/font: italic/.test(css.slice(css.indexOf(".sb-devdet-i {"), css.indexOf(".sb-devdet-i {") + 200)));
 
+// ── 2026-11-04: the branch picker's row under the pointer is a soft shadow around it — no filled square, nothing bigger ──
+const bpCss = read("components/remote-bar/branch-picker.css");
+const liteCss = read("app/lite-fx.css");
+const ctlWhite = read("app/control-white.css");
+const bpHover = /\.sb-bp-row:hover \{[^}]*\}/.exec(bpCss)?.[0] ?? "";
+assert("P9b branch picker: the hovered row has a shadow and no fill in the dark looks, the white look and the white control look; nothing scales and the list has room for the shadow", /background:\s*transparent;[^}]*box-shadow:/.test(bpHover) && !/transform|scale|font-size/.test(bpHover) && !/\.sb-bp-row:hover, \.sb-pg-btn:hover/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent !important; box-shadow:/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent; box-shadow:/.test(ctlWhite) && /\.sb-bp-list \{ margin: 2px -12px -10px;/.test(bpCss));
+
 // ── 2026-11-03: the "New branch" tile's plus stands alone (no ring), in every look ──
 const enrCss = read("components/control-room/device-enrollment.css");
 const whiteCss = read("app/control-white.css");
