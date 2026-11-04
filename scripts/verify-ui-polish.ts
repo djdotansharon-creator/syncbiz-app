@@ -42,7 +42,7 @@ const bpCss = read("components/remote-bar/branch-picker.css");
 const liteCss = read("app/lite-fx.css");
 const ctlWhite = read("app/control-white.css");
 const bpHover = /\.sb-bp-row:hover \{[^}]*\}/.exec(bpCss)?.[0] ?? "";
-assert("P9b branch picker: the hovered row has a shadow and no fill in the dark looks, the white look and the white control look; nothing scales and the list has room for the shadow", /background:\s*transparent;[^}]*box-shadow:/.test(bpHover) && !/transform|scale|font-size/.test(bpHover) && !/\.sb-bp-row:hover, \.sb-pg-btn:hover/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent !important; box-shadow:/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent; box-shadow:/.test(ctlWhite) && /\.sb-bp-list \{ margin: 2px -12px -10px;/.test(bpCss));
+assert("P9b branch picker: the hovered row has a shadow and no fill in the dark looks, the white look and the white control look; nothing scales and the list has room for the shadow", /background:\s*transparent;[^}]*box-shadow:/.test(bpHover) && !/transform|scale|font-size/.test(bpHover) && !/\.sb-bp-row:hover, \.sb-pg-btn:hover/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent !important; box-shadow:/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent; box-shadow:/.test(ctlWhite) && /\.sb-bp-list \{ margin: -2px -16px -14px;/.test(bpCss));
 
 // ── 2026-11-03: the "New branch" tile's plus stands alone (no ring), in every look ──
 const enrCss = read("components/control-room/device-enrollment.css");
