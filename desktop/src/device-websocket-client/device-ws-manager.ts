@@ -8,7 +8,7 @@ import { nextMainWsAttemptId } from "../main/main-attempt-id";
 import { MockPlaybackSession } from "../playback-agent";
 import type { StationSessionMeta } from "../playback-agent/mock-playback-session";
 import {
-  MAX_AUTO_FAILURES, PREPARE_EARLY_AFTER_SEC, PREPARE_LEAD_SEC, PREPARE_REFRESH_AFTER_MS, buildQueueItems, buildUrlSession, nextAutoIndex, sourceIdFor,
+  MAX_AUTO_FAILURES, PREPARE_EARLY_AFTER_SEC, PREPARE_LEAD_SEC, PREPARE_REFRESH_AFTER_MS, buildQueueItems, buildUrlSession, nextAutoIndex, retryIndexAfterFailures, sourceIdFor,
   type QueueItem, type RepeatMode, type UrlSession,
 } from "./url-auto-advance";
 import { isMainWsAttemptId } from "../main/main-attempt-id";
@@ -727,8 +727,20 @@ export class DeviceWsManager {
       if (this.restoreVerifying) this.restoreGiveUp("exhausted"); // P0 Gate 2d: LOCAL, never silence
       return;
     }
-    const t = this.nextTarget(false);
-    const url = t ? this.targetUrl(t) : "";
+    let t = this.nextTarget(false);
+    let url = t ? this.targetUrl(t) : "";
+    // Owner 2026-11-04: nothing left ONLY because items were marked failed in this run (one transient failed prepare of a
+    // looping song silenced the Lenovo + Dev-PC) → try the loop's item again instead of ending (capped above). Never for an
+    // unproven restore (Gate 2d hands that to LOCAL) or a dormant restore.
+    if ((!t || !url) && this.urlSession && !this.restoreVerifying && !this.restoreDormant) {
+      const ri = retryIndexAfterFailures(this.urlSession, urlRepeatModePref, this.autoFailed);
+      if (ri !== null) {
+        fileLog("INFO", "URL_AUTO_RETRY_FAILED", { reason, index: ri, failedItems: this.autoFailed.size, consecutiveFailures: this.autoFailures });
+        this.autoFailed.clear();
+        t = { kind: "playlist", index: ri };
+        url = this.targetUrl(t);
+      }
+    }
     if (!t || !url) {
       fileLog("INFO", "URL_AUTO_END", { reason });
       if (this.restoreVerifying) this.restoreGiveUp("nothing playable left"); // P0 Gate 2d
