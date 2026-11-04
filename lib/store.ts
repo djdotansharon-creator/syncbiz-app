@@ -212,7 +212,9 @@ export const db = {
     const wsId = await resolveWorkspaceId(accountId);
     if (!wsId) return new Set();
     const rows = await prisma.stationDevice.findMany({ where: { workspaceId: wsId }, select: { branchId: true }, distinct: ["branchId"] });
-    return new Set(rows.map((r) => r.branchId));
+    // a designated MASTER counts too: deleteBranch refuses on either, so the screen must say "a player is registered" for either (owner 2026-11-04: "no player shown, yet the delete says one is installed")
+    const designated = await prisma.branchMasterDesignation.findMany({ where: { workspaceId: wsId }, select: { branchId: true }, distinct: ["branchId"] });
+    return new Set([...rows.map((r) => r.branchId), ...designated.map((r) => r.branchId)]);
   },
 
   /** Control Room (info only): the engine version each branch's station last reported (the most recently seen station per branch). */
