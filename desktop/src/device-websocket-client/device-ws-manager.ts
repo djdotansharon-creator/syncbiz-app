@@ -166,6 +166,13 @@ export class DeviceWsManager {
   private prepRefreshedFor = 0;
   /** the last hand-over / MAIN navigation, kept until its attempt is proven — a failure rolls the session back */
   private autoCommit: { prevAttemptId: number; prevIndex: number; prevQueuedNow: QueueItem | null; attemptId: number; target: AutoTarget; manual?: boolean } | null = null;
+  /**
+   * Owner 2026-11-04 (Dev-PC went silent after 4 failed Droploud selections): an explicit URL SELECTION loaded as a
+   * standby over audible music. If it fails and MAIN reports the still-audible attempt again (Gate 2a), the automatic
+   * progression is rolled back to that audible attempt — otherwise it keeps watching the failed one and the audible
+   * song's natural end is never handled (silence). Kept until the selected attempt is proven playing.
+   */
+  private selectRollback: { failedAttemptId: number; prevAudibleAttemptId: number; prevUrlSession: UrlSession | null; prevQueuedNow: QueueItem | null; prevLocalQueueWatch: number } | null = null;
   // ── P0 Drop Next: MAIN's Play Next queue (URLs only) ──
   private playNext: QueueItem[] = [];
   private playNextSeq = 0;
@@ -601,6 +608,21 @@ export class DeviceWsManager {
       if (c.manual && this.autoFailures < MAX_AUTO_FAILURES) this.navLoad(orch, this.nextTarget(true), "NEXT", "after a failed navigation");
       return;
     }
+    // (a2) 2026-11-04: an explicit selection's standby failed and MAIN reports the still-audible attempt again (Gate 2a)
+    //      → MAIN's automatic progression goes back to that audible attempt (its natural end continues the music).
+    const sr = this.selectRollback;
+    if (sr && watched === sr.failedAttemptId && id === sr.prevAudibleAttemptId && m.status === "playing" && !orch.isMusicAttemptPending()) {
+      this.selectRollback = null;
+      this.urlSession = sr.prevUrlSession;
+      this.queuedNow = sr.prevQueuedNow;
+      this.localQueueWatch = sr.prevLocalQueueWatch;
+      this.resetAutoAdvance();
+      this.publishQueue();
+      if (sr.prevUrlSession) this.persistUrl(); else if (!isMainWsAttemptId(id)) this.persistLocal(); // restart restores what is really audible
+      fileLog("WARN", "URL_SELECT_FAILED_ROLLBACK", { failedAttemptId: sr.failedAttemptId, audibleAttemptId: id, mainSession: !!sr.prevUrlSession });
+      return;
+    }
+    if (sr && id === sr.failedAttemptId && m.status === "playing" && (m.position ?? 0) > 0 && !orch.isMusicAttemptPending()) this.selectRollback = null; // the selection is proven
     if (id === 0 || id !== watched) return;
     // (b) MAIN's own automatic attempt (or the watched LOCAL attempt) failed → fail forward (capped)
     if (m.status === "idle" && m.lastError) {
@@ -1247,6 +1269,13 @@ export class DeviceWsManager {
         if (!url) { this.queuedNow = null; this.localQueueWatch = 0; } // P0 Drop Next: the renderer's LOCAL session is current again
         if (!url) break; // local (paths stripped on the wire) → audio handled by the co-located renderer engine
         const fadeSec = orch.getCrossfadeSec();
+        // 2026-11-04: what MAIN auto-advances NOW (the audible attempt) — restored if this selection's standby fails. A newer
+        // selection while the previous one is still pending keeps the ORIGINAL audible state (never an unproven one).
+        const sr = this.selectRollback;
+        const keepSelectPrev = !!sr && orch.isMusicAttemptPending() && this.urlSession?.attemptId === sr.failedAttemptId;
+        const selectPrev = keepSelectPrev && sr
+          ? { prevAudibleAttemptId: sr.prevAudibleAttemptId, prevUrlSession: sr.prevUrlSession, prevQueuedNow: sr.prevQueuedNow, prevLocalQueueWatch: sr.prevLocalQueueWatch }
+          : { prevAudibleAttemptId: orch.getState().music.attemptId ?? 0, prevUrlSession: this.urlSession, prevQueuedNow: this.queuedNow, prevLocalQueueWatch: this.localQueueWatch };
         // P0 Gate 1a: always the crossfade entry point (orchestrator → cold only when nothing is audible).
         this.pendingWsLoadKey = typeof src?.id === "string" ? `${src.id}#${typeof srcMeta?.trackIndex === "number" ? srcMeta.trackIndex : 0}` : null;
         orch.playMusicCrossfade(url, fadeSec, nextMainWsAttemptId());
@@ -1262,6 +1291,12 @@ export class DeviceWsManager {
         this.cancelRestore("URL selected"); // P0 Gate 2d: an explicit selection replaces any pending restore
         this.urlSession = buildUrlSession(payload);
         if (this.urlSession) this.urlSession.attemptId = orch.getState().music.attemptId;
+        {
+          const ms = orch.getState().music;
+          this.selectRollback = ms.attemptMode === "crossfade" && typeof ms.attemptId === "number" && ms.attemptId > 0 && selectPrev.prevAudibleAttemptId > 0 && selectPrev.prevAudibleAttemptId !== ms.attemptId
+            ? { failedAttemptId: ms.attemptId, ...selectPrev }
+            : null; // cold load: nothing audible to fall back to
+        }
         this.resetAutoAdvance();
         this.queuedNow = null; // P0 Drop Next: an explicit selection plays now; the queue itself is kept
         this.localQueueWatch = 0;
