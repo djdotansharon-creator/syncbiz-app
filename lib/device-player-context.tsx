@@ -31,7 +31,7 @@ import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved, mainBootSource } from "@/lib/device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, notifyLocalSourceExecChanged, localExecResolved, mainBootSource, mainOwnsUrlPlayback } from "@/lib/device-mode-guard";
 import { getAutoMix, setAutoMix, onAutoMixChanged, getRepeatMode, getPlaybackRepeatMode, setRepeatMode, onRepeatModeChanged, getMixDuration, type RepeatMode } from "@/lib/mix-preferences";
 import { autoAdvanceHandoff } from "@/lib/auto-advance-handoff";
 import { useMobileRole } from "@/lib/mobile-role-context";
@@ -443,8 +443,9 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     }).syncbizDesktop;
     if (!bridge || typeof bridge.onStatus !== "function") return; // browser / legacy shell → stays false (fail-closed)
     let cancelled = false;
-    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean; bootSource?: string }) => {
+    const apply = (s: { commandReady?: boolean; designatedStationOffline?: boolean; bootSource?: string; mainUrlAutoAdvance?: boolean }) => {
       if (cancelled) return;
+      mainOwnsUrlPlayback.current = s?.mainUrlAutoAdvance === true; // 2026-11-04: read by the one-shot restore (never over MAIN's session)
       // P0 Gate 2d: MAIN's restart-restore decision gates the one-shot provider restore (notify on change only).
       const boot = typeof s?.bootSource === "string" ? s.bootSource : null;
       if (boot !== mainBootSource.current) {

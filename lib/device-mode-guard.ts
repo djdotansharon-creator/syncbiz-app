@@ -35,6 +35,13 @@ export const localExecResolved = { current: false };
  */
 export const mainBootSource: { current: string | null } = { current: null };
 
+/**
+ * 2026-11-04 (owner: "it plays something else than what I chose"): the co-located MAIN is playing a URL session it owns
+ * (snapshot `mainUrlAutoAdvance`) — e.g. the user's / a schedule's selection. MAIN's truth wins (CLAUDE.md §13): the
+ * one-shot provider restore must never start its saved LOCAL source over it. false = no MAIN / nothing MAIN-owned.
+ */
+export const mainOwnsUrlPlayback = { current: false };
+
 const localExecListeners = new Set<() => void>();
 export function subscribeLocalSourceExec(cb: () => void): () => void {
   localExecListeners.add(cb);
