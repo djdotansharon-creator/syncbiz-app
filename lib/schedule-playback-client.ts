@@ -9,6 +9,7 @@ import type { RadioStream, UnifiedSource } from "@/lib/source-types";
 import { sourceToUnified } from "@/lib/playback-provider";
 import { supportsEmbedded } from "@/lib/player-utils";
 import type { Schedule, Source } from "@/lib/types";
+import { stationMayStart, type ScheduleRoute } from "@/lib/schedule-station-route";
 
 export type SchedulePlaybackHandlers = {
   stop: () => void;
@@ -16,6 +17,8 @@ export type SchedulePlaybackHandlers = {
   /** Must route to MASTER when this browser is branch CONTROL — see useSchedulePlaybackHandlers. */
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
   setLastMessage: (msg: string | null) => void;
+  /** 2026-11-04 — where a schedule starts (lib/schedule-station-route.ts). Omitted = "default" (existing behavior). */
+  route?: ScheduleRoute;
 };
 
 type AppRouterLike = { push: (href: string) => void };
@@ -34,6 +37,27 @@ export async function runSchedulePlayback(
 ): Promise<boolean> {
   const tid = (schedule.targetId || schedule.sourceId || "").trim();
   const { stop, setQueue, playSource, setLastMessage } = handlers;
+  const route: ScheduleRoute = handlers.route ?? { kind: "default" };
+  // Designated station's own window, route not known yet (MAIN's designation snapshot pending): start nothing — the
+  // current music keeps playing and the next poll retries (never the renderer's own player on top of MAIN's session).
+  if (route.kind === "wait") return false;
+  /**
+   * Start a playlist / radio target. Designated station's own window: EXACTLY a manual library click — queue + playSourceOrSend
+   * (URL → MAIN's session, LOCAL → the accepted LOCAL path), WITHOUT stopping the current music first; a URL target waits
+   * (false → retried next poll) until it can reach MAIN. Every other window: unchanged (stop → queue → play row 0).
+   */
+  const start = (unified: UnifiedSource, stationTrackIndex: number): boolean => {
+    if (route.kind === "station") {
+      if (!stationMayStart(route, unified.type)) return false;
+      setQueue([unified], { force: true });
+      playSource(unified, stationTrackIndex);
+      return true;
+    }
+    stop();
+    setQueue([unified], { force: true });
+    playSource(unified, 0);
+    return true;
+  };
 
   if (schedule.targetType === "PLAYLIST" && tid) {
     if (source && supportsEmbedded(source)) {
@@ -82,10 +106,8 @@ export async function runSchedulePlayback(
       origin: "playlist",
       playlist,
     };
-    stop();
-    setQueue([unified], { force: true });
-    playSource(unified, 0);
-    return true;
+    // Station: the exact row of the first playable track (a shell at row 0 keeps the existing payload rule).
+    return start(unified, Math.max(0, tracks.indexOf(first)));
   }
 
   if (schedule.targetType === "RADIO" && tid) {
@@ -105,10 +127,7 @@ export async function runSchedulePlayback(
       return false;
     }
     const unified = radioToUnified(station);
-    stop();
-    setQueue([unified], { force: true });
-    playSource(unified, 0);
-    return true;
+    return start(unified, 0);
   }
 
   let src = source;
@@ -126,7 +145,9 @@ export async function runSchedulePlayback(
     return true;
   }
   setLastMessage(null);
-  playSource(sourceToUnified(src), 0);
+  const unifiedSrc = sourceToUnified(src);
+  if (route.kind === "station" && !stationMayStart(route, unifiedSrc.type)) return false;
+  playSource(unifiedSrc, 0);
   const target = (src.target ?? src.uriOrPath ?? "").trim();
   if (!target) {
     setLastMessage("Failed: No target path");
