@@ -69,7 +69,7 @@ import {
   reconstructUrlSource,
   mergeCurrentIntoRecoveredQueue,
 } from "./local-recovery";
-import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec, mainBootSource } from "./device-mode-guard";
+import { deviceModeAllowsLocalPlayback, localSourceExecAllowed, localExecResolved, subscribeLocalSourceExec, mainBootSource, mainOwnsUrlPlayback } from "./device-mode-guard";
 import { autoAdvanceHandoff } from "./auto-advance-handoff";
 import { urlTimingMark } from "./url-startup-timing";
 
@@ -877,6 +877,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [state.currentSource?.id, state.currentTrackIndex, state.status, state.volume]);
 
   const hasRestoredRef = useRef(false);
+  /** 2026-11-04: bumped by every playSource — the one-shot restore compares it to skip when something newer was chosen. */
+  const playIntentEpochRef = useRef(0);
   const prevStatusRef = useRef<PlaybackStatus>("idle");
   const prevTrackKeyRef = useRef<string>("");
   const currentTrack = deriveCurrentTrack(state.currentSource, state.currentTrackIndex);
@@ -1147,6 +1149,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const playSource = useCallback(
     (source: UnifiedSource, trackIndex = 0, opts?: PlaySourceOptions) => {
+      playIntentEpochRef.current += 1; // 2026-11-04: a newer playback intent — an in-flight one-shot restore must not override it
       setUrlPrepareActive(false);
       if (!localPlaybackPermitted(source, getPlayUrl(source, trackIndex))) {
         console.warn("[SyncBiz Audit] playSource BLOCKED by deviceModeAllowsLocalPlayback", {
@@ -1651,6 +1654,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       return () => unsub();
     }
     hasRestoredRef.current = true;
+    // 2026-11-04 (owner: "the screen shows my song, the speakers play an old one"): the restore awaits the library (it took
+    // ~40 s on the Dev-PC); a selection made meanwhile — a playSource here, or a URL session MAIN now owns — always wins.
+    const intentEpochAtStart = playIntentEpochRef.current;
+    const supersededBy = (): string | null =>
+      playIntentEpochRef.current !== intentEpochAtStart ? "a newer selection" : mainOwnsUrlPlayback.current ? "MAIN plays a URL session" : null;
     restoreDiag("restoring", {
       bootSource: mainBootSource.current,
       hasLocalBlock: !!persistedV2?.local,
@@ -1801,6 +1809,15 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             });
           }
           const source = effectiveSource as UnifiedSource; // non-null: every branch above assigns or returns
+          {
+            const newer = supersededBy();
+            if (newer) {
+              // the saved session is stale now: never replace the queue / display and never start it over what plays
+              restoreDiag("skipped: superseded", { by: newer, sourceId: source.id });
+              done();
+              return;
+            }
+          }
           recoveryPositionRef.current = persistedV2.positionSeconds;
           pendingSeekOnRestoreRef.current = persistedV2.positionSeconds;
           setState((s) => ({
@@ -1839,6 +1856,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
             if (cancelled) return;
             queueMicrotask(() => {
               if (cancelled) return;
+              const newer = supersededBy(); // the media-token wait above may have let a selection in
+              if (newer) {
+                restoreDiag("skipped: superseded", { by: newer, sourceId: source.id });
+                done();
+                return;
+              }
               playSourceRef.current(source, effectiveTrackIndex);
               done();
               setTimeout(() => {
@@ -1857,10 +1880,20 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         }
 
         const v1s = items.find((s) => s.id === persistedV1!.sourceId);
+        if (v1s && supersededBy()) {
+          restoreDiag("skipped: superseded", { by: supersededBy(), sourceId: v1s.id });
+          done();
+          return;
+        }
         if (v1s) {
           setState((s) => ({ ...s, volume: persistedV1!.volume }));
           const resolvedV1 = await resolveSourceForRestore(v1s);
           if (cancelled) return;
+          if (supersededBy()) {
+            restoreDiag("skipped: superseded", { by: supersededBy(), sourceId: v1s.id });
+            done();
+            return;
+          }
           playSourceRef.current(resolvedV1, persistedV1!.trackIndex);
         } else if (typeof window !== "undefined") {
           try {
