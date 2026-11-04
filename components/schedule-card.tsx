@@ -68,7 +68,7 @@ type ScheduleCardProps = {
 export function ScheduleCard({ schedule, device, source, playlists, radioStations }: ScheduleCardProps) {
   const router = useRouter();
   const { t } = useTranslations();
-  const { setLastMessage, stop, setQueue, playSource } = useSchedulePlaybackHandlers();
+  const { setLastMessage, stop, setQueue, playSource, route } = useSchedulePlaybackHandlers();
   const [deleting, setDeleting] = useState(false);
   const [playing, setPlaying] = useState(false);
 
@@ -136,7 +136,7 @@ export function ScheduleCard({ schedule, device, source, playlists, radioStation
       await runSchedulePlayback(
         schedule,
         source,
-        { stop, setQueue, playSource, setLastMessage },
+        { stop, setQueue, playSource, setLastMessage, route },
         router,
       );
       router.refresh();

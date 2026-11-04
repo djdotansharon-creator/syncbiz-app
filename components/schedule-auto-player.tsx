@@ -29,15 +29,15 @@ export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { engineEnabled } = useScheduleEngine();
   const { isRestoring } = usePlayback();
-  const { stop, setQueue, playSource, setLastMessage } = useSchedulePlaybackHandlers();
+  const { stop, setQueue, playSource, setLastMessage, route } = useSchedulePlaybackHandlers();
   const busyRef = useRef(false);
   // FLOOD FIX (2026-10-15): the playback handlers change identity on EVERY station status update (several per second).
   // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
   // (TEST logs: up to 8 requests/s per app). The latest handlers now live in a ref read at fire time; the polling
   // effect depends only on the engine switch + restore state → exactly one request per POLL_MS.
-  const handlersRef = useRef({ router, stop, setQueue, playSource, setLastMessage });
+  const handlersRef = useRef({ router, stop, setQueue, playSource, setLastMessage, route });
   useEffect(() => {
-    handlersRef.current = { router, stop, setQueue, playSource, setLastMessage };
+    handlersRef.current = { router, stop, setQueue, playSource, setLastMessage, route };
   });
 
   useEffect(() => {
@@ -46,6 +46,8 @@ export function ScheduleAutoPlayer() {
     async function tick() {
       if (!engineEnabled || cancelled || busyRef.current) return;
       if (isRestoring) return;
+      // 2026-11-04: designated station window whose route is not known yet (MAIN designation pending) → retry next poll.
+      if (handlersRef.current.route?.kind === "wait") return;
 
       busyRef.current = true;
       try {
@@ -102,7 +104,7 @@ export function ScheduleAutoPlayer() {
           ok = await runSchedulePlayback(
             winner,
             source,
-            { stop: h.stop, setQueue: h.setQueue, playSource: h.playSource, setLastMessage: h.setLastMessage },
+            { stop: h.stop, setQueue: h.setQueue, playSource: h.playSource, setLastMessage: h.setLastMessage, route: h.route },
             h.router,
           );
         } catch {
