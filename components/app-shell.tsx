@@ -365,6 +365,19 @@ function LogoutButton({ compact: isCompact }: { compact?: boolean } = {}) {
   );
 }
 
+/* 2026-11-05 (owner: opening the "More settings" menu and every control answers late on the PCs): AppShell re-renders on any state of its own — the gear menu opening, a nav
+   hover, a pathname change — and re-created these three HEAVY children each time: the whole player (6k lines), the queue (every row) and the display screen. They take no props and
+   read what they need from context or their own state, so a memo with no props never skips a render they actually need (a context / own-state change still renders them). */
+const MemoAudioPlayer = React.memo(function MemoAudioPlayer() {
+  return <AudioPlayer />;
+});
+const MemoLiveQueuePanel = React.memo(function MemoLiveQueuePanel() {
+  return <LiveQueuePanel />;
+});
+const MemoKioskDisplay = React.memo(function MemoKioskDisplay() {
+  return <KioskDisplay />;
+});
+
 export function AppShell({ children }: { children: ReactNode }) {
   const tr = useTr();
   // Electron-only: after one normal login, auto-provision MAIN's bound desktop_access token. No-op in a browser.
@@ -1321,7 +1334,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-hidden
           style={{ width: 320, height: 180 }}
         >
-          <AudioPlayer />
+          <MemoAudioPlayer />
         </div>
       </>
     );
@@ -1345,7 +1358,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           aria-hidden
           style={{ width: 320, height: 180 }}
         >
-          <AudioPlayer />
+          <MemoAudioPlayer />
         </div>
         {children}
       </>
@@ -1667,7 +1680,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {isMediaThemeRoute ? (
                 <aside className="library-deck-slot-aside relative z-[60] isolate hidden h-full min-h-0 overflow-hidden lg:block lg:border-e lg:border-slate-800/60">
                   <div className="flex h-full min-h-0 flex-col overflow-hidden p-2.5">
-                    <LiveQueuePanel />
+                    <MemoLiveQueuePanel />
                   </div>
                 </aside>
               ) : null}
@@ -1698,9 +1711,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     Drop To Play
                   </div>
                 ) : null}
-                <AudioPlayer />
+                <MemoAudioPlayer />
                 {/* The business's display screen (owner 2026-10-25): a cover over the running app, opened with a padlock + password — never unmounts anything */}
-                <KioskDisplay />
+                <MemoKioskDisplay />
                 {/* the way to the display screen: a quiet icon in the player cell's corner (owner 2026-10-25) */}
                 <KioskLaunchButton />
                 {/* Ambient clock (owner, 2026-10-14): time + time-of-day greeting in the player's top-right
