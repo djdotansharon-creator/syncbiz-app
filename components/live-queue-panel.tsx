@@ -974,7 +974,7 @@ export function LiveQueuePanel() {
      (Web Animations, composited) — a clicked song rises out of the list into the top row, a
      reorder settles, and on collapse/expand the squares grow or shrink from where they were.
      Skipped while a drag is in progress and once right after a drop (the ghost already moved). */
-  const flipRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const flipRectsRef = useRef<Map<string, Pick<DOMRect, "left" | "top" | "width" | "height">>>(new Map());
   const flipSkipOnceRef = useRef(false);
   const settlingRef = useRef(false);
   const flipQuietUntilRef = useRef(0); // collapse/expand are pure CSS transitions — FLIP keeps its hands off meanwhile
@@ -983,7 +983,14 @@ export function LiveQueuePanel() {
     const root = panelRootRef.current;
     if (!root) return;
     const els = root.querySelectorAll<HTMLElement>("[data-flip-key]");
-    const next = new Map<string, DOMRect>();
+    const next = new Map<string, Pick<DOMRect, "left" | "top" | "width" | "height">>();
+    /* 2026-11-05 (owner: the squares jump while he scrolls the queue; reproduced in the mirror with the real station state — every state tick re-renders the panel, and a box
+       measured in WINDOW coordinates "moved" by exactly the scroll distance, so every row and cover glided for 440 ms after each wheel step, the cover and its row out of step).
+       Boxes are now taken relative to the panel with the list's own scroll added back: scrolling the list (or the page) is not movement, a real change of layout still is. */
+    const rootR = root.getBoundingClientRect();
+    const scroller = root.querySelector<HTMLElement>(".sb-queue-body");
+    const scrollTop = scroller ? scroller.scrollTop : 0;
+    const norm = (el: HTMLElement, b: DOMRect) => ({ left: b.left - rootR.left, top: b.top - rootR.top + (scroller && scroller.contains(el) ? scrollTop : 0), width: b.width, height: b.height });
     const quietNow = performance.now() < flipQuietUntilRef.current;
     const afterQuiet = !quietNow && flipWasQuietRef.current; // first render after a quiet spell: just re-measure
     flipWasQuietRef.current = quietNow;
@@ -996,9 +1003,9 @@ export function LiveQueuePanel() {
       // a glide already in flight continues from where it visually is (no restart, no jump):
       // measure the visual box, drop the old glide, measure the true layout box
       const running = el.getAnimations().filter((a) => a.id === "flip");
-      const visual = running.length ? el.getBoundingClientRect() : null;
+      const visual = running.length ? norm(el, el.getBoundingClientRect()) : null;
       running.forEach((a) => a.cancel());
-      const r = el.getBoundingClientRect();
+      const r = norm(el, el.getBoundingClientRect());
       next.set(key, r);
       if (quiet || r.width === 0 || r.height === 0) return;
       const prev = visual ?? flipRectsRef.current.get(key);

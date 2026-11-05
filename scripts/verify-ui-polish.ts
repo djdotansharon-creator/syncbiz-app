@@ -44,6 +44,11 @@ const ctlWhite = read("app/control-white.css");
 const bpHover = /\.sb-bp-row:hover \{[^}]*\}/.exec(bpCss)?.[0] ?? "";
 assert("P9b branch picker: the hovered row has a shadow and no fill in the dark looks, the white look and the white control look; nothing scales and the list has room for the shadow", /background:\s*transparent;[^}]*box-shadow:/.test(bpHover) && !/transform|scale|font-size/.test(bpHover) && !/\.sb-bp-row:hover, \.sb-pg-btn:hover/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent !important; box-shadow:/.test(liteCss) && /\.sb-bp-row:hover \{ background: transparent; box-shadow:/.test(ctlWhite) && /\.sb-bp-list \{ margin: -2px -16px -14px;/.test(bpCss));
 
+// ── 2026-11-05: scrolling the queue list is not movement — the FLIP pass measures boxes relative to the panel with the list's scroll added back ──
+const lq = read("components/live-queue-panel.tsx");
+const flipPass = lq.slice(lq.indexOf("const flipRectsRef"), lq.indexOf("flipRectsRef.current = next;"));
+assert("P12 live queue FLIP: boxes are normalised against the panel and the list's scrollTop (a wheel step / state tick no longer glides every row), both the in-flight and the resting box", /const scroller = root\.querySelector<HTMLElement>\("\.sb-queue-body"\);/.test(flipPass) && /scroller\.contains\(el\) \? scrollTop : 0/.test(flipPass) && /const visual = running\.length \? norm\(el, el\.getBoundingClientRect\(\)\) : null;/.test(flipPass) && /const r = norm\(el, el\.getBoundingClientRect\(\)\);/.test(flipPass) && !/next\.set\(key, el\.getBoundingClientRect/.test(flipPass));
+
 // ── 2026-11-03: the "New branch" tile's plus stands alone (no ring), in every look ──
 const enrCss = read("components/control-room/device-enrollment.css");
 const whiteCss = read("app/control-white.css");
