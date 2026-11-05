@@ -57,5 +57,9 @@ assert("P10 the 'New branch' tile's plus has no ring in any look (resting and ho
 // ── 2026-11-04: pulling the page down at the top does nothing (no rubber band, no pull-to-refresh) ──
 assert("P11 the page does not overscroll at the top: html and body carry overscroll-behavior-y: none (no pull-to-refresh, no bounce)", /(^|\n)html,\s*\nbody \{\s*overscroll-behavior-y:\s*none;\s*\}/.test(css));
 
+// ── 2026-11-05: a STATE_UPDATE identical to the last applied one apart from `positionAt` is not applied (MAIN publishes 4+/s with whole-second positions; each one re-rendered 36 consumers) ──
+const dpc = read("lib/device-player-context.tsx");
+assert("P15 mirror state: onStateUpdate drops a message identical to the last applied one except positionAt (a stalled position is still re-applied every 1.5 s), and everything else is applied at once", /const \{ positionAt, \.\.\.rest \} = state;/.test(dpc) && /if \(key !== "" && key === last\.key && at - last\.at < 1500\) return;/.test(dpc) && /lastAppliedStateRef\.current = \{ key, at \};\s*setMasterState\(state\);/.test(dpc) && (dpc.match(/setMasterState\(/g) ?? []).length === 1);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
