@@ -15,6 +15,7 @@ import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 import { MasterMediaSession } from "@/components/master-media-session";
 import { DesktopPerfDiag } from "@/components/desktop-perf-diag";
+import { QueueDiag } from "@/components/queue-diag";
 
 /**
  * Single client boundary for all app providers.
@@ -43,6 +44,8 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <MasterMediaSession />
                 {/* READ-ONLY performance diagnostic (renders null): slow clicks / long frames / hardware → the desktop main.log. Desktop shell or localStorage "syncbiz-perfdiag"="1" only. */}
                 <DesktopPerfDiag />
+                {/* READ-ONLY diagnostic (renders null): what moves in the Live Queue (glides, remounted rows, cover loads) → the desktop main.log. Desktop shell or localStorage "syncbiz-queuediag"="1" only. */}
+                <QueueDiag />
               </DevicePlayerProvider>
             </MobileRoleProvider>
           </LibraryThemeProvider>

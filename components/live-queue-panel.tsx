@@ -26,6 +26,7 @@ import { SuggestMetadataButton } from "@/components/suggest-metadata-button";
 import { CommunityFeedbackSummary } from "@/components/community-feedback-summary";
 import { displayPlaybackState } from "@/lib/url-transition-intent";
 import { useTr } from "@/lib/i18n/use-tr";
+import { queueDiagFlip } from "@/lib/queue-diag";
 
 type TrackExtra = PlaylistTrack & { durationSeconds?: number; genre?: string; artist?: string };
 
@@ -1020,6 +1021,7 @@ export function LiveQueuePanel() {
       const anc = rowAnc ? moved.get(rowAnc) : undefined;
       if (anc && Math.abs(anc.dx - dx) < 0.5 && Math.abs(anc.dy - dy) < 0.5 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
       moved.set(el, { dx, dy });
+      queueDiagFlip(key, dx, dy, sx, sy); // READ-ONLY diagnostic (no-op unless lib/queue-diag.ts is running)
       try {
         el.animate(
           [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: "none" }],

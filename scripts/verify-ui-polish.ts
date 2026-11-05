@@ -65,5 +65,11 @@ assert("P15 mirror state: onStateUpdate drops a message identical to the last ap
 const shellSrc = read("components/app-shell.tsx");
 assert("P16 app shell: the player, the queue and the display screen are rendered through prop-less React.memo wrappers (the gear menu opening no longer re-renders them), and no bare <AudioPlayer />, <LiveQueuePanel /> or <KioskDisplay /> is left in the shell's JSX", /const MemoAudioPlayer = React\.memo\(function MemoAudioPlayer\(\) \{\s*return <AudioPlayer \/>;/.test(shellSrc) && /const MemoLiveQueuePanel = React\.memo\(function MemoLiveQueuePanel\(\) \{\s*return <LiveQueuePanel \/>;/.test(shellSrc) && /const MemoKioskDisplay = React\.memo\(function MemoKioskDisplay\(\) \{\s*return <KioskDisplay \/>;/.test(shellSrc) && (shellSrc.match(/<AudioPlayer \/>/g) ?? []).length === 1 && (shellSrc.match(/<LiveQueuePanel \/>/g) ?? []).length === 1 && (shellSrc.match(/<KioskDisplay \/>/g) ?? []).length === 1 && (shellSrc.match(/<MemoAudioPlayer \/>/g) ?? []).length === 3);
 
+// ── 2026-11-05: the Live Queue diagnostic is read-only: it only listens, writes warn lines (never the address of a cover) and hooks the panel's FLIP pass with one no-op call ──
+const qd = read("lib/queue-diag.ts");
+const lqSrc = read("components/live-queue-panel.tsx");
+const prov = read("app/(app)/providers.tsx");
+assert("P17 queue-diag: read-only (observers + console.warn only, rate-limited, active only in the desktop shell or with the localStorage flag), logs the KIND of a cover source never its address, one hook in the panel's FLIP pass and the mount next to the perf diag", /MAX_LINES_PER_MINUTE = 12/.test(qd) && /syncbizDesktop/.test(qd) && /syncbiz-queuediag/.test(qd) && /function srcKind/.test(qd) && !/localStorage\.setItem|fetch\(|sendBeacon|XMLHttpRequest|\.src\s*=/.test(qd) && (lqSrc.match(/queueDiagFlip\(/g) ?? []).length === 1 && /<QueueDiag \/>/.test(prov));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
