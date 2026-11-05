@@ -3939,6 +3939,9 @@ html[data-sb-display="black"] .player-hero-shell { text-shadow: 0 1px 3px rgba(0
 }
 /* while the pointer owns the bar, the white follows it with zero lag */
 .sb-timeline-row[data-scrubbing="true"] .sb-timeline-played { transition-property: height; }
+/* 2026-11-05: where the bar is driven by a 1-second tick (the desktop MPV, or a controller mirroring a station) the white glides linearly for that whole second instead of stepping —
+   4x fewer renders of the player, the same smooth bar. The browser's own audio engine keeps its quick 120 ms (no data-slow-bar). */
+.sb-timeline-row[data-slow-bar="true"] .sb-timeline-played { transition-duration: 180ms, 1000ms; }
 .sb-timeline-row[data-scrubbing="true"] .sb-timeline-track { background: rgba(255, 255, 255, 0.20) !important; }
 .sb-timeline-thumb { display: none !important; }
 /* time labels float above the line ends and appear with the hover */

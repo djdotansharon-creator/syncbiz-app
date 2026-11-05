@@ -4652,12 +4652,15 @@ export function AudioPlayer() {
   // in effects that reference it in their dependency arrays before this line in the file.
 
   // Desktop: tick between onStatus pushes so the timeline advances smoothly.
+  // 2026-11-05 (owner: the app answers late on a weak Windows PC): measured — this tick, not the station's messages, was what re-rendered the whole player at idle.
+  // (a) once a second instead of four times (MAIN already reports whole seconds; the bar glides for the second in CSS, see `data-slow-bar`);
+  // (b) only while this window IS the local player: as a CONTROL mirror (every designated station's own window) the position comes from the mirror tick below, so this one ran twice for nothing.
   const [, setDesktopProgressTick] = useState(0);
   useEffect(() => {
-    if (!isDesktopMode || desktopMpvSnap?.status !== "playing") return;
-    const id = setInterval(() => setDesktopProgressTick((n) => n + 1), 250);
+    if (!isDesktopLocal || desktopMpvSnap?.status !== "playing") return;
+    const id = setInterval(() => setDesktopProgressTick((n) => n + 1), 1000);
     return () => clearInterval(id);
-  }, [isDesktopMode, desktopMpvSnap?.status]);
+  }, [isDesktopLocal, desktopMpvSnap?.status]);
 
   const desktopStalePlayingZero =
     isDesktopMode &&
@@ -4695,13 +4698,13 @@ export function AudioPlayer() {
     displayStatus === "playing",
   );
 
-  // CONTROL mirror: tick every 250 ms so the progress bar advances smoothly
-  // between STATE_UPDATE snapshots (which arrive ~1s from Desktop / ~1s from browser MASTER).
+  // CONTROL mirror: tick once a second so the progress bar advances between STATE_UPDATE snapshots (which arrive ~1s from Desktop / ~1s from browser MASTER).
+  // (2026-11-05: was every 250 ms — each tick re-renders this whole component; the bar now glides linearly for the second in CSS, `data-slow-bar`.)
   // The tick only runs when in CONTROL mirror mode and MASTER is playing.
   const [, setControlMirrorTick] = useState(0);
   useEffect(() => {
     if (!isControlMirror || ms?.status !== "playing") return;
-    const id = setInterval(() => setControlMirrorTick((n) => n + 1), 250);
+    const id = setInterval(() => setControlMirrorTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [isControlMirror, ms?.status]);
 
@@ -5615,7 +5618,7 @@ export function AudioPlayer() {
             <div className="player-hero-transport-slot mt-auto shrink-0 pt-1">
             {/* Progress — hairline timeline (2026-10-12): sits exactly where the old divider was (its centre on
                 the transport's top edge); hover grows it, long-press / drag scrubs. Styles: globals.css "Hairline timeline". */}
-            <div className="sb-timeline-row relative z-[1] -mb-2.5 flex w-full min-w-0 shrink-0 items-center" data-scrubbing={isScrubbing ? "true" : "false"}>
+            <div className="sb-timeline-row relative z-[1] -mb-2.5 flex w-full min-w-0 shrink-0 items-center" data-scrubbing={isScrubbing ? "true" : "false"} data-slow-bar={isDesktopMode || isControlMirror ? "true" : undefined}>
               <span
                 className={`sb-timeline-time sb-timeline-time--start player-lcd-time w-14 shrink-0 text-right text-base font-semibold tabular-nums tracking-tight sm:w-16 sm:text-lg ${
                   isSourcesLibraryDeck ? "text-[color:var(--lib-text-secondary)]" : "text-slate-200"
