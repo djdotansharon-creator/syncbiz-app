@@ -61,5 +61,9 @@ assert("P11 the page does not overscroll at the top: html and body carry overscr
 const dpc = read("lib/device-player-context.tsx");
 assert("P15 mirror state: onStateUpdate drops a message identical to the last applied one except positionAt (a stalled position is still re-applied every 1.5 s), and everything else is applied at once", /const \{ positionAt, \.\.\.rest \} = state;/.test(dpc) && /if \(key !== "" && key === last\.key && at - last\.at < 1500\) return;/.test(dpc) && /lastAppliedStateRef\.current = \{ key, at \};\s*setMasterState\(state\);/.test(dpc) && (dpc.match(/setMasterState\(/g) ?? []).length === 1);
 
+// ── 2026-11-05: AppShell's own state (the gear menu opening, a nav hover …) no longer re-renders the three heavy prop-less children it renders directly ──
+const shellSrc = read("components/app-shell.tsx");
+assert("P16 app shell: the player, the queue and the display screen are rendered through prop-less React.memo wrappers (the gear menu opening no longer re-renders them), and no bare <AudioPlayer />, <LiveQueuePanel /> or <KioskDisplay /> is left in the shell's JSX", /const MemoAudioPlayer = React\.memo\(function MemoAudioPlayer\(\) \{\s*return <AudioPlayer \/>;/.test(shellSrc) && /const MemoLiveQueuePanel = React\.memo\(function MemoLiveQueuePanel\(\) \{\s*return <LiveQueuePanel \/>;/.test(shellSrc) && /const MemoKioskDisplay = React\.memo\(function MemoKioskDisplay\(\) \{\s*return <KioskDisplay \/>;/.test(shellSrc) && (shellSrc.match(/<AudioPlayer \/>/g) ?? []).length === 1 && (shellSrc.match(/<LiveQueuePanel \/>/g) ?? []).length === 1 && (shellSrc.match(/<KioskDisplay \/>/g) ?? []).length === 1 && (shellSrc.match(/<MemoAudioPlayer \/>/g) ?? []).length === 3);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
