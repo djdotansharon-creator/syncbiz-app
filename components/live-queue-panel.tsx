@@ -853,8 +853,9 @@ export function LiveQueuePanel() {
   // P0 Gate 1f: the pending item — a row of the shown list (same playlist, or nothing audible = the list IS the new
   // session) gets "Loading…" instead of the now-playing bars; another playlist loading over audible music = a strip.
   const qPending = isControlMirror ? queueDisplay.pending : null;
-  const pendingRowIndex = qPending && (qPending.sameSession || !heldForQueue) ? qPending.index : null;
-  const pendingStrip = qPending && !qPending.sameSession && heldForQueue ? qPending : null;
+  /* 2026-11-06 (owner): ONE loading state — the playing square (the song on screen: the audible one while the next loads, or the new session's first item when nothing was audible) is
+     blurred with a ring; no strip, no extra row. When the song starts the row is re-created for the new track and its cover / title come in (see the sb-now-* rules in globals.css). */
+  const nowLoading = qPending !== null;
 
   /**
    * Queue row jump: re-invokes playSource on the displayed session source at the requested
@@ -1413,7 +1414,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                 (sessionTracks.length === 1 && playlistGenre ? playlistGenre : null);
               const thumb = derivePlaylistTrackCoverArt({ cover: t.cover, url: t.url, type: t.type });
               const isCurrent = i === sessionForList.highlightIndex;
-              const isPendingRow = pendingRowIndex !== null && i === pendingRowIndex; // P0 Gate 1f
+              const isPendingRow = nowLoading; // P0 Gate 1f — the playing square is the only row shown here (`if (!isCurrent) return null`)
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
               const displayNumber = displayIndex + 1;
               if (!isCurrent) return null;
@@ -1442,7 +1443,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                   {isCurrent ? (
                     <span className="sb-queue-accent pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full" aria-hidden />
                   ) : null}
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]" data-flip-key={`s:${t.id}`}>
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]" data-flip-key={`s:${t.id}`} data-loading={isPendingRow ? "true" : undefined}>
                     {thumb ? (
                       <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
@@ -1450,6 +1451,8 @@ onPointerDown={onRowPointerDown("pn", k)}
                         {displayNumber}
                       </div>
                     )}
+                    {isPendingRow ? <span className="sb-queue-spinner" aria-hidden /> : null}
+                    {isPendingRow ? <span className="sr-only" role="status">{tt("Loading…")}</span> : null}
                     {isCurrent ? (
                       <span className="sr-only">{tt("Now playing")}</span>
                     ) : null}
@@ -1471,11 +1474,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                       <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} catalogItemId={tr.catalogItemId ?? null} />
                     </span>
                   ) : null}
-                  {isPendingRow ? (
-                    <span className="flex h-7 shrink-0 items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#a1a1a6]" aria-label="Loading">
-                      Loading…
-                    </span>
-                  ) : isCurrent ? (
+                  {isCurrent ? (
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label={tt("Now playing")}>
                       <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
                         <span />
@@ -1512,12 +1511,6 @@ onPointerDown={onRowPointerDown("pn", k)}
         ) : null}
       </div>
       <div className="sb-queue-body min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
-        {pendingStrip ? (
-          <p className="mb-1.5 flex min-w-0 items-center gap-2 rounded-[7px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px] leading-tight text-[#a1a1a6]" aria-live="polite">
-            <span className="shrink-0 font-medium text-[#f5f5f7]">Loading…</span>
-            {pendingStrip.title ? <span dir="auto" className="min-w-0 truncate">{pendingStrip.title}</span> : null}
-          </p>
-        ) : null}
         {sessionTracks.length === 0 ? (
           nowPlayingDetached ? null : <p className="text-[10px] leading-tight text-slate-500/70">{tt("Pick a playlist to start")}</p>
         ) : displayedSessionTracks.length === 0 ? (
