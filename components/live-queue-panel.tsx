@@ -852,8 +852,9 @@ export function LiveQueuePanel() {
   // P0 Gate 1f: the pending item — a row of the shown list (same playlist, or nothing audible = the list IS the new
   // session) gets "Loading…" instead of the now-playing bars; another playlist loading over audible music = a strip.
   const qPending = isControlMirror ? queueDisplay.pending : null;
-  const pendingRowIndex = qPending && (qPending.sameSession || !heldForQueue) ? qPending.index : null;
-  const pendingStrip = qPending && !qPending.sameSession && heldForQueue ? qPending : null;
+  /* 2026-11-06 (owner): ONE loading state — the playing square (the song on screen: the audible one while the next loads, or the new session's first item when nothing was audible) is
+     blurred with a ring; no strip, no extra row. When the song starts the row is re-created for the new track and its cover / title come in (see the sb-now-* rules in globals.css). */
+  const nowLoading = qPending !== null;
 
   /**
    * Queue row jump: re-invokes playSource on the displayed session source at the requested
@@ -1411,7 +1412,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                 (sessionTracks.length === 1 && playlistGenre ? playlistGenre : null);
               const thumb = derivePlaylistTrackCoverArt({ cover: t.cover, url: t.url, type: t.type });
               const isCurrent = i === sessionForList.highlightIndex;
-              const isPendingRow = pendingRowIndex !== null && i === pendingRowIndex; // P0 Gate 1f
+              const isPendingRow = nowLoading; // P0 Gate 1f — the playing square is the only row shown here (`if (!isCurrent) return null`)
               const isNextInList = markNextInOrder && nextLinear !== null && i === nextLinear;
               const displayNumber = displayIndex + 1;
               if (!isCurrent) return null;
@@ -1449,6 +1450,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                       </div>
                     )}
                     {isPendingRow ? <span className="sb-queue-spinner" aria-hidden /> : null}
+                    {isPendingRow ? <span className="sr-only" role="status">{tt("Loading…")}</span> : null}
                     {isCurrent ? (
                       <span className="sr-only">{tt("Now playing")}</span>
                     ) : null}
@@ -1470,9 +1472,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                       <SuggestMetadataButton trackTitle={title} trackArtist={tr.artist ? String(tr.artist) : null} catalogItemId={tr.catalogItemId ?? null} />
                     </span>
                   ) : null}
-                  {isPendingRow ? (
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center" role="status" aria-label={tt("Loading…")} />
-                  ) : isCurrent ? (
+                  {isCurrent ? (
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label={tt("Now playing")}>
                       <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
                         <span />
@@ -1509,14 +1509,6 @@ onPointerDown={onRowPointerDown("pn", k)}
         ) : null}
       </div>
       <div className="sb-queue-body min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
-        {pendingStrip ? (
-          <div className="sb-queue-pending mb-1.5 flex min-w-0 items-center gap-2.5" role="status" aria-live="polite" aria-label={tt("Loading…")}>
-            <span className="sb-queue-pending-tile relative h-12 w-12 shrink-0 overflow-hidden rounded-md" data-loading="true">
-              <span className="sb-queue-spinner" aria-hidden />
-            </span>
-            {pendingStrip.title ? <span dir="auto" className="sb-queue-pending-title min-w-0 truncate text-[12px] leading-tight text-[#a1a1a6]">{pendingStrip.title}</span> : null}
-          </div>
-        ) : null}
         {sessionTracks.length === 0 ? (
           nowPlayingDetached ? null : <p className="text-[10px] leading-tight text-slate-500/70">{tt("Pick a playlist to start")}</p>
         ) : displayedSessionTracks.length === 0 ? (

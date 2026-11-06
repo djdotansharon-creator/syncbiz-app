@@ -4630,26 +4630,28 @@ html[data-sb-display="song"] .sb-queue-drag-ghost {
    The label's width glides to zero on the same 700ms curve, so the chevron slides to the centre. */
 .sb-queue-label { max-width: 260px; transition: opacity 260ms ease, max-width var(--q-dur, 700ms) var(--q-ease, ease); }
 .sb-queue-collapsed .sb-queue-label { max-width: 0; min-width: 0; margin: 0; overflow: hidden; }
-/* 2026-11-06 (owner: not the word "Loading" — the song's square blurred, with a loading circle on it): a song that is being loaded shows its cover blurred (soft, slightly enlarged so the
-   blur's edge never shows) with a spinning ring on top; no text. The tile of a playlist loading over audible music (no cover yet) is a soft blurred tile with the same ring. Only while
-   loading — the ring is the only animation that runs, and only for those few seconds. */
+/* 2026-11-06 (owner: not the word "Loading" — the song's square blurred, with a loading circle on it; and when the song starts the picture changes, the blur coming down, and the text
+   changes): a song that is loading shows the playing square's cover blurred (soft, slightly enlarged so the blur's edge never shows) with a spinning ring on top; no text, no strip. When the
+   song starts the row is re-created for the new track: its cover comes in from a blur (sharpening) and its title / artist fade in. Only the ring runs continuously, and only while loading. */
 .queue-row .h-12.w-12 img { transition: filter 320ms ease, transform 320ms ease; }
 .queue-row .h-12.w-12[data-loading="true"] img { filter: blur(5px) brightness(0.82); transform: scale(1.16); }
-.sb-queue-pending-tile { background: linear-gradient(135deg, rgba(150, 160, 190, 0.34), rgba(70, 80, 110, 0.34)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
 .sb-queue-spinner {
   position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; box-sizing: border-box;
   border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.28); border-top-color: #ffffff;
   animation: sb-queue-spin 0.8s linear infinite; pointer-events: none;
 }
 @keyframes sb-queue-spin { to { transform: rotate(360deg); } }
+/* the new song arrives: cover from a blur to sharp, title + artist in (the row is re-created per track; not while the square is still loading) */
+@keyframes sb-now-cover-in { from { filter: blur(10px) brightness(0.85); transform: scale(1.18); opacity: 0.35; } to { filter: blur(0) brightness(1); transform: scale(1); opacity: 1; } }
+@keyframes sb-now-text-in { from { opacity: 0; filter: blur(4px); transform: translateY(3px); } to { opacity: 1; filter: blur(0); transform: none; } }
+.queue-row-current .h-12.w-12:not([data-loading="true"]) img { animation: sb-now-cover-in 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.queue-row-current .min-w-0 > p { animation: sb-now-text-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.queue-row-current .min-w-0 > span { animation: sb-now-text-in 420ms cubic-bezier(0.22, 1, 0.36, 1) 60ms backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .queue-row-current .h-12.w-12 img, .queue-row-current .min-w-0 > p, .queue-row-current .min-w-0 > span { animation: none; }
+}
 @media (prefers-reduced-motion: reduce) { .sb-queue-spinner { animation-duration: 2.4s; } }
-.sb-queue-pending { padding-inline-start: 4px; } /* the same 4px the playing row starts with, so the two tiles line up */
 .sb-queue-spinner { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)); } /* legible over a light cover too */
-html[data-sb-display="white"] .sb-queue-pending-tile { background: linear-gradient(135deg, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.12)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06); }
-html[data-sb-display="white"] .sb-queue-pending-tile .sb-queue-spinner { border-color: rgba(0, 0, 0, 0.18); border-top-color: #1c1c1e; filter: none; }
-.sb-queue-collapsed .sb-queue-pending { justify-content: center; padding-inline-start: 0; }
-.sb-queue-collapsed .sb-queue-pending-tile { width: 45px; height: 45px; }
-.sb-queue-collapsed .sb-queue-pending-title { display: none; }
 .library-deck-slot-aside header > div { transition: gap var(--q-dur, 700ms) var(--q-ease, ease); }
 .sb-queue-collapsed > header > div { justify-content: center; gap: 0; }
 /* (w) owner, 2026-10-14: the Drop Next pad is hidden FOR NOW — Play Next itself keeps working (drops
