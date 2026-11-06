@@ -287,7 +287,7 @@ const navKeys = [
   "display-design",
 ] as const;
 /** entries that exist in the code but are NOT offered in the top bar or the gear menu (owner 2026-10-22: "remote" is not part of this interface at all; "settings" moved into the gear menu as "More settings") */
-const HIDDEN_NAV_KEYS = new Set<string>(["remote", "settings", "owner"]); // owner 2026-10-31: the Owner tab moved into Settings (tabs "Business" and "Remote control")
+const HIDDEN_NAV_KEYS = new Set<string>(["remote", "settings", "owner", "radio"]); // owner 2026-11-06: no Radio tab on the top bar (the library has its own Radio filter). owner 2026-10-31: the Owner tab moved into Settings (tabs "Business" and "Remote control")
 /** management entries — shown only to managers (security hotfix 2026-10-13) */
 const MANAGEMENT_NAV_KEYS = new Set<string>(["dashboard", "controlRoom", "access-control", "owner", "display-design"]);
 /** tabs of the top bar that are never offered in the gear menu (always on the bar — they cannot be pinned or unpinned) */
