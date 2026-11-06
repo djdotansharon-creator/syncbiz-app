@@ -3772,9 +3772,12 @@ export function AudioPlayer() {
           const preloadAt = preloadThresholdSec(d, mixSec);
           const mixAt = mixPointThresholdSec(d, mixSec);
           const nextUrl = getNextStreamUrl();
+          // A deck that already ENDED never starts a pre-load / crossfade (2026-10-28): its natural end already moved the
+          // provider on, so `nextUrl` is now the song AFTER the new one — mixing into it skipped a song and repeated another.
           const canOverlap = !!(
             nextUrl &&
             currentPlayUrl &&
+            !a.ended &&
             !isHlsUrl(currentPlayUrl) &&
             !isHlsUrl(nextUrl)
           );
@@ -3911,9 +3914,17 @@ export function AudioPlayer() {
   }, [currentSource, isYouTube, isSoundCloud, isHtmlAudio, isYouTubeMix, isYouTubeMultiTrack, getNextStreamUrl, getNextEmbeddedSource, deviceCtx?.isBranchConnected, deviceCtx?.deviceMode, updatePositionIfChanged, updateDurationIfChanged, updateBufferedIfChanged, reportRecoveryProgress, getDeckAudio, getStandbyDeck, swapActiveDeck, deckTransitionLock, guardedYtPlay, markYtEngineConfirmed]);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !isHtmlAudio) return;
-    const onEnded = () => {
+    // Both decks listen (2026-10-28): after a crossfade the song plays on the OTHER deck, and when it then ends without a
+    // crossfade (nothing to pre-load — e.g. back from Play Next to the list) its `ended` must still advance, never silence.
+    // Only the ACTIVE deck's end counts; a standby deck's `ended` is ignored.
+    const decks = [audioDeckARef.current, audioDeckBRef.current].filter((x): x is HTMLAudioElement => !!x);
+    if (decks.length === 0 || !isHtmlAudio) return;
+    const onEnded = (ev: Event) => {
+      const audio = ev.currentTarget as HTMLAudioElement;
+      if (audio !== audioRef.current) {
+        sbStall("ended_ignored_standby_deck", {});
+        return;
+      }
       const d = lastKnownDurationRef.current;
       const msSinceTrigger = xfadeTriggerTsRef.current != null && typeof performance !== "undefined" ? Math.round(performance.now() - xfadeTriggerTsRef.current) : null;
       if (endedHandledRef.current) {
@@ -3984,8 +3995,10 @@ export function AudioPlayer() {
       sbStall("ended_next_call", { via: "ended_auto" });
       nextRef.current({ auditTransportCase: "ended_auto" });
     };
-    audio.addEventListener("ended", onEnded);
-    return () => audio.removeEventListener("ended", onEnded);
+    for (const deck of decks) deck.addEventListener("ended", onEnded);
+    return () => {
+      for (const deck of decks) deck.removeEventListener("ended", onEnded);
+    };
   }, [isHtmlAudio]);
 
   useEffect(() => {
