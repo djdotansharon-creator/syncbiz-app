@@ -33,7 +33,7 @@ const player = read("components/audio-player.tsx");
 assert("S5 the LOCAL direct-seek path in the audio player is untouched and the CONTROL commit still goes through seekOrSend", /if \(isDesktopLocal \|\| isDesignatedLocalExec\) \{[\s\S]*?syncbizDesktop\.mpvSeekTo\(\(pct \/ 100\) \* displayDuration\)/.test(player) && /deviceCtx\?\.seekOrSend\(target\)/.test(player));
 
 const ws = read("desktop/src/device-websocket-client/device-ws-manager.ts");
-assert("S6 (documents the gap) MAIN's WS handler still has no SEEK case — remote controllers (phone / browser) seeking a URL track need a MAIN change + installer (parked)", !/case "SEEK"/.test(ws));
+assert("S6 the gap is CLOSED (PR #153, DESKTOP MAIN): MAIN's WS handler has a SEEK case that seeks the music channel (orch.seekMusic) — remote controllers (phone / browser) can seek a URL track once the station runs an installer that includes it", /case "SEEK": \{[\s\S]{0,600}orch\.seekMusic\(/.test(ws));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

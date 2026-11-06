@@ -80,5 +80,9 @@ const jLoad = read("app/(app)/(workspace)/jingles/loading.tsx");
 const css3 = read("app/globals.css");
 assert("P20 owner tweaks: Radio is hidden from the top bar (HIDDEN_NAV_KEYS), the Jingles route has its own loading boundary that renders the real page body (no skeleton), and the progress bar's track / buffer / fill are rounded", /HIDDEN_NAV_KEYS = new Set<string>\(\["remote", "settings", "owner", "radio"\]\)/.test(shell2) && /JinglesPageContent/.test(jPage) && /return <JinglesPageContent \/>;/.test(jLoad) && !/animate-pulse/.test(jLoad) && /\.sb-timeline-played \{/.test(css3) && /border-radius: 999px !important; \/\* owner 2026-11-06: rounded/.test(css3));
 
+// ── 2026-11-06: while the pointer scrubs the progress bar draws the pointer (and its time), never the engine's catching-up position ──
+const ap2 = read("components/audio-player.tsx");
+assert("P21 seek bar: while scrubbing the fill and the time follow the pointer (isScrubbing wins over the 1.5 s catch-up rule), the pointer's value is not cleared by its timer while the pointer is down, and the release re-arms it", /optimistic && \(isScrubbing \|\| !\(Math\.abs\(displayPosition - optimistic\.target\) < 1\.5\)\) \? optimistic\.pct : displayProgressPercent/.test(ap2) && /formatTime\(isScrubbing && optimistic \? optimistic\.target : displayPosition\)/.test(ap2) && /if \(isDraggingRef\.current\) return; \/\/ the pointer is still down/.test(ap2) && /markOptimistic\(releasePct\);/.test(ap2));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
