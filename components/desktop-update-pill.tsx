@@ -22,7 +22,7 @@ import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-ve
 
 const DEFAULT_RELEASES = "https://github.com/djdotansharon-creator/syncbiz-app/releases";
 
-type DesktopBridge = { getAppVersion?: () => Promise<string> };
+type DesktopBridge = { getAppVersion?: () => Promise<string>; startUpdate?: () => Promise<{ ok: boolean; reason?: string }> };
 
 function desktopBridge(): DesktopBridge | undefined {
   if (typeof window === "undefined") return undefined;
@@ -112,6 +112,13 @@ export function DesktopUpdatePill() {
       title={title}
       aria-label={title}
       data-sb-update={target.required ? "required" : "available"}
+      onClick={(e) => {
+        // an engine that can update itself (>= 2.3.2) does it here (download, verify, install); an older one just follows the link
+        const b = desktopBridge();
+        if (typeof b?.startUpdate !== "function") return;
+        e.preventDefault();
+        void b.startUpdate().catch(() => undefined);
+      }}
     >
       <span className="sb-pill-t">{text}</span>
     </a>
