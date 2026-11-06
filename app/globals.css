@@ -3925,7 +3925,7 @@ html[data-sb-display="black"] .player-hero-shell { text-shadow: 0 1px 3px rgba(0
 .sb-timeline-buffer,
 .sb-timeline-played {
   height: var(--tl-h) !important;
-  border-radius: 0 !important; /* rectangular, owner direction */
+  border-radius: 999px !important; /* owner 2026-11-06: rounded — the frame (track, buffer) and the white fill (was rectangular, owner 2026-10) */
   box-shadow: none !important;
   transition: height 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease;
 }

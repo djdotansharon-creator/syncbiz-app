@@ -73,5 +73,12 @@ assert("P18 collapsed queue strip: the side padding is (51 - 45) / 2 = 3px — t
 const lq2 = read("components/live-queue-panel.tsx");
 assert("P19 queue loading: no literal English 'Loading…' text and no pending strip left in the queue panel; the playing row's tile is marked data-loading with a spinner while anything is pending; the CSS blurs the loading cover, spins the ring, and brings the next song's cover in from a blur with its text fading in (reduced motion: none)", !/>\s*Loading…\s*</.test(lq2) && !/pendingStrip|sb-queue-pending/.test(lq2) && !/sb-queue-pending/.test(stripCss) && /const nowLoading = qPending !== null;/.test(lq2) && /const isPendingRow = nowLoading;/.test(lq2) && /data-loading=\{isPendingRow \? "true" : undefined\}/.test(lq2) && /\{isPendingRow \? <span className="sb-queue-spinner" aria-hidden \/> : null\}/.test(lq2) && /\.queue-row \.h-12\.w-12\[data-loading="true"\] img \{ filter: blur\(5px\)/.test(stripCss) && /@keyframes sb-queue-spin/.test(stripCss) && /@keyframes sb-now-cover-in/.test(stripCss) && /@keyframes sb-now-text-in/.test(stripCss) && /\.queue-row-current \.h-12\.w-12:not\(\[data-loading="true"\]\) img \{ animation: sb-now-cover-in/.test(stripCss) && /prefers-reduced-motion: reduce\) \{\s*\.queue-row-current/.test(stripCss));
 
+// ── 2026-11-06: no Radio tab on the top bar; the Jingles tab shows its real screen while it loads (not the generic skeleton); the progress bar and its frame are rounded ──
+const shell2 = read("components/app-shell.tsx");
+const jPage = read("app/(app)/(workspace)/jingles/page.tsx");
+const jLoad = read("app/(app)/(workspace)/jingles/loading.tsx");
+const css3 = read("app/globals.css");
+assert("P20 owner tweaks: Radio is hidden from the top bar (HIDDEN_NAV_KEYS), the Jingles route has its own loading boundary that renders the real page body (no skeleton), and the progress bar's track / buffer / fill are rounded", /HIDDEN_NAV_KEYS = new Set<string>\(\["remote", "settings", "owner", "radio"\]\)/.test(shell2) && /JinglesPageContent/.test(jPage) && /return <JinglesPageContent \/>;/.test(jLoad) && !/animate-pulse/.test(jLoad) && /\.sb-timeline-played \{/.test(css3) && /border-radius: 999px !important; \/\* owner 2026-11-06: rounded/.test(css3));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
