@@ -4936,7 +4936,10 @@ export function AudioPlayer() {
       : 0;
   /* what the bar draws: the pointer's position while a scrub/tap is pending, else the real one */
   const shownProgressPercent =
-    optimistic && !(Math.abs(displayPosition - optimistic.target) < 1.5) ? optimistic.pct : displayProgressPercent;
+    optimistic && (isScrubbing || !(Math.abs(displayPosition - optimistic.target) < 1.5)) ? optimistic.pct : displayProgressPercent;
+  /* 2026-11-06 (owner: on the station's own window the bar "jumps and does not follow the mouse perfectly"): while the pointer scrubs the bar draws the POINTER, always — before, it
+     switched to the real position whenever that came within 1.5 s of the pointer's second, i.e. every time the MPV seeks the pointer triggers (one every 160 ms on a station) had caught up,
+     so the white fill hopped between the pointer and the engine's position. After the release the old rule resumes (the pointer's value until the engine arrives). */
 
   const displayStatusLabel =
     transitionStatusText
@@ -5278,6 +5281,7 @@ export function AudioPlayer() {
       if (optimisticTimerRef.current) clearTimeout(optimisticTimerRef.current);
       optimisticTimerRef.current = setTimeout(() => {
         optimisticTimerRef.current = null;
+        if (isDraggingRef.current) return; // the pointer is still down (held still): the bar stays under it; the release re-arms this timer
         setOptimistic(null);
       }, 3500);
     },
@@ -5364,7 +5368,9 @@ export function AudioPlayer() {
     if (wasDragging) {
       setIsScrubbing(false);
       // the release always lands exactly where the pointer let go
-      liveSeek(getPercentFromClientX(lastPointerXRef.current), true);
+      const releasePct = getPercentFromClientX(lastPointerXRef.current);
+      markOptimistic(releasePct); // the pointer's value stays until the engine's position arrives (and its timer restarts from the release)
+      liveSeek(releasePct, true);
     } else if (pressed && displayCanSeek && displayDuration > 0) {
       // plain click / tap on the bar: jump to that second
       const pct = getPercentFromClientX(lastPointerXRef.current);
@@ -5622,7 +5628,7 @@ export function AudioPlayer() {
                 }`}
                 aria-live="polite"
               >
-                {formatTime(displayPosition)}
+                {formatTime(isScrubbing && optimistic ? optimistic.target : displayPosition)}
               </span>
             <div
               ref={timelineRef}
