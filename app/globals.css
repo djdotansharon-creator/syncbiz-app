@@ -4190,7 +4190,9 @@ html[data-sb-display="song"] .library-deck-unified { overflow: visible !importan
 /* the queue's scroll box kept 2px of scrollbar room on its end side (`pr-0.5`) — with the card
    centred to 10px on both sides that made the rows/tiles sit 2px left of centre. Overlay
    scrollbars need no room; classic ones take 17px regardless. */
-.library-deck-slot-aside .overflow-y-auto { padding-inline-end: 0 !important; }
+/* 2026-11-06 (Hebrew / right-to-left): `pr-0.5` is the PHYSICAL right padding, but `padding-inline-end` is the LEFT side when the page is mirrored — so in Hebrew the 2px stayed, the rows sat 2px
+   left of centre and the collapsed strip's squares lost 2px on their left edge. Both sides are zeroed, in either direction. */
+.library-deck-slot-aside .overflow-y-auto { padding-inline-end: 0 !important; padding-right: 0 !important; }
 /* the floating card has a faint glass fill in every mode (the song-mode "asides transparent"
    rule above used to win on specificity and left the card with no surface at all) */
 html[data-sb-display="song"] .library-deck-unified .library-deck-slot-aside,
@@ -4221,8 +4223,10 @@ html[data-sb-display="song"] .library-theme.library-player-route-bridge { overfl
   color: #ffffff !important;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
-/* 3) collapsed strip: the squares back to 45px (owner: "a bit smaller"), still centred (7px / 7px) */
-.library-deck-slot-aside:has(.sb-queue-collapsed) > div { padding: 7px !important; }
+/* 3) collapsed strip: the squares back to 45px (owner: "a bit smaller"), still centred.
+   2026-11-06 (owner: the playing square is too big and the songs under it are cut): the strip is 51px wide (grid column above) and the squares 45px, so the side padding is
+   3px — (51 - 45) / 2. It was 7px, which left only 37px inside: the rows (clipped by their scroll box) lost 8px of every square while the playing square stuck out beyond them. */
+.library-deck-slot-aside:has(.sb-queue-collapsed) > div { padding: 3px !important; }
 /* 4) Play Next ("waiting list") items are cover squares too — one scrolling row under the hairline
       above the Drop Next pad; the remove control appears on hover. */
 .sb-queue-tiles--wide.sb-queue-tiles--playnext { max-height: 118px; overflow-y: auto; } /* the collapsed strip scrolls as a whole */
@@ -4626,6 +4630,26 @@ html[data-sb-display="song"] .sb-queue-drag-ghost {
    The label's width glides to zero on the same 700ms curve, so the chevron slides to the centre. */
 .sb-queue-label { max-width: 260px; transition: opacity 260ms ease, max-width var(--q-dur, 700ms) var(--q-ease, ease); }
 .sb-queue-collapsed .sb-queue-label { max-width: 0; min-width: 0; margin: 0; overflow: hidden; }
+/* 2026-11-06 (owner: not the word "Loading" — the song's square blurred, with a loading circle on it): a song that is being loaded shows its cover blurred (soft, slightly enlarged so the
+   blur's edge never shows) with a spinning ring on top; no text. The tile of a playlist loading over audible music (no cover yet) is a soft blurred tile with the same ring. Only while
+   loading — the ring is the only animation that runs, and only for those few seconds. */
+.queue-row .h-12.w-12 img { transition: filter 320ms ease, transform 320ms ease; }
+.queue-row .h-12.w-12[data-loading="true"] img { filter: blur(5px) brightness(0.82); transform: scale(1.16); }
+.sb-queue-pending-tile { background: linear-gradient(135deg, rgba(150, 160, 190, 0.34), rgba(70, 80, 110, 0.34)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+.sb-queue-spinner {
+  position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; box-sizing: border-box;
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.28); border-top-color: #ffffff;
+  animation: sb-queue-spin 0.8s linear infinite; pointer-events: none;
+}
+@keyframes sb-queue-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sb-queue-spinner { animation-duration: 2.4s; } }
+.sb-queue-pending { padding-inline-start: 4px; } /* the same 4px the playing row starts with, so the two tiles line up */
+.sb-queue-spinner { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)); } /* legible over a light cover too */
+html[data-sb-display="white"] .sb-queue-pending-tile { background: linear-gradient(135deg, rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.12)); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06); }
+html[data-sb-display="white"] .sb-queue-pending-tile .sb-queue-spinner { border-color: rgba(0, 0, 0, 0.18); border-top-color: #1c1c1e; filter: none; }
+.sb-queue-collapsed .sb-queue-pending { justify-content: center; padding-inline-start: 0; }
+.sb-queue-collapsed .sb-queue-pending-tile { width: 45px; height: 45px; }
+.sb-queue-collapsed .sb-queue-pending-title { display: none; }
 .library-deck-slot-aside header > div { transition: gap var(--q-dur, 700ms) var(--q-ease, ease); }
 .sb-queue-collapsed > header > div { justify-content: center; gap: 0; }
 /* (w) owner, 2026-10-14: the Drop Next pad is hidden FOR NOW — Play Next itself keeps working (drops

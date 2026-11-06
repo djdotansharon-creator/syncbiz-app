@@ -1440,7 +1440,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                   {isCurrent ? (
                     <span className="sb-queue-accent pointer-events-none absolute bottom-1 left-0 top-1 w-[2px] rounded-full" aria-hidden />
                   ) : null}
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]" data-flip-key={`s:${t.id}`}>
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-slate-800/80 ring-1 ring-white/[0.06]" data-flip-key={`s:${t.id}`} data-loading={isPendingRow ? "true" : undefined}>
                     {thumb ? (
                       <HydrationSafeImage src={thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
@@ -1448,6 +1448,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                         {displayNumber}
                       </div>
                     )}
+                    {isPendingRow ? <span className="sb-queue-spinner" aria-hidden /> : null}
                     {isCurrent ? (
                       <span className="sr-only">{tt("Now playing")}</span>
                     ) : null}
@@ -1470,9 +1471,7 @@ onPointerDown={onRowPointerDown("pn", k)}
                     </span>
                   ) : null}
                   {isPendingRow ? (
-                    <span className="flex h-7 shrink-0 items-center justify-end whitespace-nowrap text-[11px] font-medium text-[#a1a1a6]" aria-label="Loading">
-                      Loading…
-                    </span>
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center" role="status" aria-label={tt("Loading…")} />
                   ) : isCurrent ? (
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center" aria-label={tt("Now playing")}>
                       <span className="queue-now-playing-bars queue-now-playing-bars--action-slot" aria-hidden>
@@ -1511,10 +1510,12 @@ onPointerDown={onRowPointerDown("pn", k)}
       </div>
       <div className="sb-queue-body min-h-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden overscroll-contain py-1 pr-0.5">
         {pendingStrip ? (
-          <p className="mb-1.5 flex min-w-0 items-center gap-2 rounded-[7px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px] leading-tight text-[#a1a1a6]" aria-live="polite">
-            <span className="shrink-0 font-medium text-[#f5f5f7]">Loading…</span>
-            {pendingStrip.title ? <span dir="auto" className="min-w-0 truncate">{pendingStrip.title}</span> : null}
-          </p>
+          <div className="sb-queue-pending mb-1.5 flex min-w-0 items-center gap-2.5" role="status" aria-live="polite" aria-label={tt("Loading…")}>
+            <span className="sb-queue-pending-tile relative h-12 w-12 shrink-0 overflow-hidden rounded-md" data-loading="true">
+              <span className="sb-queue-spinner" aria-hidden />
+            </span>
+            {pendingStrip.title ? <span dir="auto" className="sb-queue-pending-title min-w-0 truncate text-[12px] leading-tight text-[#a1a1a6]">{pendingStrip.title}</span> : null}
+          </div>
         ) : null}
         {sessionTracks.length === 0 ? (
           nowPlayingDetached ? null : <p className="text-[10px] leading-tight text-slate-500/70">{tt("Pick a playlist to start")}</p>
