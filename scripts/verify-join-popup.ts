@@ -35,7 +35,7 @@ assert("P7 opening the link keeps THAT code alive for 10 minutes — a public, f
 const ownerFn = store.slice(store.indexOf("function ownerDeviceData"), store.indexOf("\n}\n", store.indexOf("function ownerDeviceData")));
 assert("P8 the owner's computer is a REMOTE (it controls, never plays, takes no seat); a computer that plays asks for Player and takes a numbered seat", /requestedRole: "REMOTE"/.test(ownerFn) && /approvedRole: "REMOTE"/.test(ownerFn) && !/"PLAYER"/.test(ownerFn) && /playerClass: "owner"/.test(ownerFn));
 assert("P9 'may sign in from a computer' is OFF by default: in every ready-made role and in a role the owner adds", DEFAULT_ROLES.every((r) => r.allowComputer === false) && /name: newName, openControlRoom: false, allowComputer: false/.test(panel));
-assert("P10 no gear tab between the Player's tabs", !/sb-gear-tab/.test(shell) && !/isGearTab/.test(shell) && /item\.labelKey !== "controlRoom"/.test(shell));
+assert("P10 no gear tab between the Player's tabs", !/sb-gear-tab/.test(shell) && !/isGearTab/.test(shell) && shell.includes(".filter((item) => pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))") /* owner 2026-11-08: Control Room = plain text tab when switched ON; no gear tab */);
 
 const rb = read("components/remote-bar/remote-bar.tsx");
 const rbCss = read("components/remote-bar/remote-bar.css");
