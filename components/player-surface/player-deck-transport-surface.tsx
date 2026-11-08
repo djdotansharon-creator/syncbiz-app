@@ -99,12 +99,19 @@ export function PlayerDeckTransportSurface(props: PlayerDeckTransportSurfaceProp
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => apply()) : null;
     ro?.observe(row);
     if (ro && row.parentElement) ro.observe(row.parentElement);
+    /* 2026-11-08 (owner: "it must run smooth"): the 1-second safety-net timer is gone. PROVEN BY RUNTIME (CDP on the live Dev-PC station):
+       each of its reads forced the browser to recompute the WHOLE page's styles — 300 ms freezes. What it covered is now watched instead:
+       the cluster's own size (fonts / icons arriving, buttons changing) and the deck grid around the player (the queue card opening or
+       closing moves the player sideways); the window's own resize stays. */
+    const cluster = row.querySelector<HTMLElement>(".player-transport-cluster");
+    if (ro && cluster) ro.observe(cluster);
+    const grid = row.closest<HTMLElement>(".library-deck-unified");
+    if (ro && grid) ro.observe(grid);
     window.addEventListener("resize", apply);
-    const id = window.setInterval(apply, 1000); // cheap safety net for layout shifts the observer can't see
+    if (typeof document !== "undefined" && document.fonts?.ready) void document.fonts.ready.then(() => apply()).catch(() => {});
     return () => {
       ro?.disconnect();
       window.removeEventListener("resize", apply);
-      window.clearInterval(id);
     };
   }, []);
 
