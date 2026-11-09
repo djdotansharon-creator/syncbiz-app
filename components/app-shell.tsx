@@ -403,6 +403,8 @@ export function AppShell({ children }: { children: ReactNode }) {
    *  Cosmetic — the server gate (components/management/management-gate.tsx + the API guards) is the real enforcement. */
   const [canManage, setCanManage] = useState(false);
   const greeting = getTimeBasedGreeting(now.getHours(), t);
+  /** false on the server and while the page hydrates, true right after — the greeting depends on the clock (see the deck clock below). */
+  const greetingReady = useSyncExternalStore(() => () => {}, () => true, () => false);
   const headerSubtitle = t.headerSubtitle ?? labels.headerSubtitle?.en ?? "Schedule playback and send commands to endpoint devices";
 
   useEffect(() => {
@@ -1730,7 +1732,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     {/* owner, later the same day: the greeting takes the clock's place; the time is
                         off the display for now (kept in markup, `.sb-deck-clock-time { display:none }`) */}
-                    <span className="sb-deck-clock-greeting">{greeting}</span>
+                    {/* 2026-11-09: drawn only after the page has woken up — the server's clock is UTC, the branch's is local, so in 8 hours
+                        a day the two greetings differed → React hydration error #418 → the whole page redrawn from scratch, which also
+                        wiped the Light graphics setting on <html> (station ~3× busier). Server and first client frame now both draw nothing. */}
+                    <span className="sb-deck-clock-greeting">{greetingReady ? greeting : ""}</span>
                     <span className="sb-deck-clock-time" suppressHydrationWarning>{timeStr}</span>
                   </div>
                 ) : null}
