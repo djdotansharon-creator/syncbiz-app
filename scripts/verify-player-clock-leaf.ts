@@ -34,7 +34,14 @@ assert("C5 the time text, the fill + thumb and the display-screen publish are th
   (ap.match(/<LiveTimeText\s+getPosition=/g) ?? []).length === 1 && (ap.match(/<LiveTimelineFill\s+getPosition=/g) ?? []).length === 1 && (ap.match(/<NowPositionPublisher\s+getPosition=/g) ?? []).length === 1);
 assert("C6 one shared 250 ms ticker that stops when nobody listens (no timer while paused / idle)",
   /const PLAYER_CLOCK_MS = 250;/.test(lt) && /if \(subscribers\.size === 0 && ticker !== null\) \{\n\s*clearInterval\(ticker\);/.test(lt)
-  && /useSyncExternalStore\(running \? subscribeClock : subscribeNothing/.test(lt));
+  && /useSyncExternalStore\(\s*running \? subscribeClock : subscribeNothing/.test(lt));
+// 2026-11-09 later (owner: "once a second"): the 250 ms tick only LOOKS; each leaf redraws when what it shows changes
+assert("C9 each leaf redraws only when what it shows changes: the time text by its string, the bar and the display copy by the whole second",
+  (lt.match(/useSyncExternalStore\(\s*running \? subscribeClock : subscribeNothing,/g) ?? []).length === 3
+  && /const displayPosition = getPosition\(\);\n\s*return format\(override \?\? displayPosition\);/.test(lt)
+  && /const wholeSecond = Math\.floor\(displayPosition\);/.test(lt) && /\(wholeSecond \/ displayDuration\) \* 100/.test(lt)
+  && /\(\) => Math\.floor\(getPosition\(\)\),/.test(lt)
+  && !/tickCount/.test(lt));
 assert("C7 the leaves are display-only: no playback calls, only the display-screen publish",
   !/usePlayback|useDevicePlayer|syncbizDesktop|sendCommand|seekTo|mpv/i.test(lt.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")) && /publishNowPosition\(displayPosition, displayDuration, displayStatus\)/.test(lt));
 assert("C8 the station's video clip reads the live position itself (the player no longer re-renders 4×/s to feed it)",
