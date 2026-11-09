@@ -677,7 +677,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     return navItems
       .filter((item) => item.labelKey !== "dashboard" && item.labelKey !== "access-control")
       .filter((item) => !HIDDEN_NAV_KEYS.has(item.labelKey))
-      .filter((item) => item.labelKey !== "controlRoom" && pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))
+      // owner 2026-11-08: "if its switch is ON we see it in the top bar, like everything else" — Control Room is a normal text tab again when switched
+      // ON in the gear menu (managers only, like every management entry). 46593b9 (2026-10-30) removed the old GEAR tab and excluded it here
+      // unconditionally, which left the menu switch dead.
+      .filter((item) => pinnedSet.has(item.labelKey) && (canManage || !MANAGEMENT_NAV_KEYS.has(item.labelKey)))
       .sort((a, b) => {
         const ia = (NAV_ORDER as readonly string[]).indexOf(a.labelKey);
         const ib = (NAV_ORDER as readonly string[]).indexOf(b.labelKey);
