@@ -208,7 +208,7 @@ async function waitForYtReallyPlaying(
 import { redactMediaToken } from "@/lib/media/media-session";
 import { useRadioNowPlaying } from "@/lib/use-radio-now-playing";
 import { RadioIcon } from "@/components/ui/radio-icon";
-import { publishNowPosition } from "@/lib/now-position";
+import { LiveTimeText, LiveTimelineFill, NowPositionPublisher } from "@/components/player-surface/live-timeline";
 import {
   PRELOAD_LEAD_SEC,
   STANDBY_READY_TIMEOUT_MS,
@@ -4654,13 +4654,17 @@ export function AudioPlayer() {
   // isDesktopMode is declared earlier (near the desktopMpvSnap state) to avoid TDZ errors
   // in effects that reference it in their dependency arrays before this line in the file.
 
-  // Desktop: tick between onStatus pushes so the timeline advances smoothly.
+  // Desktop: the smooth 4×/s timeline now lives in the small leaves of player-surface/live-timeline.tsx (2026-11-09 — before,
+  // this tick re-rendered the WHOLE player 4× a second). The player itself still re-renders on this tick only in the one case
+  // that reads the clock in its own render: "playing" at position 0 — `desktopStalePlayingZero` below must flip after 1 s.
+  const desktopZeroWatch =
+    isDesktopMode && desktopMpvSnap?.status === "playing" && (desktopMpvSnap?.duration ?? 0) > 0 && (desktopMpvSnap?.position ?? 0) <= 0;
   const [, setDesktopProgressTick] = useState(0);
   useEffect(() => {
-    if (!isDesktopMode || desktopMpvSnap?.status !== "playing") return;
+    if (!desktopZeroWatch) return;
     const id = setInterval(() => setDesktopProgressTick((n) => n + 1), 250);
     return () => clearInterval(id);
-  }, [isDesktopMode, desktopMpvSnap?.status]);
+  }, [desktopZeroWatch]);
 
   const desktopStalePlayingZero =
     isDesktopMode &&
@@ -4698,15 +4702,9 @@ export function AudioPlayer() {
     displayStatus === "playing",
   );
 
-  // CONTROL mirror: tick every 250 ms so the progress bar advances smoothly
-  // between STATE_UPDATE snapshots (which arrive ~1s from Desktop / ~1s from browser MASTER).
-  // The tick only runs when in CONTROL mirror mode and MASTER is playing.
-  const [, setControlMirrorTick] = useState(0);
-  useEffect(() => {
-    if (!isControlMirror || ms?.status !== "playing") return;
-    const id = setInterval(() => setControlMirrorTick((n) => n + 1), 250);
-    return () => clearInterval(id);
-  }, [isControlMirror, ms?.status]);
+  // CONTROL mirror: the progress bar still advances 4×/s between STATE_UPDATE snapshots (which arrive ~1s from Desktop /
+  // ~1s from browser MASTER) — but via the small leaves of player-surface/live-timeline.tsx (2026-11-09), not by
+  // re-rendering this whole player. The clock runs only when in CONTROL mirror mode and MASTER is playing (unchanged).
 
   // CONTROL mirror: the state snapshot carries no play URL, so recover the
   // YouTube video id for the display-only video dock. Prefer an explicit
@@ -4739,30 +4737,35 @@ export function AudioPlayer() {
   useEffect(() => () => { if (controlSeekTimeoutRef.current) clearTimeout(controlSeekTimeoutRef.current); }, []);
 
   // Interpolate CONTROL position between STATE_UPDATE snapshots using positionAt timestamp.
-  const displayPosition = isDesktopLocal
-    ? (() => {
-        const pos = desktopMpvSnap.position;
-        const dur = desktopMpvSnap.duration;
-        if (desktopMpvSnap.status !== "playing" || !Number.isFinite(pos)) return pos;
-        if (!Number.isFinite(dur) || dur <= 0) return pos;
-        const at = desktopSnapPositionAtRef.current;
-        if (!at) return pos;
-        const ageMs = Date.now() - at;
-        if (ageMs > 1200) return pos;
-        return Math.min(pos + ageMs / 1000, dur);
-      })()
-    : isControlMirror
-      ? computeLivePosition(ms, controlPendingSeek) // SHARED with mobile — bar + text use this one value
-      : position;
+  // 2026-11-09: the same computation as before, as a function — so the live-timeline leaves can call it on their own 4×/s
+  // tick (it is handed down fresh on every render) while the player re-renders only when its state really changes.
+  const computeDisplayPosition = (): number =>
+    isDesktopLocal
+      ? (() => {
+          const pos = desktopMpvSnap.position;
+          const dur = desktopMpvSnap.duration;
+          if (desktopMpvSnap.status !== "playing" || !Number.isFinite(pos)) return pos;
+          if (!Number.isFinite(dur) || dur <= 0) return pos;
+          const at = desktopSnapPositionAtRef.current;
+          if (!at) return pos;
+          const ageMs = Date.now() - at;
+          if (ageMs > 1200) return pos;
+          return Math.min(pos + ageMs / 1000, dur);
+        })()
+      : isControlMirror
+        ? computeLivePosition(ms, controlPendingSeek) // SHARED with mobile — bar + text use this one value
+        : position;
+  const displayPosition = computeDisplayPosition();
+  /** The timeline leaves tick 4×/s exactly when the old whole-player ticks ran: desktop MPV playing, or CONTROL mirror + MASTER playing. */
+  const liveClockRunning =
+    (isDesktopMode && desktopMpvSnap?.status === "playing") || (isControlMirror && ms?.status === "playing");
   const displayDuration = isDesktopLocal
     ? desktopMpvSnap.duration
     : isControlMirror
       ? (typeof ms?.duration === "number" && Number.isFinite(ms.duration) ? ms.duration : Number.NaN)
       : duration;
-  // Hands the position the bar shows to the display screen (lib/now-position.ts). Display-only: nothing here reads it back.
-  useEffect(() => {
-    publishNowPosition(displayPosition, displayDuration, displayStatus);
-  }, [displayPosition, displayDuration, displayStatus]);
+  // Hands the position the bar shows to the display screen (lib/now-position.ts) — now from <NowPositionPublisher> (live-timeline.tsx),
+  // so the display screen keeps its 4×/s updates without this player re-rendering. Display-only: nothing here reads it back.
   const displayVolume = isDesktopLocal
     ? desktopMpvSnap.volume
     : isControlMirror
@@ -4931,15 +4934,8 @@ export function AudioPlayer() {
             (!!scWidgetRef.current && isSoundCloud) ||
             (isHtmlAudio && Number.isFinite(duration) && duration > 0)));
   const displayBufferedPercent = isControlMirror ? 0 : bufferedPercent;
-  const displayProgressPercent =
-    Number.isFinite(displayPosition) &&
-    Number.isFinite(displayDuration) &&
-    displayDuration > 0
-      ? Math.min(100, (displayPosition / displayDuration) * 100)
-      : 0;
-  /* what the bar draws: the pointer's position while a scrub/tap is pending, else the real one */
-  const shownProgressPercent =
-    optimistic && (isScrubbing || !(Math.abs(displayPosition - optimistic.target) < 1.5)) ? optimistic.pct : displayProgressPercent;
+  /* What the bar draws (the pointer's position while a scrub/tap is pending, else the real one) is computed in
+     LiveTimelineFill (player-surface/live-timeline.tsx, 2026-11-09) — the same rule, on the leaf's own 4×/s tick. */
   /* 2026-11-06 (owner: on the station's own window the bar "jumps and does not follow the mouse perfectly"): while the pointer scrubs the bar draws the POINTER, always — before, it
      switched to the real position whenever that came within 1.5 s of the pointer's second, i.e. every time the MPV seeks the pointer triggers (one every 160 ms on a station) had caught up,
      so the white fill hopped between the pointer and the engine's position. After the release the old rule resumes (the pointer's value until the engine arrives). */
@@ -5461,6 +5457,7 @@ export function AudioPlayer() {
       role="region"
       aria-label={t.playerControllerAria}
     >
+      <NowPositionPublisher getPosition={computeDisplayPosition} running={liveClockRunning} displayDuration={displayDuration} displayStatus={displayStatus} />
       {/* FRAMELESS deck (operator direction): no border, no hairlines, no colored
           strips — just the surface. The soft gradient stays (it dims the video bg). */}
       <div
@@ -5631,7 +5628,12 @@ export function AudioPlayer() {
                 }`}
                 aria-live="polite"
               >
-                {formatTime(isScrubbing && optimistic ? optimistic.target : displayPosition)}
+                <LiveTimeText
+                  getPosition={computeDisplayPosition}
+                  running={liveClockRunning}
+                  override={isScrubbing && optimistic ? optimistic.target : null}
+                  format={formatTime}
+                />
               </span>
             <div
               ref={timelineRef}
@@ -5662,19 +5664,20 @@ export function AudioPlayer() {
                 style={{ width: `${Math.min(displayBufferedPercent, 100)}%` }}
               />
             )}
-            <div
-              className={`sb-timeline-played absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
+            <LiveTimelineFill
+              getPosition={computeDisplayPosition}
+              running={liveClockRunning}
+              displayDuration={displayDuration}
+              optimistic={optimistic}
+              isScrubbing={isScrubbing}
+              playedClassName={`sb-timeline-played absolute left-0 top-1/2 h-[5px] -translate-y-1/2 rounded-sm transition-all duration-100 ${
                 isSourcesLibraryDeck ? "library-player-timeline-played" : "bg-gradient-to-r from-cyan-600/50 to-cyan-400/75"
               }`}
-              style={{ width: `${shownProgressPercent}%` }}
-            />
-            <div
-              className={`sb-timeline-thumb absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
+              thumbClassName={`sb-timeline-thumb absolute top-1/2 h-3 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm transition-all duration-100 ${
                 isSourcesLibraryDeck
                   ? "library-player-timeline-thumb bg-[color:var(--lib-accent)]"
                   : "bg-cyan-100/90"
               }`}
-              style={{ left: `${Math.max(0, Math.min(100, shownProgressPercent))}%` }}
             />
             {(isHoveringTimeline || isScrubbing) && displayDuration > 0 && (
               <div
@@ -5926,6 +5929,7 @@ export function AudioPlayer() {
             videoId={mirrorVid}
             mpvStatus={ms.status === "playing" ? "playing" : "paused"}
             mpvPosition={Number.isFinite(displayPosition) ? displayPosition : 0}
+            getPosition={computeDisplayPosition} /* 2026-11-09: the player no longer re-renders 4×/s, so the clip reads the live position itself */
             className="absolute inset-0"
           />
           <div
