@@ -163,6 +163,11 @@ export function DesktopVideoDock({
                 onStateRef.current?.({ loading: true, playing: false, readyState: e.target.getPlayerState?.() ?? -1, error: false });
                 const f = e.target.getIframe?.();
                 if (f) {
+                  /* 2026-11-08 (PROVEN BY RUNTIME on the Dev-PC station: the clip played but was invisible): the station's video sits in a
+                     `.sb-deck-video-bg` slot, and globals.css keeps every iframe there at opacity 0 until it is marked as styled
+                     (`data-sb-shown`). Only the browser decks' styling marked theirs, so this dock stayed invisible for good. It is styled
+                     right here, so it marks itself. Display-only; muting / sync / playback untouched. */
+                  f.dataset.sbShown = "1";
                   const s = f.style;
                   s.position = "absolute";
                   s.left = "-10%";
