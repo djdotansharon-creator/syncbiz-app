@@ -15,7 +15,7 @@ function assert(name: string, ok: boolean, detail?: unknown) {
   else fail++;
 }
 
-type Env = { cores?: number; memory?: number; renderer?: string | null; ua?: string; search?: string; store?: Record<string, string> };
+type Env = { cores?: number; memory?: number; renderer?: string | null; ua?: string; search?: string; store?: Record<string, string>; desktop?: boolean };
 /** Runs the boot script in a throw-away "browser" and returns what it did. */
 function boot(env: Env) {
   const store = new Map<string, string>(Object.entries(env.store ?? {}));
@@ -33,6 +33,7 @@ function boot(env: Env) {
     localStorage: { getItem: (k: string) => (store.has(k) ? store.get(k)! : null), setItem: (k: string, v: string) => void store.set(k, String(v)), removeItem: (k: string) => void store.delete(k) },
     navigator: { hardwareConcurrency: env.cores ?? 10, deviceMemory: env.memory, userAgent: env.ua ?? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/130" },
     location: { search: env.search ?? "" },
+    ...(env.desktop ? { window: { syncbizDesktop: {} } } : {}),
   };
   vm.runInNewContext(FX_BOOT_SCRIPT, ctx);
   return { lite: attrs.get("data-sb-fx") === "lite", store };
@@ -56,6 +57,11 @@ const q = boot({ cores: 2, search: "?x=1&fx=full" });
 assert("C3 ?fx=full in the address wins and is remembered", q.lite === false && q.store.get(FX_STORAGE_KEY) === "full");
 const q2 = boot({ search: "?fx=lite" });
 assert("C4 ?fx=lite in the address wins and is remembered", q2.lite === true && q2.store.get(FX_STORAGE_KEY) === "lite");
+// owner rule 2026-11-08: the desktop app (station player) ALWAYS opens in Light
+const d1 = boot({ desktop: true, cores: 16, ua: WIN, renderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11)", store: { [FX_STORAGE_KEY]: "full" } });
+assert("D1 the desktop app opens in Light even on a strong PC where Full was chosen before, and remembers Light", d1.lite === true && d1.store.get(FX_STORAGE_KEY) === "lite");
+assert("D2 the desktop app in Light switches the mirror video off (same Light rule)", d1.store.get(FX_MIRROR_KEY) === "off");
+assert("D3 a BROWSER with Full chosen keeps Full (the rule is the desktop app only)", boot({ cores: 16, ua: WIN, store: { [FX_STORAGE_KEY]: "full" } }).lite === false);
 
 // ── the heavy second video ("mirror") is switched off by lite and given back only if lite switched it off ───────────
 const l1 = boot({ cores: 2 });
