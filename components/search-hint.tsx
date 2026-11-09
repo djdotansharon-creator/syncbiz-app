@@ -9,6 +9,11 @@
  * word fades and the magnifier travels to the field's start; leaving the field → it glides back to the centre and a beat
  * later the first word rises. Pure overlay (pointer-events: none). Styles: `.sb-sh*` in globals.css.
  * (Earlier variants: design/search-hint.before-round10b.tsx.bak, design/search-hint.before-round10d.tsx.bak.)
+ *
+ * 2026-11-09 (owner, after a CDP measurement on a live station: the cycle cost ~0.84 s of every 10 s — each new word measured the
+ * whole page): the words cycle ONLY while the pointer is over the search field (`animate`). Otherwise the field shows one
+ * still line, `idleText` ("Search or drop URLs"), with no timers at all — a station nobody touches never runs the cycle. The
+ * writing direction is read from the <html dir> attribute (the same one the RTL rules key on) instead of a style lookup.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -18,13 +23,21 @@ type Phase = "show" | "fall" | "empty";
 const ICON = 17;
 const GAP = 11;
 
-export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) {
+export function SearchHint({ words, rest, animate, idleText }: { words: string[]; rest: boolean; animate: boolean; idleText: string }) {
   const [i, setI] = useState(0);
   const [phase, setPhase] = useState<Phase>("show");
+  const [wasAnimate, setWasAnimate] = useState(animate);
   const rootRef = useRef<HTMLSpanElement>(null);
   const iconRef = useRef<SVGSVGElement>(null);
   const wordRef = useRef<HTMLSpanElement>(null);
   const emptyWait = useRef(260); // how long the icon rests alone at the centre before the next word
+
+  // the pointer arrived / left: start from a shown word (the first cycle word, or the still line) — set during render, no flash
+  if (wasAnimate !== animate) {
+    setWasAnimate(animate);
+    setPhase("show");
+    if (animate) setI(0);
+  }
 
   // positions, straight on the DOM (no per-frame re-render): the icon's transform is transitioned by CSS, the word's is instant
   useLayoutEffect(() => {
@@ -33,7 +46,7 @@ export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) 
     const word = wordRef.current;
     // owner 2026-10-20: in a right-to-left interface the magnifier sits at the RIGHT of the word and travels to the RIGHT edge on focus — everything is mirrored
     // (CSS anchors the icon / word from the right in `[dir=rtl]`, so the same offsets just change sign)
-    const sg = rootRef.current && getComputedStyle(rootRef.current).direction === "rtl" ? -1 : 1;
+    const sg = document.documentElement.dir === "rtl" ? -1 : 1;
     if (rest) {
       icon.style.transform = "translateX(0px)";
     } else if (phase === "show" && word) {
@@ -43,7 +56,7 @@ export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) 
     } else {
       icon.style.transform = `translateX(${sg * (-ICON / 2)}px)`; // falling / between words: the icon alone, centred
     }
-  }, [i, rest, phase, words]);
+  }, [i, rest, phase, animate, idleText, words]);
 
   // the field is open → once the word has faded, forget it; on leaving, the icon travels back before the first word
   useEffect(() => {
@@ -53,9 +66,9 @@ export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) 
     return () => window.clearTimeout(t);
   }, [rest]);
 
-  // rise → hold → fall → (icon alone at the centre) → next word
+  // rise → hold → fall → (icon alone at the centre) → next word — only while the pointer is over the field
   useEffect(() => {
-    if (rest || words.length === 0) return;
+    if (rest || !animate || words.length === 0) return;
     const wait = phase === "show" ? 2400 : phase === "fall" ? 620 : emptyWait.current;
     const t = window.setTimeout(() => {
       if (phase === "show") setPhase("fall");
@@ -67,9 +80,16 @@ export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) 
       }
     }, wait);
     return () => window.clearTimeout(t);
-  }, [rest, phase, i, words.length]);
+  }, [rest, animate, phase, i, words.length]);
 
-  const word = words[i % Math.max(1, words.length)] ?? "";
+  // the field was open and is left without the pointer on it: the still line comes back (the cycle's own "empty" step only runs while animating)
+  useEffect(() => {
+    if (rest || animate || phase !== "empty") return;
+    const t = window.setTimeout(() => setPhase("show"), emptyWait.current);
+    return () => window.clearTimeout(t);
+  }, [rest, animate, phase]);
+
+  const word = animate ? (words[i % Math.max(1, words.length)] ?? "") : idleText;
   return (
     <span ref={rootRef} className="sb-sh" data-rest={rest ? "1" : "0"} aria-hidden>
       <svg ref={iconRef} className="sb-sh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -77,7 +97,7 @@ export function SearchHint({ words, rest }: { words: string[]; rest: boolean }) 
       </svg>
       {phase === "empty" ? null : (
         <span ref={wordRef} className={`sb-sh-word${phase === "fall" ? " is-out" : ""}`} dir="auto">
-          <RiseText key={`${i}:${word}`} text={word} step={38} delay={0} />
+          <RiseText key={animate ? `${i}:${word}` : `idle:${word}`} text={word} step={38} delay={0} />
         </span>
       )}
     </span>

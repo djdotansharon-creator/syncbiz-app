@@ -723,6 +723,8 @@ export function LibraryInputArea({
   const [listening, setListening] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const showTools = searchFocused || query.length > 0; // the field is 'open': mic + ✕ visible, the hint folds away
+  // 2026-11-09 (owner): the hint's words cycle only while the pointer is over the field; otherwise one still line
+  const [hintHover, setHintHover] = useState(false);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const micCleanup = useRef<(() => void) | null>(null);
   const [micIdle, setMicIdle] = useState(true); // true until the microphone level meter is running
@@ -2420,7 +2422,7 @@ export function LibraryInputArea({
           {/* ONE unified field: search text, keywords (jazz / 80s), or ANY link —
               YouTube video/playlist, Spotify, radio stream, local path. Links go
               straight to the ingest flow; everything else searches. */}
-          <div className="relative flex min-w-0 flex-1 items-center gap-1">
+          <div className="relative flex min-w-0 flex-1 items-center gap-1" onPointerEnter={() => setHintHover(true)} onPointerLeave={() => setHintHover(false)}>
           {urlIngesting || externalYtSaveBusy ? (
             <span className="shrink-0 ps-1 text-[11px] font-medium text-[#6cb2ff]">
               {externalYtSaveBusy ? "Saving…" : urlIngestPhase ?? (t.adding ?? "Adding…")}
@@ -2432,6 +2434,8 @@ export function LibraryInputArea({
           <SearchHint
             words={locale === "he" ? ["מוזיקה", "אמנים", "אלבומים", "ז׳אנרים", "פלייליסטים", "רדיו", "קישורים"] : ["Music", "Artists", "Albums", "Genres", "Playlists", "Radio", "Links"]}
             rest={showTools}
+            animate={hintHover}
+            idleText="Search or drop URLs"
           />
           <input
             ref={inputRef}
