@@ -1,6 +1,16 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { AnimationEvent, CSSProperties } from "react";
+
+/** 2026-11-09 (owner: "lighten the station"): a letter whose rise has finished is marked `data-done`, and the CSS then drops its
+ *  animation (`.sb-rise-l[data-done]`). Before, the finished animation stayed attached (fill-mode `both`), so the browser kept
+ *  every letter as its own composited layer forever — 84 layers on the live station screen, re-composited every frame while
+ *  nothing moved. Same look: the letter's resting place (`transform: none`) is exactly where the animation ended. */
+function settleLetter(e: AnimationEvent<HTMLSpanElement>) {
+  if (e.animationName !== "sb-rise-up") return;
+  const el = e.target as HTMLElement;
+  if (el.classList?.contains("sb-rise-l")) el.dataset.done = "1";
+}
 
 const RTL_CH = /[֐-׿؀-ۿ]/;
 const STRONG_CH = /[A-Za-z֐-׿؀-ۿ]/;
@@ -46,7 +56,7 @@ export function RiseText({ text, step = 26, delay = 140 }: { text: string; step?
   // long strings stagger tighter so the whole line is in within ~0.9s
   const eff = Math.min(step, 900 / Math.max(1, Array.from(text).length));
   return (
-    <span className="sb-rise" aria-label={text} style={{ ["--rd" as string]: `${delay}ms` } as CSSProperties}>
+    <span className="sb-rise" aria-label={text} style={{ ["--rd" as string]: `${delay}ms` } as CSSProperties} onAnimationEnd={settleLetter}>
       {toRuns(text).map((run, ri) => {
         // whitespace at the END of a run belongs between the runs (in the block's own flow) — inside an RTL run it would be drawn at
         // the run's visual LEFT end and push the whole title a few px off the line of the artist / info below it
