@@ -209,6 +209,7 @@ import { redactMediaToken } from "@/lib/media/media-session";
 import { useRadioNowPlaying } from "@/lib/use-radio-now-playing";
 import { RadioIcon } from "@/components/ui/radio-icon";
 import { LiveTimeText, LiveTimelineFill, NowPositionPublisher } from "@/components/player-surface/live-timeline";
+import { sameMpvSnap } from "@/lib/same-mpv-snap";
 import {
   PRELOAD_LEAD_SEC,
   STANDBY_READY_TIMEOUT_MS,
@@ -776,6 +777,8 @@ export function AudioPlayer() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const desktop = (window as any).syncbizDesktop;
     let cancelled = false;
+    // 2026-11-09: the last snapshot handed to React state — a push with the very same values is not drawn again (see lib/same-mpv-snap.ts)
+    let lastDrawnSnap: DesktopMpvSnap | null = null;
     const applySnap = (s: any) => {
       if (cancelled) return;
       const nextPos = typeof s.mpvPosition === "number" ? s.mpvPosition : 0;
@@ -863,7 +866,12 @@ export function AudioPlayer() {
           sbDiag("STREAM_PLAYING", { attemptId: snap.attemptId, advances: attemptProgressCountRef.current, position: snap.position }); // DIAG
         }
       }
-      setDesktopMpvSnap(snap);
+      // Every push above still updated the refs (freeze clock, confirmation, startup progress); the screen re-renders only when
+      // the snapshot's values changed — MAIN repeats the same whole-second position ~17× a second (2026-11-09 measurement).
+      if (!sameMpvSnap(lastDrawnSnap, snap)) {
+        lastDrawnSnap = snap;
+        setDesktopMpvSnap(snap);
+      }
     };
     const unsub = desktop.onStatus((s: any) => applySnap(s));
     return () => { cancelled = true; if (typeof unsub === "function") unsub(); };
