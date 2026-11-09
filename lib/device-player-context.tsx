@@ -38,6 +38,7 @@ import { useMobileRole } from "@/lib/mobile-role-context";
 import { isNativeShellStreamerMode, isStreamerDeviceMode } from "@/lib/streamer-device-mode";
 import { wsTokenUrl } from "@/lib/enrollment-device-id";
 import { readEmergencyPlayer, subscribeEmergencyPlayer } from "@/lib/emergency-player";
+import { gateMasterState, type MasterGateMemo } from "@/lib/master-state-gate";
 
 type DevicePlayerContextValue = {
   /** True when this tab registers as a branch WS device (see `resolveDeviceRoleActive`). */
@@ -812,20 +813,14 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
      MAIN publishes on EVERY MPV event (4+ a second) but its position is whole seconds, so most messages differ from the one before only in `positionAt`. Each one still became a new
      `masterState` object and re-rendered all 36 consumers (player, library, queue rows). A message identical to the last APPLIED one apart from `positionAt` is dropped — nothing on
      screen can change, and the position the UI extrapolates from stays on the older, more exact base. A STALLED position (same second, status still "playing") is still re-applied every
-     1.5 s so the bar's freeze stays visible, exactly as before. Every real change (track, status, volume, queue, mode, the next second) is applied at once. */
-  const lastAppliedStateRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
+     1.5 s so the bar's freeze stays visible, exactly as before. Every real change (track, status, volume, queue, mode, the next second) is applied at once.
+     2026-11-09 (owner: "the whole library redraws every second"): "the next second" is no longer a change while a song simply plays on — every surface
+     extrapolates the position itself. The rule now lives in lib/master-state-gate.ts (seek / stall / re-anchor every 5 s; transitions and pauses keep the rule above). */
+  const lastAppliedStateRef = useRef<MasterGateMemo | null>(null);
   const onStateUpdate = useCallback((state: StationPlaybackState) => {
-    const { positionAt, ...rest } = state;
-    let key = "";
-    try {
-      key = JSON.stringify(rest);
-    } catch {
-      key = ""; // unserialisable → always apply
-    }
-    const at = typeof positionAt === "number" && Number.isFinite(positionAt) ? positionAt : 0;
-    const last = lastAppliedStateRef.current;
-    if (key !== "" && key === last.key && at - last.at < 1500) return;
-    lastAppliedStateRef.current = { key, at };
+    const gate = gateMasterState(lastAppliedStateRef.current, state, urlTransitionRef.current != null);
+    lastAppliedStateRef.current = gate.memo;
+    if (!gate.apply) return;
     setMasterState(state);
   }, []);
   const onSecondaryDesktop = useCallback(() => setSecondaryDesktopModalOpen(true), []);

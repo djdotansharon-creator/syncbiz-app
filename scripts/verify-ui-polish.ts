@@ -59,7 +59,9 @@ assert("P11 the page does not overscroll at the top: html and body carry overscr
 
 // ── 2026-11-05: a STATE_UPDATE identical to the last applied one apart from `positionAt` is not applied (MAIN publishes 4+/s with whole-second positions; each one re-rendered 36 consumers) ──
 const dpc = read("lib/device-player-context.tsx");
-assert("P15 mirror state: onStateUpdate drops a message identical to the last applied one except positionAt (a stalled position is still re-applied every 1.5 s), and everything else is applied at once", /const \{ positionAt, \.\.\.rest \} = state;/.test(dpc) && /if \(key !== "" && key === last\.key && at - last\.at < 1500\) return;/.test(dpc) && /lastAppliedStateRef\.current = \{ key, at \};\s*setMasterState\(state\);/.test(dpc) && (dpc.match(/setMasterState\(/g) ?? []).length === 1);
+// 2026-11-09: the rule moved into lib/master-state-gate.ts (the same 1.5 s rule kept for pauses / transitions; while playing the next second is extrapolated) — behaviour tested in scripts/verify-master-state-gate.ts
+const gate = read("lib/master-state-gate.ts");
+assert("P15 mirror state: onStateUpdate drops a message identical to the last applied one except positionAt (a stalled position is still re-applied every 1.5 s), and everything else is applied at once", /const \{ positionAt, \.\.\.withPosition \} = state;/.test(gate) && /if \(fullKey === last\.fullKey && at - last\.at < MASTER_SAME_STATE_REAPPLY_MS\) return \{ apply: false, memo: dropped \};/.test(gate) && /export const MASTER_SAME_STATE_REAPPLY_MS = 1500;/.test(gate) && /if \(!gate\.apply\) return;\s*setMasterState\(state\);/.test(dpc) && (dpc.match(/setMasterState\(/g) ?? []).length === 1);
 
 // ── 2026-11-05: AppShell's own state (the gear menu opening, a nav hover …) no longer re-renders the three heavy prop-less children it renders directly ──
 const shellSrc = read("components/app-shell.tsx");
