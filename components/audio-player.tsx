@@ -5928,7 +5928,11 @@ export function AudioPlayer() {
             <MpvVideoSurface className="absolute inset-y-0 right-0 w-[60%]" />
           </div>
         ) : null
-      ) : isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") ? (
+      ) : isControlMirror && mirrorVid && (ms?.status === "playing" || ms?.status === "paused") &&
+        /* 2026-11-09 (owner: branches like Shufersal need no video): on the desktop app the per-device Artwork ⇄ Video button
+           decides — "Artwork" mounts NO YouTube clip at all (before, only the MPV-video path above obeyed it and the clip kept
+           streaming behind the picture). A plain browser has no such button → unchanged. Display-only; audio is never touched. */
+        (!isDesktopMode || desktopBgMode === "video") ? (
         <div
           className="sb-deck-video-bg pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
           aria-hidden

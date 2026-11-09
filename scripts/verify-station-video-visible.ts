@@ -24,7 +24,8 @@ const onReady = dock.slice(dock.indexOf("onReady: (e: { target: YTPlayerLike }) 
 assert("V1 the dock marks its iframe as shown in onReady, where it styles it", /const f = e\.target\.getIframe\?\.\(\);\n\s*if \(f\) \{[\s\S]{0,700}f\.dataset\.sbShown = "1";/.test(onReady));
 assert("V2 the hide-until-styled rule for the browser decks is unchanged", css.includes(".sb-deck-video-bg iframe:not([data-sb-shown]) { opacity: 0 !important; }"));
 assert("V3 the station (CONTROL mirror) video still lives in the .sb-deck-video-bg slot via DesktopVideoDock",
-  /isControlMirror && mirrorVid && \(ms\?\.status === "playing" \|\| ms\?\.status === "paused"\) \? \(\n\s*<div\n\s*className="sb-deck-video-bg[\s\S]{0,200}<DesktopVideoDock/.test(player));
+  // 2026-11-09: the condition gained the per-device Artwork ⇄ Video gate (scripts/verify-artwork-mode-station-video.ts); the slot is the same
+  /isControlMirror && mirrorVid && \(ms\?\.status === "playing" \|\| ms\?\.status === "paused"\) &&[\s\S]{0,500}?\(!isDesktopMode \|\| desktopBgMode === "video"\) \? \(\n\s*<div\n\s*className="sb-deck-video-bg[\s\S]{0,200}<DesktopVideoDock/.test(player));
 assert("V4 the dock still mutes itself on ready (audio never comes from it)", /e\.target\.mute\?\.\(\);\n\s*e\.target\.setVolume\?\.\(0\);/.test(onReady));
 
 console.log(`\n${pass} passed, ${fail} failed`);
