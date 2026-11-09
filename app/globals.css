@@ -1890,6 +1890,19 @@ main.library-main-below-deck[data-library-theme="pearl-light"] {
   height: auto !important;
 }
 
+/* ── 2026-11-08 performance (owner: "it must run smooth", the Lenovo): the browser skips style / layout / paint for library cards
+   that are off screen. PROVEN BY RUNTIME on the live Dev-PC station (104 cards, Library screen):
+   - main thread busy 9.6 s → 5.5 s per 10 s;
+   - layer building 5.9 s → 1.8 s;
+   - worst freeze 0.41 s → 0.12 s;
+   - screenshots of the cards (and on hover) identical.
+   The card already clips its content (overflow-hidden), so the containment adds no clipping. `auto` remembers each card's real size
+   after it has been on screen once; 240px is only the first guess for a card never shown. Every card stays in the page (search, keyboard). */
+.library-source-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
 .library-source-card .sb-lbc-as-div,
 .library-source-card .sb-lbc-shell {
   flex: 0 0 auto !important;
