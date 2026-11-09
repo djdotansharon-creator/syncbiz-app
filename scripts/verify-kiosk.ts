@@ -76,7 +76,10 @@ async function main() {
   const shell = read("components", "app-shell.tsx");
   assert("S6 the shell mounts it exactly once and still has exactly three <AudioPlayer /> mounts (no new instance)", (shell.match(/<KioskDisplay \/>/g) ?? []).length === 1 && (shell.match(/<AudioPlayer \/>/g) ?? []).length === 3);
   const player = read("components", "audio-player.tsx");
-  assert("S7 the only addition to the player is a display-only publish of its position", player.includes("publishNowPosition(displayPosition, displayDuration, displayStatus)") && (player.match(/publishNowPosition/g) ?? []).length === 2);
+  // 2026-11-09: the publish moved into <NowPositionPublisher> (components/player-surface/live-timeline.tsx) so the display screen keeps its 4×/s
+  // position without the whole player re-rendering. Same invariant: one display-only publish, mounted once per player, nothing reads it back.
+  const leaf = read("components", "player-surface", "live-timeline.tsx");
+  assert("S7 the only addition to the player is a display-only publish of its position", leaf.includes("publishNowPosition(displayPosition, displayDuration, displayStatus)") && (leaf.match(/publishNowPosition/g) ?? []).length === 2 && (player.match(/<NowPositionPublisher /g) ?? []).length === 1 && !/publishNowPosition/.test(player));
   const css = read("app", "kiosk-display.css");
   const cssNoScrim = css.replace(/html:not\(\[data-sb-fx="lite"\]\) \.sb-kiosk-scrim\s*\{[^}]*\}/, "").replace(/html:not\(\[data-sb-fx="lite"\]\) \.sb-kiosk-sheet\s*\{[^}]*\}/, "");
   assert("S8 no blur layers on the display screen (light on a simple computer) — the only exceptions are the veil behind the OPEN password bar and the glass sheet of a search result, never in light-graphics mode", !/backdrop-filter\s*:\s*(?!none)/.test(cssNoScrim) && !/filter\s*:\s*blur/.test(cssNoScrim) && /html:not\(\[data-sb-fx="lite"\]\) \.sb-kiosk-scrim\s*\{[^}]*backdrop-filter:\s*blur/.test(css) && /html:not\(\[data-sb-fx="lite"\]\) \.sb-kiosk-sheet\s*\{[^}]*backdrop-filter:\s*blur/.test(css));
