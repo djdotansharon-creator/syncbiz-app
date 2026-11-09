@@ -18,13 +18,17 @@ export function publishNowPosition(position: number, duration: number, status: s
   listeners.forEach((l) => l());
 }
 
-export function useNowPosition(): NowPosition {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => current,
-    () => current,
-  );
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+const subscribeNothing = () => () => {};
+
+/**
+ * `active` = whether the caller is on screen. 2026-11-09 (CDP on a live station): the display screen is mounted all the time but
+ * shown only when locked; it listened anyway and redrew ~20× a second while hidden. Inactive → no subscription (no redraws); it
+ * still reads the latest value whenever it renders, so it is current the moment it opens.
+ */
+export function useNowPosition(active = true): NowPosition {
+  return useSyncExternalStore(active ? subscribe : subscribeNothing, () => current, () => current);
 }

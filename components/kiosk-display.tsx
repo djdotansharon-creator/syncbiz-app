@@ -1448,11 +1448,12 @@ export function KioskDisplay(): ReactElement | null {
   const theme: "light" | "dark" = themePref === "auto" ? (autoLight ? "light" : "dark") : themePref;
   const colors = useCrossfade(paletteFor(info, theme));
   const transport = useTransport();
-  const pos = useNowPosition();
   const today = useToday();
   const perms = useKioskPermissions();
   const design = useKioskDesign();
   const [shown, setShown] = useState(false);
+  // 2026-11-09: the screen follows the position only while it is up (hidden, it redrew ~20× a second for nothing)
+  const pos = useNowPosition(shown);
   const [leaving, setLeaving] = useState(false);
   const [intro, setIntro] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
