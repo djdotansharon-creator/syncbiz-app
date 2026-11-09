@@ -980,7 +980,10 @@ export function AudioPlayer() {
     const styleDeckIframe = (player: unknown, active: boolean) => {
       /* getIframe is a public YT.Player API not present on our minimal YTPlayerAPI type. */
       const f = (player as { getIframe?: () => HTMLIFrameElement | null } | null)?.getIframe?.();
-      if (!f) return;
+      /* 2026-11-08 (owner: "lighten the Lenovo"): a deck whose iframe is no longer on the page shows nothing — skip it. Every YT command
+         (unloadModule below) sent to a detached iframe makes YouTube print "The YouTube player is not attached to the DOM"; at this 100 ms
+         tick that was 10 lines a second written into main.log by MAIN (108 MB in one day). The live deck is styled exactly as before. */
+      if (!f || !f.isConnected || !f.contentWindow) return;
       /* No YouTube captions/annotations inside the deck — the captions module is display-only
          (audio never passes through it); unload is idempotent and cheap. */
       try {
