@@ -6,6 +6,7 @@ import {
   useMemo,
   useEffect,
   useRef,
+  useSyncExternalStore,
   startTransition,
   type DragEvent,
   type MouseEvent,
@@ -525,7 +526,12 @@ type LibraryNavGlyphKind =
   | "external_playlists"
   | "dj_ai"
   | "sources"
-  | "favorites";
+  | "favorites"
+  | "royalty_free"
+  | "my_computer";
+
+/** "Am I inside the desktop app?" — false on the server and while the page hydrates, then the real answer (no effect, no extra state). */
+const noopSubscribe = () => () => {};
 
 function LibraryNavGlyph({ kind }: { kind: LibraryNavGlyphKind }) {
   const base = {
@@ -601,6 +607,20 @@ function LibraryNavGlyph({ kind }: { kind: LibraryNavGlyphKind }) {
       return (
         <svg {...base}>
           <path d="M12 20.5S4 15.3 4 9.9C4 7.2 6.1 5 8.8 5c1.6 0 3 .9 3.2 2 .2-1.1 1.6-2 3.2-2C17.9 5 20 7.2 20 9.9c0 5.4-8 10.6-8 10.6z" />
+        </svg>
+      );
+    case "royalty_free": /* music bank — stacked records */
+      return (
+        <svg {...base}>
+          <path d="M4 7h16M4 12h16M4 17h10" />
+          <circle cx="18" cy="17" r="2.5" />
+        </svg>
+      );
+    case "my_computer": /* monitor */
+      return (
+        <svg {...base}>
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 20h8M12 16v4" />
         </svg>
       );
   }
@@ -858,6 +878,7 @@ function SourcesManagerInner({
   const router = useRouter();
   const pathname = usePathname() ?? "";
   const { active: activeCenterModule, setActive: setActiveCenterModule, workspaceId: centerWorkspaceId } = useCenterModule();
+  const inDesktopApp = useSyncExternalStore(noopSubscribe, () => Boolean(window.syncbizDesktop), () => false);
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const tr = useTr();
@@ -4134,8 +4155,11 @@ function SourcesManagerInner({
               </p>
               <div className="space-y-0.5">
                 {(() => {
+                  /* while the bank / computer panel is open, only its own row is lit */
+                  const bankOrComputerOpen =
+                    isRoyaltyFreeMusicModule(activeCenterModule) || isMyMusicLibraryModule(activeCenterModule);
                   const navViewActive = (id: LibraryViewId) =>
-                    !djHubRailActive && selection.type === "library_view" && selection.id === id;
+                    !djHubRailActive && !bankOrComputerOpen && selection.type === "library_view" && selection.id === id;
                   /* Big, thin type (operator direction: "פונט דק ואותיות גדולות"). */
                   const navCls = (active: boolean) =>
                     `flex w-full items-center justify-between px-2 py-1.5 text-left text-[17px] font-light tracking-wide transition-colors duration-150 ${
@@ -4160,7 +4184,11 @@ function SourcesManagerInner({
                         <button
                           key={r.id}
                           type="button"
-                          onClick={() => setSelection({ type: "library_view", id: r.id })}
+                          onClick={() => {
+                            /* a library destination shows the library — close a bank / computer panel opened from this list */
+                            if (bankOrComputerOpen) setActiveCenterModule(null);
+                            setSelection({ type: "library_view", id: r.id });
+                          }}
                           className={navCls(navViewActive(r.id))}
                         >
                           <span className="flex min-w-0 items-center gap-2.5">
@@ -4191,6 +4219,39 @@ function SourcesManagerInner({
                         <span className="text-[15px] font-light tabular-nums">
                           {displaySources.filter((s) => isDjCreatorWorkspacePlaylistSource(s)).length}
                         </span>
+                      </button>
+                      {/* 2026-11-09 (owner): the Royalty-Free bank and "My Computer" (play music files from this PC) were pads next to the
+                          player before the redesign hid them — they live here now, under DJ AI. Same panels, same flags; click again to close. */}
+                      {RFM_CATALOG_ENABLED ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveCenterModule(isRoyaltyFreeMusicModule(activeCenterModule) ? null : "royalty-free-music")
+                          }
+                          aria-pressed={isRoyaltyFreeMusicModule(activeCenterModule)}
+                          className={navCls(isRoyaltyFreeMusicModule(activeCenterModule))}
+                        >
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <LibraryNavGlyph kind="royalty_free" />
+                            <span className="truncate">{tr("Royalty-Free Music")}</span>
+                          </span>
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={!inDesktopApp}
+                        onClick={() =>
+                          setActiveCenterModule(isMyMusicLibraryModule(activeCenterModule) ? null : "my-music-library")
+                        }
+                        aria-pressed={inDesktopApp ? isMyMusicLibraryModule(activeCenterModule) : undefined}
+                        className={`${navCls(isMyMusicLibraryModule(activeCenterModule))}${inDesktopApp ? "" : " cursor-default opacity-45 hover:text-[#a1a1a6]"}`}
+                      >
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <LibraryNavGlyph kind="my_computer" />
+                          <span className="truncate">{tr("My Computer")}</span>
+                        </span>
+                        {/* native tooltips are stripped app-wide (no-native-tooltips.tsx) — say it in the row */}
+                        {inDesktopApp ? null : <span className="shrink-0 text-[11px] font-light">{tr("Desktop app only")}</span>}
                       </button>
                       {tailRows.map((r) => (
                         <button
