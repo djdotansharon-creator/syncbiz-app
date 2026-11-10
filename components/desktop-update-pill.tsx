@@ -242,7 +242,7 @@ export function DesktopUpdatePill() {
                 <span className="sb-pill-t">{text}</span>
               </span>
               <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
-                <span className="sb-update-ver" dir="ltr">v{target.version}</span>
+                <span className="sb-update-ver" dir="ltr">{target.version}</span>
                 <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
                   <span className="sb-pill-t">{text}</span>
                 </a>

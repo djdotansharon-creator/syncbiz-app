@@ -8155,7 +8155,7 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 .sb-update-ver { text-align: center; font-weight: 700; font-size: 20px; line-height: 1.1; letter-spacing: -0.01em; }
 /* the Update button sits under the version; "What's new" is UNDER the button (owner): centred, small, no frame, not bold, always underlined */
 .sb-update-go { margin-top: 13px; }
-.sb-update-new { align-self: center; margin-top: 13px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; opacity: 0.9; }
+.sb-update-new { align-self: center; margin-top: 13px; font-size: 10px; font-weight: 400; color: var(--upd-fg); text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; opacity: 0.9; }
 .sb-update-new:hover, .sb-update-new:focus-visible { opacity: 1; outline: none; }
 
 /* ── "What's new" page (owner 2026-11-10): the headlines have NO frame — plain text scrolling between a soft blur at the top and at the bottom (the top one only once the reader has scrolled; the bottom one only while more text follows). The page's own dark ground is #0b0f16. ── */
