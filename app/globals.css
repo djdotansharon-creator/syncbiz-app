@@ -8127,6 +8127,60 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
   .cr-row-update { padding-bottom: 2px; }
   [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
 }
+/* ── the update card (owner 2026-11-10): the amber "Update" ellipse ITSELF grows into a rectangle (same colour, so it reads as one shape) — the version number (centred), a small borderless "What's new" centred under it (our site, where the details are),
+   and the one-word "Update" button at the bottom. Colours: amber + dark text on the black / song looks; a deeper orange + WHITE text on the white look
+   (white on pale amber would not read). The pill (closed) takes the same colours so the shape does not change colour while it grows. ── */
+.sb-update-pill { cursor: pointer; border: 0; }
+.sb-update-pill[data-sb-update="available"], .sb-update-card[data-sb-update="available"] { --upd-bg: #fbbf24; --upd-fg: #1c1400; --upd-btn: rgba(28, 20, 0, 0.13); --upd-btn-h: rgba(28, 20, 0, 0.22); }
+.sb-update-pill[data-sb-update="required"], .sb-update-card[data-sb-update="required"] { --upd-bg: #dc2626; --upd-fg: #ffffff; --upd-btn: rgba(255, 255, 255, 0.2); --upd-btn-h: rgba(255, 255, 255, 0.3); }
+html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"], html[data-sb-display="white"] .sb-update-card[data-sb-update="available"] { --upd-bg: #ea580c; --upd-fg: #ffffff; --upd-btn: rgba(255, 255, 255, 0.2); --upd-btn-h: rgba(255, 255, 255, 0.3); }
+html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"] { background-color: #ea580c; color: #ffffff; }
+html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover { background-color: #f26a1b; }
+.sb-update-card {
+  position: fixed; z-index: 2147482500; box-sizing: border-box; overflow: hidden; background: var(--upd-bg); color: var(--upd-fg);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
+  transition: width 340ms cubic-bezier(0.22, 1, 0.36, 1), height 340ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 340ms cubic-bezier(0.22, 1, 0.36, 1); /* folding back: quick */
+}
+.sb-update-card.is-open { transition: width 680ms cubic-bezier(0.22, 1, 0.36, 1), height 680ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 680ms cubic-bezier(0.22, 1, 0.36, 1); } /* opening: unhurried (owner 2026-11-10) */
+.sb-update-ghost { position: absolute; top: 0; inset-inline-start: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; opacity: 1; transition: opacity 110ms ease; pointer-events: none; }
+.sb-update-card.is-open .sb-update-ghost { opacity: 0; }
+.sb-update-in { position: absolute; top: 0; inset-inline-start: 0; box-sizing: border-box; padding: 12px 14px 11px; display: flex; flex-direction: column; gap: 0; }
+/* the text does not appear with the card: a moment after it has opened it rises out of a mist (blur + a small lift → sharp), the number first, then the button, then "What's new" */
+@keyframes sb-upd-rise { from { opacity: 0; filter: blur(10px); transform: translateY(10px); } to { opacity: 1; filter: blur(0); transform: none; } }
+.sb-update-card:not(.is-open) :is(.sb-update-ver, .sb-update-go, .sb-update-new) { opacity: 0; transition: opacity 140ms ease; }
+.sb-update-card.is-open .sb-update-ver { animation: sb-upd-rise 1000ms cubic-bezier(0.22, 1, 0.36, 1) 480ms backwards; }
+.sb-update-card.is-open .sb-update-go { animation: sb-upd-rise 1000ms cubic-bezier(0.22, 1, 0.36, 1) 640ms backwards; }
+.sb-update-card.is-open .sb-update-new { animation: sb-upd-rise 1000ms cubic-bezier(0.22, 1, 0.36, 1) 800ms backwards; }
+.sb-update-go {
+  display: flex; align-items: center; justify-content: center; height: 32px; border-radius: 999px; text-decoration: none; background: var(--upd-btn); color: var(--upd-fg);
+  font-size: 13px; font-weight: 700; transition: background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.16); /* a soft dark shadow under the button (owner) */
+}
+.sb-update-go:hover { background: var(--upd-btn-h); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.26), 0 1px 2px rgba(0, 0, 0, 0.18); }
+.sb-update-go:active { transform: scale(0.98); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+.sb-update-go:focus-visible { outline: 2px solid var(--upd-fg); outline-offset: 2px; }
+/* the version number, simple (owner 2026-11-10): the card's own font (inherited — the owner did not like the system / Verdana ones), semibold, tight, one line tall */
+.sb-update-ver { text-align: center; font-weight: 600; font-size: 30px; line-height: 1; letter-spacing: -0.02em; }
+/* the Update button sits under the version; "What's new" is UNDER the button (owner): centred, small, no frame, not bold, always underlined */
+.sb-update-go { margin-top: 12px; }
+.sb-update-new { align-self: center; margin-top: 4px; font-size: 10px; font-weight: 400; color: var(--upd-fg); text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; }
+.sb-update-new:hover, .sb-update-new:focus-visible { text-decoration-thickness: 2px; outline: none; }
+
+/* ── "What's new" page (owner 2026-11-10): the headlines have NO frame — plain text scrolling between a soft blur at the top and at the bottom (the top one only once the reader has scrolled; the bottom one only while more text follows). The page's own dark ground is #0b0f16. ── */
+@keyframes sb-wn-rise { from { opacity: 0; filter: blur(12px); transform: translateY(12px); } to { opacity: 1; filter: blur(0); transform: none; } }
+.sb-wn-rise { animation: sb-wn-rise 900ms cubic-bezier(0.22, 1, 0.36, 1) var(--d, 0ms) backwards; } /* each line rises out of a mist, one after another from the top (--d = its delay) */
+.sb-wn-wrap { position: relative; --wn-bg: #0b0f16; }
+.sb-wn-scroll { max-height: min(42vh, 310px); overflow-y: auto; overscroll-behavior: contain; padding: 6px 0; scrollbar-width: none; outline: none; }
+.sb-wn-scroll::-webkit-scrollbar { display: none; }
+.sb-wn-para { margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
+.sb-wn-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.sb-wn-list li { display: flex; gap: 12px; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.sb-wn-dot { flex: none; margin-top: 9px; width: 6px; height: 6px; border-radius: 50%; background: #fbbf24; }
+.sb-wn-fade { position: absolute; inset-inline: 0; height: 64px; pointer-events: none; opacity: 0; transition: opacity 200ms ease; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.sb-wn-fade.is-on { opacity: 1; }
+.sb-wn-fade--top { top: 0; background: linear-gradient(to bottom, var(--wn-bg) 8%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); }
+.sb-wn-fade--bot { bottom: 0; background: linear-gradient(to top, var(--wn-bg) 8%, transparent 100%); -webkit-mask-image: linear-gradient(to top, #000 40%, transparent); mask-image: linear-gradient(to top, #000 40%, transparent); }
+@media (prefers-reduced-motion: reduce) { .sb-update-card, .sb-update-card.is-open, .sb-update-in, .sb-update-ghost, .sb-wn-fade { transition-duration: 1ms !important; } .sb-update-card.is-open :is(.sb-update-ver, .sb-update-go, .sb-update-new), .sb-wn-rise { animation-duration: 1ms !important; animation-delay: 0ms !important; } }
 
 /* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
    a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */

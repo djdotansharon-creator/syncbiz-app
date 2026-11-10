@@ -46,7 +46,7 @@ function desktopTagSortKey(tag: string): number {
 }
 
 type GHAsset = { name: string; browser_download_url: string; size: number };
-type GHRelease = { tag_name: string; draft: boolean; prerelease: boolean; published_at: string | null; assets: GHAsset[] };
+type GHRelease = { tag_name: string; name?: string | null; body?: string | null; draft: boolean; prerelease: boolean; published_at: string | null; assets: GHAsset[] };
 
 export type WindowsInstaller = {
   url: string; // GitHub asset browser_download_url (attachment); NEVER shown to the client directly
@@ -55,6 +55,9 @@ export type WindowsInstaller = {
   sizeBytes: number;
   tag: string;
   publishedAt: string | null;
+  /** the release's title and notes as written on GitHub — shown on the site's "What's new" page (never executed / rendered as HTML) */
+  title: string | null;
+  notes: string | null;
 };
 
 /** Latest published desktop release that actually has a `.exe` asset, or null. Network — server only. */
@@ -89,6 +92,8 @@ export async function resolveLatestWindowsInstaller(): Promise<WindowsInstaller 
         sizeBytes: asset.size,
         tag: r.tag_name,
         publishedAt: r.published_at,
+        title: typeof r.name === "string" && r.name.trim() ? r.name.trim() : null,
+        notes: typeof r.body === "string" && r.body.trim() ? r.body : null,
       };
     }
   }

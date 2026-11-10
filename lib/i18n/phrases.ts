@@ -303,6 +303,17 @@ export const HE_PHRASES: Record<string, string> = {
   // ── desktop settings ──
   "VONO Protection is configured from the VONO Desktop app on the branch player.": "הגנת VONO מוגדרת מאפליקציית VONO Desktop בנגן הסניף.",
   "Loading…": "טוען…",
+  // ── the update card (the amber pill) and the "What's new" page ──
+  "Update available": "עדכון זמין",
+  "What's new": "מה חדש",
+  "Update now": "עדכן עכשיו",
+  "Update": "עדכון",
+  "What's new in VONO Player {v}": "מה חדש ב-VONO Player {v}",
+  "Version {v}": "גרסה {v}",
+  "No details were published for this version.": "לא פורסמו פרטים על הגרסה הזו.",
+  "After the download: close VONO and run the file — it installs over the current version.": "אחרי ההורדה: סוגרים את VONO ומריצים את הקובץ — הוא מתקין מעל הגרסה הקיימת.",
+  "The update is not available for download yet.": "העדכון עדיין לא זמין להורדה.",
+  "All versions": "כל הגרסאות",
   "Update the SyncBiz desktop app to manage Protection.": "עדכנו את אפליקציית שולחן העבודה של SyncBiz כדי לנהל את ההגנה.",
   "Not supported on this platform.": "לא נתמך בפלטפורמה הזו.",
   "VONO starts with Windows and automatically recovers the player if it stops.": "VONO עולה עם Windows ומשחזר את הנגן אוטומטית אם הוא נעצר.",
