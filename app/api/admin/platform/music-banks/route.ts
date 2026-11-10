@@ -7,8 +7,9 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * GET /api/admin/platform/music-banks — Platform → Businesses (owner 2026-11-10). SUPER_ADMIN only.
- * Every business (workspace) with its chains (brands), branches, counts and its private-bank grants, plus the bank list.
+ * GET /api/admin/platform/music-banks — Platform → Accounts (owner 2026-11-10/11). SUPER_ADMIN only.
+ * Every account (workspace) with its chains (brands), branches, counts, last device activity and its private-bank grants,
+ * plus the bank list.
  */
 export async function GET() {
   const admin = await getSuperAdminOrNull();
@@ -30,9 +31,10 @@ export async function GET() {
         musicBankGrants: { select: { bankId: true, expiresAt: true, createdAt: true } },
       },
     }),
-    prisma.device.groupBy({ by: ["workspaceId"], _count: { _all: true } }),
+    prisma.device.groupBy({ by: ["workspaceId"], _count: { _all: true }, _max: { lastSeenAt: true } }),
   ]);
   const devices = new Map(deviceCounts.map((r) => [r.workspaceId, r._count._all]));
+  const lastSeen = new Map(deviceCounts.map((r) => [r.workspaceId, r._max.lastSeenAt?.toISOString() ?? null]));
 
   return NextResponse.json(
     {
@@ -55,6 +57,7 @@ export async function GET() {
         users: w._count.members,
         branchCount: w._count.branches,
         devices: devices.get(w.id) ?? 0,
+        lastActiveAt: lastSeen.get(w.id) ?? null,
         chains: w.brands.map((b) => ({ id: b.id, name: b.name, isDefault: b.isDefault, color: b.color })),
         branches: w.branches.map((b) => ({ id: b.id, name: b.name, chainId: b.brandId })),
         grants: w.musicBankGrants.map((g) => ({ bankId: g.bankId, expiresAt: g.expiresAt?.toISOString() ?? null, since: g.createdAt.toISOString() })),

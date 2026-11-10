@@ -91,9 +91,13 @@ async function main() {
   assert("P7a the Royalty-Free catalog asks the server for the private banks and shows them only when there are some",
     /fetch\("\/api\/music-bank\/private-banks"/.test(rfm) && /\{privatePacks\.length > 0 \? \(/.test(rfm));
   const hub = read("components/admin/businesses-hub.tsx");
-  assert("P7b Platform → Businesses: squares like People, a business page with tabs (Music banks / Chains & branches / Account)",
-    /className="sb-pg-tile"/.test(hub) && /Music banks<\/button>/.test(hub) && /Chains &amp; branches<\/button>/.test(hub) && /Account<\/button>/.test(hub)
-    && /href="\/admin\/platform\/businesses"/.test(read("app/admin/platform/page.tsx")));
+  // 2026-11-11 (owner, option א): the list is a table (hundreds of international accounts), not squares
+  assert("P7b Platform → Accounts: a sortable, filterable table; an account page with tabs (Music banks / Chains & branches / Account)",
+    /<table className="sb-bz-table">/.test(hub) && !/className="sb-pg-tile"/.test(hub) && /sb-bz-filters/.test(hub) && /aria-sort=/.test(hub)
+    && /Music banks<\/button>/.test(hub) && /Chains &amp; branches<\/button>/.test(hub) && /Account<\/button>/.test(hub)
+    && /href="\/admin\/platform\/accounts"/.test(read("app/admin/platform/page.tsx")) && /BusinessesHub/.test(read("app/admin/platform/accounts/page.tsx")));
+  assert("P7d the list shows each account's last device activity (server reads the newest Device.lastSeenAt)",
+    /_max: \{ lastSeenAt: true \}/.test(list) && /lastActiveAt:/.test(list));
   assert("P7c the old Shufersal panel reads the list from the server too", /fetch\("\/api\/music-bank\/private-banks"/.test(read("components/shufersal-bank-workspace-panel.tsx")));
 
   console.log(`\n${pass} passed, ${fail} failed`);

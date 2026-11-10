@@ -5,7 +5,47 @@
 .sb-bz-count { margin-inline-start: 6px; font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.45); }
 .sb-bz-banks { color: #8ff0c2; }
 
-/* the Music banks top tab: one block per bank, a switch per business */
+/* 2026-11-11 (owner, option א): the account LIST is a table — it has to hold hundreds of international customers.
+   Status filters as soft chips, sortable column heads, a row opens the account. No frames: rows are separated by a hairline. */
+.sb-bz-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 16px; }
+.sb-bz-chip { border: 0; border-radius: 999px; padding: 6px 13px; background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.75); font: inherit; font-size: 12.5px; font-weight: 550; cursor: pointer; transition: background-color 0.15s, color 0.15s; }
+.sb-bz-chip span { margin-inline-start: 4px; color: rgba(255, 255, 255, 0.42); font-variant-numeric: tabular-nums; }
+.sb-bz-chip:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.sb-bz-chip[aria-pressed="true"] { background: rgba(255, 255, 255, 0.9); color: #111; }
+.sb-bz-chip[aria-pressed="true"] span { color: rgba(0, 0, 0, 0.5); }
+.sb-bz-chip:focus-visible, .sb-bz-th:focus-visible, .sb-bz-acct:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 2px; }
+
+.sb-bz-tablewrap { overflow-x: auto; border-radius: 18px; background: rgba(255, 255, 255, 0.035); }
+.sb-bz-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.sb-bz-table th { padding: 12px 14px 10px; text-align: start; white-space: nowrap; font-size: 11.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.sb-bz-table th { vertical-align: middle; line-height: 1.3; }
+.sb-bz-th { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; line-height: inherit; border: 0; padding: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.sb-bz-th:hover { color: #fff; }
+.sb-bz-caret { display: inline-block; min-width: 0.7em; color: #fff; }
+.sb-bz-table td { padding: 10px 14px; white-space: nowrap; color: rgba(255, 255, 255, 0.85); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.sb-bz-table tbody tr { cursor: pointer; transition: background-color 0.15s; }
+.sb-bz-table tbody tr:hover { background: rgba(255, 255, 255, 0.05); }
+.sb-bz-table tbody tr:last-child td { border-bottom: 0; }
+.sb-bz-table .sb-bz-num { text-align: end; }
+.sb-bz-table th.sb-bz-num .sb-bz-th { flex-direction: row-reverse; }
+.sb-bz-acct { display: flex; align-items: center; gap: 11px; max-width: 320px; border: 0; padding: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.sb-bz-acctname { display: flex; flex-direction: column; min-width: 0; }
+.sb-bz-acctname b { overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 600; color: #fff; }
+.sb-bz-acctname small { overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: rgba(255, 255, 255, 0.5); }
+.sb-bz-plan { text-transform: capitalize; }
+.sb-bz-dim { color: rgba(255, 255, 255, 0.4) !important; }
+@media (max-width: 760px) { .sb-bz-opt { display: none; } }
+
+/* status: the meaning colour, separate from the brand accent */
+.sb-bz-pill { display: inline-block; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; line-height: 1.35; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6); }
+.sb-bz-pill[data-tone="ok"] { background: rgba(95, 227, 161, 0.14); color: #8ff0c2; }
+.sb-bz-pill[data-tone="info"] { background: rgba(10, 132, 255, 0.16); color: #8cc4ff; }
+.sb-bz-pill[data-tone="warn"] { background: rgba(255, 207, 92, 0.15); color: #ffd97d; }
+.sb-bz-pill[data-tone="bad"] { background: rgba(255, 99, 99, 0.15); color: #ff9c9c; }
+.sb-psn-meta .sb-bz-pill { margin-inline-end: 6px; }
+
+/* the Music banks top tab: per bank the accounts it is open to, + a search to open it for another one */
+.sb-bz-find { display: block; max-width: 360px; margin: 14px 0 4px; }
 .sb-bz-banks-tab { display: flex; flex-direction: column; gap: 34px; max-width: 720px; }
 .sb-bz-bankicon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: rgba(255, 255, 255, 0.08); color: #ffcf5c; }
 .sb-bz-bankname { font-size: 19px !important; font-weight: 650 !important; }

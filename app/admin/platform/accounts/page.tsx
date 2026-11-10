@@ -5,10 +5,10 @@ import { BusinessesHub } from "@/components/admin/businesses-hub";
 export const dynamic = "force-dynamic";
 
 /**
- * Platform → Businesses (owner 2026-11-10): every business as a square, its own page with tabs, and the PRIVATE music
- * banks opened per business. The layout already enforces SUPER_ADMIN; re-checked here for defense-in-depth.
+ * Platform → Accounts (owner 2026-11-10/11): every customer account in a table, its own page with tabs, and the PRIVATE music
+ * banks opened per account. The layout already enforces SUPER_ADMIN; re-checked here for defense-in-depth.
  */
-export default async function AdminBusinessesPage() {
+export default async function AdminAccountsPage() {
   await requireSuperAdmin();
   return (
     <div className="space-y-5">

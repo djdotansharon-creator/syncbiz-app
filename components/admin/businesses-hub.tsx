@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Platform → BUSINESSES (owner 2026-11-10): "the permissions room's design, only businesses instead of people — chains under
- * them — and every one with tidy tabs". Squares, one per business (the same glass tiles as People); a press opens the business's
- * own page with tabs: Music banks (open / close a PRIVATE bank, optional end date), Chains & branches, Account. A second top tab,
- * Music banks, shows each private bank with a switch per business. SUPER_ADMIN only (the data routes answer 403 to anyone else).
- * Styles: the permissions room's own classes (people-grid.css, permissions-hub.css) + businesses-hub.css for the few new pieces.
+ * Platform → ACCOUNTS (owner 2026-11-10, reshaped 2026-11-11): the platform owner's back office for customer accounts, in the
+ * permissions room's visual language. 2026-11-11 (owner, option א): squares do not scale to hundreds of international customers →
+ * the list is a TABLE (search, status filters, sortable columns: plan, status, branches, devices, private banks, last active),
+ * like the customer lists of mature SaaS back offices. A row opens the account's own page with tabs: Music banks (open / close
+ * a PRIVATE bank, optional end date), Chains & branches, Account. The top tab Music banks lists, per bank, the accounts it is
+ * open to + a search to open it for another account. SUPER_ADMIN only (the data routes answer 403 to anyone else).
+ * Styles: the permissions room's own classes (people-grid.css, permissions-hub.css) + businesses-hub.css for the new pieces.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,7 +29,8 @@ type Business = {
   users: number;
   branchCount: number;
   devices: number;
-  chains: { id: string; name: string; isDefault: boolean; color: string | null }[];
+  lastActiveAt: string | null;
+  chains:{ id: string; name: string; isDefault: boolean; color: string | null }[];
   branches: { id: string; name: string; chainId: string | null }[];
   grants: Grant[];
 };
@@ -49,6 +52,30 @@ function fmtHours(sec: number): string {
 const isLive = (g: Grant): boolean => g.expiresAt == null || new Date(g.expiresAt).getTime() > Date.now();
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
+const STATUS: Record<string, { label: string; tone: string }> = {
+  ACTIVE: { label: "Active", tone: "ok" },
+  TRIALING: { label: "Trial", tone: "info" },
+  PAST_DUE: { label: "Past due", tone: "warn" },
+  SUSPENDED: { label: "Suspended", tone: "bad" },
+  CANCELLED: { label: "Cancelled", tone: "off" },
+};
+function StatusPill({ status }: { status: string | null }) {
+  const s = status ? STATUS[status] : undefined;
+  return <span className="sb-bz-pill" data-tone={s?.tone ?? "off"}>{s?.label ?? "No plan"}</span>;
+}
+function fmtAgo(iso: string | null, now: number): string {
+  if (!iso) return "Never";
+  const min = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000));
+  if (min < 2) return "Just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  return d < 60 ? `${d} days ago` : fmtDay(iso);
+}
+type SortKey = "name" | "branches" | "devices" | "banks" | "active" | "created";
+type Filter = "all" | "ACTIVE" | "TRIALING" | "PAST_DUE" | "SUSPENDED" | "CANCELLED" | "banks";
+
 function Switch({ on, busy, label, onChange }: { on: boolean; busy: boolean; label: string; onChange: (next: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} data-on={on ? "1" : "0"} className="sb-tg" disabled={busy} onClick={() => onChange(!on)}>
@@ -64,6 +91,10 @@ export function BusinessesHub() {
   const [tab, setTab] = useState<"businesses" | "banks">("businesses");
   const [openId, setOpenId] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
+  const [bankQ, setBankQ] = useState<Record<string, string>>({});
+  const [now] = useState(() => Date.now()); // "last active" is relative to when the list loaded
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -116,22 +147,69 @@ export function BusinessesHub() {
     }
   }, []);
 
+  const liveCount = (b: Business): number => b.grants.filter(isLive).length;
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: 0, banks: 0 };
+    for (const b of businesses ?? []) {
+      c.all++;
+      if (b.status) c[b.status] = (c[b.status] ?? 0) + 1;
+      if (b.grants.some(isLive)) c.banks++;
+    }
+    return c;
+  }, [businesses]);
+
   const shown = useMemo(() => {
     const n = q.trim().toLowerCase();
-    const list = businesses ?? [];
-    if (!n) return list;
-    return list.filter((b) => [b.name, b.slug, b.ownerEmail ?? "", ...b.chains.map((c) => c.name)].some((s) => s.toLowerCase().includes(n)));
-  }, [businesses, q]);
+    const list = (businesses ?? []).filter((b) => {
+      if (filter === "banks" ? !b.grants.some(isLive) : filter !== "all" && b.status !== filter) return false;
+      return !n || [b.name, b.slug, b.ownerEmail ?? "", ...b.chains.map((c) => c.name)].some((s) => s.toLowerCase().includes(n));
+    });
+    const val = (b: Business): number | string => {
+      switch (sort.key) {
+        case "branches": return b.branchCount;
+        case "devices": return b.devices;
+        case "banks": return b.grants.filter(isLive).length;
+        case "active": return b.lastActiveAt ? new Date(b.lastActiveAt).getTime() : 0;
+        case "created": return new Date(b.createdAt).getTime();
+        default: return b.name.toLowerCase();
+      }
+    };
+    return [...list].sort((a, b) => {
+      const x = val(a), y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * sort.dir;
+    });
+  }, [businesses, q, filter, sort]);
 
   const open = openId ? (businesses ?? []).find((b) => b.id === openId) ?? null : null;
   if (open) {
     return <BusinessPage business={open} banks={banks} busy={busy} error={error} onBack={() => setOpenId(null)} onSetGrant={setGrant} />;
   }
 
+  const sortBy = (key: SortKey) =>
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "name" ? 1 : -1 }));
+  const th = (k: SortKey, label: string, className?: string) => (
+    <th className={className} aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button type="button" className="sb-bz-th" onClick={() => sortBy(k)}>
+        {label}
+        <span className="sb-bz-caret" aria-hidden>{sort.key === k ? (sort.dir === 1 ? "↑" : "↓") : ""}</span>
+      </button>
+    </th>
+  );
+  const FILTERS: { id: Filter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "ACTIVE", label: "Active" },
+    { id: "TRIALING", label: "Trial" },
+    { id: "PAST_DUE", label: "Past due" },
+    { id: "SUSPENDED", label: "Suspended" },
+    { id: "CANCELLED", label: "Cancelled" },
+    { id: "banks", label: "With private banks" },
+  ];
+
   return (
     <div className="sb-ph sb-bz">
-      <div className="sb-ph-tabs" role="tablist" aria-label="Businesses">
-        <button type="button" role="tab" aria-selected={tab === "businesses"} className="sb-ph-tab" onClick={() => setTab("businesses")}>Businesses</button>
+      <div className="sb-ph-tabs" role="tablist" aria-label="Accounts">
+        <button type="button" role="tab" aria-selected={tab === "businesses"} className="sb-ph-tab" onClick={() => setTab("businesses")}>Accounts</button>
         <button type="button" role="tab" aria-selected={tab === "banks"} className="sb-ph-tab" onClick={() => setTab("banks")}>Music banks</button>
       </div>
 
@@ -139,32 +217,62 @@ export function BusinessesHub() {
       {businesses === null && !error ? <p className="sb-rh-empty">Loading…</p> : null}
 
       {businesses !== null && tab === "businesses" ? (
-        <section className="sb-pg" aria-label="Businesses">
+        <section className="sb-pg" aria-label="Accounts">
           <div className="sb-pg-top">
-            <h2 className="sb-pg-title">Businesses <small className="sb-bz-count">{businesses.length}</small></h2>
+            <h2 className="sb-pg-title">Accounts <small className="sb-bz-count">{businesses.length}</small></h2>
             <label className="sb-pg-search">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-              <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Business, chain or owner email" aria-label="Search businesses" />
+              <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Account, chain or owner email" aria-label="Search accounts" />
             </label>
           </div>
-          <div className="sb-pg-grid">
-            {shown.map((b) => {
-              const live = b.grants.filter(isLive).length;
-              const chains = b.chains.filter((c) => !c.isDefault);
-              return (
-                <button key={b.id} type="button" className="sb-pg-tile" onClick={() => setOpenId(b.id)}>
-                  {live > 0 ? <span className="sb-pg-dot" aria-hidden title="Has private banks" /> : null}
-                  <span className="sb-pg-avatar" style={{ background: toneFor(b.name) }}>{initialOf(b.name)}</span>
-                  <span className="sb-pg-name">{b.name}</span>
-                  <span className="sb-pg-sub">
-                    {chains.length > 0 ? plural(chains.length, "chain", "chains") + " · " : ""}
-                    {plural(b.branchCount, "branch", "branches")}
-                  </span>
-                  {live > 0 ? <span className="sb-pg-sub sb-bz-banks">{plural(live, "private bank", "private banks")}</span> : null}
-                </button>
-              );
-            })}
-            {q && shown.length === 0 ? <p className="sb-pg-empty">No business matches.</p> : null}
+          <div className="sb-bz-filters" role="group" aria-label="Filter accounts">
+            {FILTERS.filter((f) => f.id === "all" || (counts[f.id] ?? 0) > 0).map((f) => (
+              <button key={f.id} type="button" className="sb-bz-chip" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+                {f.label} <span>{counts[f.id] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <div className="sb-bz-tablewrap">
+            <table className="sb-bz-table">
+              <thead>
+                <tr>
+                  {th("name", "Account")}
+                  <th>Plan</th>
+                  <th>Status</th>
+                  {th("branches", "Branches", "sb-bz-num")}
+                  {th("devices", "Devices", "sb-bz-num sb-bz-opt")}
+                  {th("banks", "Private banks", "sb-bz-num")}
+                  {th("active", "Last active")}
+                  {th("created", "Created", "sb-bz-opt")}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((b) => {
+                  const live = liveCount(b);
+                  return (
+                    <tr key={b.id} onClick={() => setOpenId(b.id)}>
+                      <td>
+                        <button type="button" className="sb-bz-acct" onClick={(e) => { e.stopPropagation(); setOpenId(b.id); }}>
+                          <span className="sb-pg-avatar sb-bz-mini" style={{ background: toneFor(b.name) }} aria-hidden>{initialOf(b.name)}</span>
+                          <span className="sb-bz-acctname">
+                            <b>{b.name}</b>
+                            <small>{b.ownerEmail ?? "No owner"}</small>
+                          </span>
+                        </button>
+                      </td>
+                      <td className="sb-bz-plan">{b.plan ?? "—"}</td>
+                      <td><StatusPill status={b.status} /></td>
+                      <td className="sb-bz-num">{b.branchCount}</td>
+                      <td className="sb-bz-num sb-bz-opt">{b.devices}</td>
+                      <td className="sb-bz-num">{live > 0 ? <span className="sb-bz-banks">{live}</span> : <span className="sb-bz-dim">—</span>}</td>
+                      <td className={b.lastActiveAt ? "" : "sb-bz-dim"}>{fmtAgo(b.lastActiveAt, now)}</td>
+                      <td className="sb-bz-opt sb-bz-dim">{fmtDay(b.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {shown.length === 0 ? <p className="sb-pg-empty">No account matches.</p> : null}
           </div>
         </section>
       ) : null}
@@ -172,7 +280,26 @@ export function BusinessesHub() {
       {businesses !== null && tab === "banks" ? (
         <section className="sb-bz-banks-tab" aria-label="Music banks">
           {banks.map((bank) => {
-            const holders = businesses.filter((b) => b.grants.some((g) => g.bankId === bank.id && isLive(g))).length;
+            const holders = businesses.filter((b) => b.grants.some((g) => g.bankId === bank.id));
+            const openCount = holders.filter((b) => b.grants.some((g) => g.bankId === bank.id && isLive(g))).length;
+            const find = (bankQ[bank.id] ?? "").trim().toLowerCase();
+            const candidates = find
+              ? businesses.filter((b) => !holders.includes(b) && [b.name, b.slug, b.ownerEmail ?? ""].some((s) => s.toLowerCase().includes(find))).slice(0, 8)
+              : [];
+            const row = (b: Business) => {
+              const g = b.grants.find((x) => x.bankId === bank.id) ?? null;
+              const on = g != null && isLive(g);
+              return (
+                <div key={b.id} className="sb-rh-row">
+                  <span className="sb-pg-avatar sb-bz-mini" style={{ background: toneFor(b.name) }}>{initialOf(b.name)}</span>
+                  <div className="sb-rh-rowtext">
+                    <b>{b.name}</b>
+                    <small>{g ? (on ? (g.expiresAt ? `Open until ${fmtDay(g.expiresAt)}` : "Open · no end date") : `Ended ${fmtDay(g.expiresAt)}`) : "Closed"}{b.ownerEmail ? ` · ${b.ownerEmail}` : ""}</small>
+                  </div>
+                  <Switch on={on} busy={busy === `${b.id}:${bank.id}`} label={`${bank.name} for ${b.name}`} onChange={(next) => void setGrant(b.id, bank.id, next, null)} />
+                </div>
+              );
+            };
             return (
               <div key={bank.id} className="sb-bz-bank">
                 <div className="sb-rh-head">
@@ -181,24 +308,23 @@ export function BusinessesHub() {
                   </span>
                   <div className="sb-rh-rowtext">
                     <b className="sb-bz-bankname">{bank.name}</b>
-                    <small>Private · {plural(bank.trackCount, "song", "songs")} · {fmtHours(bank.durationSeconds)} · open to {plural(holders, "business", "businesses")}</small>
+                    <small>Private · {plural(bank.trackCount, "song", "songs")} · {fmtHours(bank.durationSeconds)} · open to {plural(openCount, "account", "accounts")}</small>
                   </div>
                 </div>
                 <p className="sb-rh-grouphint">{bank.description}</p>
-                {businesses.map((b) => {
-                  const g = b.grants.find((x) => x.bankId === bank.id) ?? null;
-                  const on = g != null && isLive(g);
-                  return (
-                    <div key={b.id} className="sb-rh-row">
-                      <span className="sb-pg-avatar sb-bz-mini" style={{ background: toneFor(b.name) }}>{initialOf(b.name)}</span>
-                      <div className="sb-rh-rowtext">
-                        <b>{b.name}</b>
-                        <small>{g ? (on ? (g.expiresAt ? `Open until ${fmtDay(g.expiresAt)}` : "Open · no end date") : `Ended ${fmtDay(g.expiresAt)}`) : "Closed"}</small>
-                      </div>
-                      <Switch on={on} busy={busy === `${b.id}:${bank.id}`} label={`${bank.name} for ${b.name}`} onChange={(next) => void setGrant(b.id, bank.id, next, null)} />
-                    </div>
-                  );
-                })}
+                {holders.length === 0 ? <p className="sb-psn-muted">Not open to any account yet.</p> : holders.map(row)}
+                <label className="sb-pg-search sb-bz-find">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+                  <input
+                    type="search"
+                    value={bankQ[bank.id] ?? ""}
+                    onChange={(e) => setBankQ((m) => ({ ...m, [bank.id]: e.target.value }))}
+                    placeholder="Open it for another account…"
+                    aria-label={`Find an account to open ${bank.name} for`}
+                  />
+                </label>
+                {candidates.map(row)}
+                {find && candidates.length === 0 ? <p className="sb-psn-muted">No other account matches.</p> : null}
               </div>
             );
           })}
@@ -233,14 +359,14 @@ function BusinessPage({
   return (
     <div className="sb-psn sb-bz">
       <div className="sb-psn-head">
-        <button type="button" className="sb-psn-back" onClick={onBack} aria-label="Back to businesses">
+        <button type="button" className="sb-psn-back" onClick={onBack} aria-label="Back to accounts">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="sb-psn-backicon"><path d="M15 5l-7 7 7 7" /></svg>
         </button>
         <span className="sb-pg-avatar sb-psn-avatar" style={{ background: toneFor(b.name) }}>{initialOf(b.name)}</span>
         <div className="sb-psn-title">
           <h2>{b.name}</h2>
           <div className="sb-psn-meta">
-            <span>{b.ownerEmail ?? "No owner"}</span>
+            <span><StatusPill status={b.status} /> {b.ownerEmail ?? "No owner"}</span>
             <span>
               {plural(b.branchCount, "branch", "branches")} · {plural(b.devices, "device", "devices")} · {plural(b.users, "user", "users")}
             </span>
