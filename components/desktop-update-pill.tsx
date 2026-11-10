@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useTranslations } from "@/lib/locale-context";
+import { useLocale, useTranslations } from "@/lib/locale-context";
 import { useTr } from "@/lib/i18n/use-tr";
 import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-version";
 
@@ -10,7 +10,7 @@ import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-ve
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
  * Compares the running desktop app version (`window.syncbizDesktop.getAppVersion()`) against the canonical version
  * advertised by `/api/desktop/download`. When the API version is newer it shows the pill, linking to the installer
- * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10: the pill now opens a small CARD first (version number, "What's new" = /whats-new on our site, "Update now" = the installer); a click anywhere else or Escape closes it. Amber = an update is available;
+ * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the word "Update" (the install link), under it the version number and the release date, a small borderless "What's new" (our site), and the release's headlines scrolling between a soft blur above and below (no frames); a click anywhere else or Escape folds it back. Amber = an update is available;
  * red + "Update required" = this engine is older than MIN_ENGINE_VERSION (lib/desktop-version.ts).
  *
  * Backward compatibility: desktop builds <= 0.1.2 shipped before the `getAppVersion` bridge existed. Those clients
@@ -40,17 +40,29 @@ const PILL_BASE =
 const PILL_AMBER = " bg-[#fbbf24] text-[#1c1400] hover:bg-[#fcd34d]";
 const PILL_RED = " bg-[#dc2626] text-white hover:bg-[#b91c1c]";
 
+const CARD_W = 272;
+/** the card's end of the exit animation (CSS transition is 300 ms) */
+const CLOSE_MS = 240;
+
+type Target = { version: string; href: string; required: boolean; date: string | null; items: string[] };
+
 export function DesktopUpdatePill() {
   const { t } = useTranslations();
+  const { locale } = useLocale();
   const tr = t as unknown as Record<string, string | undefined>;
-  const [target, setTarget] = useState<{ version: string; href: string; required: boolean } | null>(null);
+  const [target, setTarget] = useState<Target | null>(null);
   const trp = useTr();
-  // the card (owner 2026-11-10): the ellipse opens a small rectangle with the version number, "What's new" (our site) and "Update now"; it opens with an effect and closes by a click anywhere else
+  // the card: the pill itself grows into a rectangle. `open` = mounted, `expanded` = at full size (false = still/again pill-sized), `closing` = on its way back.
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const [geo, setGeo] = useState<{ top: number; left?: number; right?: number; pw: number; ph: number } | null>(null);
+  const [fullH, setFullH] = useState(0);
+  const [edge, setEdge] = useState({ top: false, bottom: false });
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const notesRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
 
   const place = useCallback(() => {
@@ -58,16 +70,30 @@ export function DesktopUpdatePill() {
     if (!el || typeof window === "undefined") return;
     const r = el.getBoundingClientRect();
     const rtl = document.documentElement.getAttribute("dir") === "rtl";
-    setPos(rtl ? { top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) } : { top: r.bottom + 8, left: Math.max(8, r.left) });
+    const maxEdge = Math.max(8, window.innerWidth - CARD_W - 8);
+    setGeo(
+      rtl
+        ? { top: r.top, right: Math.min(maxEdge, Math.max(8, window.innerWidth - r.right)), pw: r.width, ph: r.height }
+        : { top: r.top, left: Math.min(maxEdge, Math.max(8, r.left)), pw: r.width, ph: r.height },
+    );
+  }, []);
+  /** top / bottom blur is shown only where there is more text to scroll to (the top one only after the reader has scrolled) */
+  const syncEdges = useCallback(() => {
+    const el = notesRef.current;
+    if (!el) return;
+    const top = el.scrollTop > 2;
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+    setEdge((p) => (p.top === top && p.bottom === bottom ? p : { top, bottom }));
   }, []);
   const closeCard = useCallback(() => {
     setClosing(true);
+    setExpanded(false);
     if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null;
       setOpen(false);
       setClosing(false);
-    }, 170);
+    }, CLOSE_MS);
   }, []);
   const toggleCard = useCallback(() => {
     if (open && !closing) {
@@ -78,10 +104,31 @@ export function DesktopUpdatePill() {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
+    if (open) {
+      setClosing(false);
+      setExpanded(true);
+      return;
+    }
     place();
     setClosing(false);
+    setExpanded(false);
     setOpen(true);
   }, [open, closing, closeCard, place]);
+
+  // measure the full height once the card is mounted at pill size (its text is still invisible), then grow it on the next frames
+  useEffect(() => {
+    if (!open) return;
+    let id2 = 0;
+    const id1 = requestAnimationFrame(() => {
+      setFullH(innerRef.current?.offsetHeight ?? 0);
+      syncEdges();
+      id2 = requestAnimationFrame(() => setExpanded(true));
+    });
+    return () => {
+      cancelAnimationFrame(id1);
+      cancelAnimationFrame(id2);
+    };
+  }, [open, syncEdges]);
 
   useEffect(() => {
     if (!open) return;
@@ -125,6 +172,8 @@ export function DesktopUpdatePill() {
           expectedVersion?: string;
           url?: string | null;
           releasesPageUrl?: string;
+          releasedAt?: string | null;
+          notes?: { items?: unknown; paragraphs?: unknown };
         };
         if (cancelled) return;
 
@@ -148,7 +197,15 @@ export function DesktopUpdatePill() {
           typeof data.releasesPageUrl === "string" && data.releasesPageUrl.startsWith("https://")
             ? data.releasesPageUrl
             : DEFAULT_RELEASES;
-        setTarget({ version: latest, href: directUrl.length > 0 ? directUrl : releases, required });
+        const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : []);
+        const bullets = strs(data.notes?.items);
+        setTarget({
+          version: latest,
+          href: directUrl.length > 0 ? directUrl : releases,
+          required,
+          date: typeof data.releasedAt === "string" && data.releasedAt ? data.releasedAt : null,
+          items: bullets.length > 0 ? bullets : strs(data.notes?.paragraphs),
+        });
       } catch {
         /* offline / endpoint unreachable / version unreadable — stay silent */
       }
@@ -163,8 +220,9 @@ export function DesktopUpdatePill() {
 
   const title = (tr.desktopUpdateAvailable ?? "Update available v{v}").replaceAll("{v}", target.version);
   const text = target.required ? (tr.desktopUpdateRequiredPill ?? "Update required") : (tr.desktopUpdatePill ?? "Update");
-
-  const kicker = target.required ? (tr.desktopUpdateRequiredPill ?? "Update required") : trp("Update available");
+  const when = target.date ? new Date(target.date) : null;
+  const dateText = when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString(locale === "he" ? "he-IL" : "en-GB", { day: "numeric", month: "short", year: "numeric" }) : null;
+  const kind = target.required ? "required" : "available";
 
   return (
     <>
@@ -175,25 +233,57 @@ export function DesktopUpdatePill() {
         aria-haspopup="dialog"
         aria-expanded={open && !closing}
         className={PILL_BASE + (target.required ? PILL_RED : PILL_AMBER)}
+        style={open ? { visibility: "hidden" } : undefined}
         title={title}
         aria-label={title}
-        data-sb-update={target.required ? "required" : "available"}
+        data-sb-update={kind}
       >
         <span className="sb-pill-t">{text}</span>
       </button>
-      {open && pos
+      {open && geo
         ? createPortal(
             <div
               ref={cardRef}
               role="dialog"
               aria-label={title}
-              className={`sb-update-card${closing ? " is-closing" : ""}`}
-              style={{ top: pos.top, left: pos.left, right: pos.right }}
+              className={`sb-update-card${expanded ? " is-open" : ""}`}
+              data-sb-update={kind}
+              style={{
+                top: geo.top,
+                left: geo.left,
+                right: geo.right,
+                width: expanded ? CARD_W : geo.pw,
+                height: expanded ? fullH : geo.ph,
+                borderRadius: expanded ? 16 : geo.ph / 2,
+              }}
             >
-              <p className="sb-update-card-kicker">{kicker}</p>
-              <p className="sb-update-card-ver" dir="ltr">{target.version}</p>
-              <a className="sb-update-card-btn" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
-              <a className="sb-update-card-btn sb-update-card-btn--go" href={target.href} target="_blank" rel="noopener noreferrer">{trp("Update now")}</a>
+              {/* the pill's own word, fading out as the rectangle grows */}
+              <span className="sb-update-ghost" aria-hidden style={{ width: geo.pw, height: geo.ph }}>
+                <span className="sb-pill-t">{text}</span>
+              </span>
+              <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
+                <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
+                  <span className="sb-pill-t">{text}</span>
+                </a>
+                <div className="sb-update-meta">
+                  <span className="sb-update-ver" dir="ltr">v{target.version}</span>
+                  {dateText ? <span className="sb-update-date">· {dateText}</span> : null}
+                  <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
+                </div>
+                {target.items.length > 0 ? (
+                  <div className="sb-update-notes-wrap">
+                    <div ref={notesRef} className="sb-update-notes" tabIndex={0} role="region" aria-label={trp("What's new")} onScroll={syncEdges}>
+                      <ul>
+                        {target.items.map((it, i) => (
+                          <li key={i}>{it}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <span className={`sb-update-fade sb-update-fade--top${edge.top ? " is-on" : ""}`} aria-hidden />
+                    <span className={`sb-update-fade sb-update-fade--bot${edge.bottom ? " is-on" : ""}`} aria-hidden />
+                  </div>
+                ) : null}
+              </div>
             </div>,
             document.body,
           )
