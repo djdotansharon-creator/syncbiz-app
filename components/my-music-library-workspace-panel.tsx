@@ -86,6 +86,22 @@ function IconFolderGlyph({ className }: { className?: string }) {
   );
 }
 
+function IconPlus({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function IconPlay({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" />
+    </svg>
+  );
+}
+
 /** Local-browser placeholder: stacked vinyl + simplified deck silhouette (syncs with slate/cyan UI). */
 function LocalLibraryDeckPlaceholder({ className }: { className?: string }) {
   return (
@@ -258,7 +274,6 @@ function TrackTableRow({
   onDragStartFile,
   isPlayBusy,
   isAddDisabled,
-  index,
 }: TrackTableRowProps): ReactElement {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const [loading, setLoading] = useState(false);
@@ -313,7 +328,6 @@ function TrackTableRow({
   const genre = tags?.genre?.trim() || "";
   const year = tags?.year?.trim() || "";
   const showLoadingHint = loading && !tags;
-  const zebra = index % 2 === 0 ? "bg-slate-900/30" : "bg-slate-900/15";
 
   return (
     <tr
@@ -321,37 +335,30 @@ function TrackTableRow({
       draggable
       onDragStart={(e) => onDragStartFile(e, file.path)}
       onDoubleClick={() => onPlay(file.path)}
-      className={`${zebra} cursor-grab border-b border-slate-800/60 align-middle text-slate-200 transition hover:bg-slate-800/45 active:cursor-grabbing`}
+      className="cursor-grab align-middle transition active:cursor-grabbing"
     >
       <td className="px-3 py-2">
         <MusicLibraryTrackThumb absolutePath={file.path} />
       </td>
-      <td className="max-w-[12rem] truncate px-3 py-2 text-sm" title={artist || undefined}>
-        {artist || <span className="text-slate-600">—</span>}
+      <td className="sb-cp-2 max-w-[12rem] px-3 py-2 text-sm">
+        <div className="sb-cp-clip">{artist || <span className="sb-cp-faint">—</span>}</div>
       </td>
-      <td className="max-w-[18rem] px-3 py-2 text-sm font-medium text-slate-100" title={titleShown}>
-        <div className="truncate">{titleShown}</div>
-        {!titleTagged ? (
-          <div className="truncate font-mono text-[10px] text-slate-600" title={file.name}>
-            {file.name}
-          </div>
-        ) : null}
+      <td className="sb-cp-ink max-w-[18rem] px-3 py-2 text-sm font-medium">
+        <div className="sb-cp-clip">{titleShown}</div>
+        {!titleTagged ? <div className="sb-cp-faint sb-cp-clip font-mono text-[10px]">{file.name}</div> : null}
       </td>
-      <td className="max-w-[10rem] truncate px-3 py-2 text-xs capitalize text-slate-400" title={genre || undefined}>
-        {genre || (showLoadingHint ? <span className="text-slate-600">…</span> : <span className="text-slate-700">—</span>)}
+      <td className="sb-cp-2 max-w-[10rem] px-3 py-2 text-xs capitalize">
+        <div className="sb-cp-clip">{genre || <span className="sb-cp-faint">{showLoadingHint ? "…" : "—"}</span>}</div>
       </td>
-      <td className="px-3 py-2 text-xs tabular-nums text-slate-400">
-        {year || <span className="text-slate-700">—</span>}
-      </td>
-      <td className="px-3 py-2 text-right">
-        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+      <td className="sb-cp-2 px-3 py-2 text-xs tabular-nums">{year || <span className="sb-cp-faint">—</span>}</td>
+      <td className="px-3 py-2 text-end">
+        <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
           {process.env.NODE_ENV !== "production" ? (
             <button
               type="button"
               onClick={() => void inspectRawTagsAndLog(file.path)}
-              title="Inspect raw tags (logs to console)"
               aria-label="Inspect raw tags"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-800/70 bg-slate-950/40 text-[10px] font-semibold text-slate-500 transition hover:border-slate-600 hover:bg-slate-800/60 hover:text-slate-200"
+              className="sb-cp-icon-btn !h-7 !w-7 text-[10px] font-semibold"
             >
               i
             </button>
@@ -360,21 +367,13 @@ function TrackTableRow({
             type="button"
             disabled={isAddDisabled || isPlayBusy}
             onClick={() => onAddToPlaylist(file)}
-            title="Add to Playlist"
             aria-label="Add to Playlist"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-700/70 bg-slate-900/60 text-slate-300 transition hover:border-slate-500 hover:bg-slate-800 hover:text-slate-100 disabled:pointer-events-none disabled:opacity-40"
+            className="sb-cp-icon-btn"
           >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden>
-              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-            </svg>
+            <IconPlus className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            disabled={isPlayBusy}
-            onClick={() => onPlay(file.path)}
-            className="inline-flex h-8 min-w-[3.5rem] items-center justify-center rounded-md border border-cyan-500/40 bg-cyan-900/35 px-2.5 text-[11px] font-semibold text-cyan-100 transition hover:border-cyan-400/55 hover:bg-cyan-800/40 disabled:pointer-events-none disabled:opacity-40"
-          >
-            {isPlayBusy ? "…" : "Play"}
+          <button type="button" disabled={isPlayBusy} onClick={() => onPlay(file.path)} aria-label="Play" className="sb-cp-icon-btn">
+            {isPlayBusy ? <span className="text-xs">…</span> : <IconPlay className="h-4 w-4" />}
           </button>
         </div>
       </td>
@@ -467,19 +466,19 @@ function TrackTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] table-auto border-collapse text-left">
-        <thead className="sticky top-0 z-[1] bg-slate-950/95 backdrop-blur">
-          <tr className="border-b border-slate-800/85 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+      <table className="sb-cp-table w-full min-w-[560px] table-auto border-collapse text-start">
+        <thead>
+          <tr>
             {columns.map((c, i) => (
-              <th key={`${c.label}-${i}`} className={`px-3 py-2 ${c.widthClass ?? ""} ${c.align === "right" ? "text-right" : "text-left"}`}>
+              <th key={`${c.label}-${i}`} className={`px-3 py-2 ${c.widthClass ?? ""} ${c.align === "right" ? "text-end" : "text-start"}`}>
                 {c.key ? (
                   <button
                     type="button"
                     onClick={() => toggleSort(c.key as TrackSortKey)}
-                    className="inline-flex items-center gap-1 text-slate-400 transition hover:text-slate-100"
+                    className="inline-flex items-center gap-1 uppercase transition hover:opacity-80"
                   >
                     {c.label}
-                    <span className="text-[9px] text-slate-500">{sortIndicator(c.key as TrackSortKey)}</span>
+                    <span className="text-[9px]">{sortIndicator(c.key as TrackSortKey)}</span>
                   </button>
                 ) : (
                   c.label
@@ -517,22 +516,6 @@ function IconChevronLeft({ className }: { className?: string }) {
   );
 }
 
-const folderCardClass =
-  "rounded-xl border border-slate-700/40 bg-slate-950/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]";
-
-const ghostBtn =
-  "inline-flex shrink-0 items-center justify-center rounded-md border border-slate-600/50 bg-slate-900/50 px-3 py-1.5 text-[11px] font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-800/60 hover:text-white disabled:pointer-events-none disabled:opacity-40";
-
-const playOutlineBtn =
-  "inline-flex shrink-0 items-center justify-center rounded-md border border-cyan-500/35 bg-cyan-950/35 px-3 py-1.5 text-[11px] font-semibold text-cyan-100/95 transition hover:border-cyan-400/45 hover:bg-cyan-900/35 disabled:pointer-events-none disabled:opacity-40";
-
-const folderCardAccents = ["border-l-cyan-500/45", "border-l-sky-500/45", "border-l-teal-500/40", "border-l-violet-400/38"] as const;
-
-function folderAccentClass(path: string): string {
-  let h = 0;
-  for (let i = 0; i < path.length; i++) h = (h + path.charCodeAt(i) * (i + 3)) % 1009;
-  return folderCardAccents[h % folderCardAccents.length] ?? folderCardAccents[0];
-}
 
 type ListResult =
   | {
@@ -975,55 +958,43 @@ export function MyMusicLibraryWorkspacePanel({
   const listApiMissing = isElectronWithBridge() && !canListMusicLibrary();
 
   return (
-    <div className="sb-anim-rise flex h-full min-h-0 flex-col gap-4 bg-slate-950 p-4 sm:p-5">
-      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-800/70 pb-3">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">My Music Library</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          title="Close"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-700/75 bg-slate-900 text-slate-400 transition hover:border-slate-600 hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/35"
-        >
-          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
+    /* 2026-11-10 (owner): drawn straight on the library page in Ori's language — no panel box, no frames inside frames; colours from
+       app/center-panels.css (`sb-cp`) so the dark / transparent / white looks all apply. Behaviour unchanged. */
+    <div className="sb-cp sb-anim-rise flex h-full min-h-0 flex-col gap-4 px-1 pb-1">
+      <header className="flex shrink-0 items-center justify-between gap-4 pt-1">
+        <div className="min-w-0">
+          <h2 className="sb-cp-title">My Computer</h2>
+          <p className="sb-cp-meta mt-1">Music files on this PC · they stay on this computer</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close" className="sb-cp-icon-btn">
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
           </svg>
         </button>
-      </div>
+      </header>
 
       {webOnly ? (
-        <div className="rounded-xl border border-slate-800/85 bg-slate-900/50 p-6 text-slate-300">
-          <p className="text-base font-semibold text-slate-100">Available in SyncBiz Desktop</p>
-          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
-            Local folder browsing runs in the desktop app on your PC.
-          </p>
-          <a
-            href="/api/desktop/download"
-            className="mt-5 inline-flex items-center justify-center rounded-xl border border-sky-500/40 bg-sky-500/15 px-5 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-400/60 hover:bg-sky-500/25"
-          >
-            Download Desktop
-          </a>
-          <Link
-            href="/settings"
-            className="mt-4 inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200"
-          >
-            Open Settings
-          </Link>
+        <div className="flex flex-col items-start gap-1 py-6">
+          <p className="sb-cp-ink text-base font-semibold">Available in SyncBiz Desktop</p>
+          <p className="sb-cp-2 max-w-md text-sm leading-relaxed">Local folder browsing runs in the desktop app on your PC.</p>
+          <div className="mt-4 flex items-center gap-2">
+            <a href="/api/desktop/download" className="sb-cp-primary">
+              Download Desktop
+            </a>
+            <Link href="/settings" className="sb-cp-act">
+              Open Settings
+            </Link>
+          </div>
         </div>
       ) : listApiMissing ? (
-        <p className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] px-5 py-4 text-sm leading-relaxed text-amber-100/95">
-          Update SyncBiz Desktop to browse your music folder.
-        </p>
+        <p className="sb-cp-2 py-6 text-sm leading-relaxed">Update SyncBiz Desktop to browse your music folder.</p>
       ) : !rootPath ? (
-        <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-700/55 bg-slate-950 px-6 py-14 text-center">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-lg border border-sky-500/20 bg-slate-900/95 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_16px_-2px_rgba(56,189,248,0.18)]">
-            <IconFolderGlyph className="h-8 w-8 text-sky-400/85 drop-shadow-[0_0_6px_rgba(125,211,252,0.35)]" />
-          </div>
-          <p className="max-w-sm text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-            No music folder selected
-          </p>
-          <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-500">
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-14 text-center">
+          <span className="sb-cp-glyph mb-5">
+            <IconFolderGlyph className="h-7 w-7" />
+          </span>
+          <p className="sb-cp-ink max-w-sm text-lg font-semibold sm:text-xl">No music folder selected</p>
+          <p className="sb-cp-2 mt-2 max-w-md text-sm leading-relaxed">
             Choose where your local audio files live. You can change it anytime in Settings.
           </p>
           {canPickMusicFolder() ? (
@@ -1031,19 +1002,14 @@ export function MyMusicLibraryWorkspacePanel({
               type="button"
               disabled={folderPickBusy}
               onClick={() => void chooseMusicFolderFromPanel()}
-              className="mt-7 inline-flex w-full max-w-xs items-center justify-center rounded-lg border border-sky-600/70 bg-sky-700 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-600 disabled:opacity-50"
+              className="sb-cp-primary mt-7"
             >
               {folderPickBusy ? "Opening…" : "Choose Music Folder"}
             </button>
           ) : (
-            <p className="mt-4 max-w-md text-xs text-amber-200/90">
-              Update SyncBiz Desktop to choose a folder from here, or use Settings below.
-            </p>
+            <p className="sb-cp-2 mt-4 max-w-md text-xs">Update SyncBiz Desktop to choose a folder from here, or use Settings below.</p>
           )}
-          <Link
-            href="/settings"
-            className={`inline-flex text-sm font-medium text-slate-400 underline decoration-slate-600 underline-offset-2 transition hover:text-slate-200 ${canPickMusicFolder() ? "mt-4" : "mt-6"}`}
-          >
+          <Link href="/settings" className={`sb-cp-act ${canPickMusicFolder() ? "mt-3" : "mt-5"}`}>
             Open Settings
           </Link>
           {folderPickError ? <p className="mt-3 max-w-md text-xs text-rose-400">{folderPickError}</p> : null}
@@ -1087,87 +1053,54 @@ export function MyMusicLibraryWorkspacePanel({
             tabIndex={-1}
             onChange={onM3uFileInputChange}
           />
-          <nav
-            aria-label="Folder path"
-            className="flex min-w-0 flex-col gap-2 border-b border-slate-800/75 pb-2 sm:flex-row sm:items-stretch sm:gap-3"
-          >
-            <button
-              type="button"
-              disabled={!segments.length}
-              onClick={navigateUp}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-semibold text-slate-100 transition enabled:hover:border-slate-600 enabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35 sm:self-auto"
-            >
-              <IconChevronLeft className="h-4 w-4 text-slate-400" />
+          {/* path bar: quiet Up / Import + the folder trail as plain words (no boxes) */}
+          <nav aria-label="Folder path" className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1">
+            <button type="button" disabled={!segments.length} onClick={navigateUp} className="sb-cp-act -ms-2">
+              <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
               Up
             </button>
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 px-1 text-[13px] font-semibold">
+              {segments.length === 0 ? (
+                <button type="button" onClick={() => navigateToSegment(-1)} className="sb-cp-ink break-all text-start">
+                  {/* Folder NAME only (no drive/location) — customer privacy. */}
+                  {(rootPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Library")}
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="sb-cp-2 shrink-0 hover:underline" onClick={() => navigateToSegment(-1)}>
+                    Root
+                  </button>
+                  {segments.map((seg, i) => (
+                    <span key={`${seg}-${i}`} className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                      <span className="sb-cp-faint" aria-hidden>
+                        /
+                      </span>
+                      <button
+                        type="button"
+                        className={`min-w-0 max-w-full break-all text-start ${i === segments.length - 1 ? "sb-cp-ink" : "sb-cp-2 hover:underline"}`}
+                        onClick={() => navigateToSegment(i)}
+                      >
+                        {seg}
+                      </button>
+                    </span>
+                  ))}
+                </>
+              )}
+            </div>
             {canImportM3u() ? (
               <button
                 type="button"
                 disabled={m3uImportBusy || addFlowBusy}
                 onClick={() => m3uFileInputRef.current?.click()}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-semibold text-slate-100 transition hover:border-slate-600 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
-                title="Import .m3u / .m3u8 / .pls. Only tracks inside your music folder are added."
+                className="sb-cp-act"
               >
                 {m3uImportBusy ? "Importing…" : "Import playlist"}
               </button>
             ) : null}
-            <div
-              className="min-w-0 flex-1 rounded-md border border-slate-800/90 bg-slate-900/55 px-2.5 py-1.5"
-              /* PRIVACY: never expose the drive/location — tooltip shows the
-                 relative in-library path only (subfolder names), no root path. */
-              title={relSubpath ? `Library / ${relSubpath.replace(/\//g, " / ")}` : "Library root"}
-            >
-              <p className="text-[9px] font-medium uppercase tracking-[0.18em] text-slate-600">Location</p>
-              <div className="mt-0.5 font-mono text-xs font-medium leading-snug text-slate-100 sm:text-[0.8125rem] sm:leading-snug">
-                {segments.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => navigateToSegment(-1)}
-                    className="break-all text-left text-sky-300/95 transition hover:text-sky-200"
-                  >
-                    {/* Folder NAME only (no drive/location) — customer privacy. */}
-                    {(rootPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Library")}
-                  </button>
-                ) : (
-                  <span className="flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
-                    <button
-                      type="button"
-                      className="shrink-0 text-sky-300/95 transition hover:text-sky-200"
-                      onClick={() => navigateToSegment(-1)}
-                    >
-                      Root
-                    </button>
-                    {segments.map((seg, i) => (
-                      <span key={`${seg}-${i}`} className="flex min-w-0 flex-wrap items-baseline gap-x-1">
-                        <span className="text-slate-600" aria-hidden>
-                          /
-                        </span>
-                        <button
-                          type="button"
-                          className={`min-w-0 max-w-full break-all text-left ${
-                            i === segments.length - 1 ? "text-slate-100" : "text-sky-300/95 hover:text-sky-200"
-                          } transition`}
-                          onClick={() => navigateToSegment(i)}
-                        >
-                          {seg}
-                        </button>
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </div>
-            </div>
           </nav>
 
           {m3uImportSummary ? (
-            <div
-              className={`rounded-lg border px-3 py-2.5 text-sm ${
-                m3uImportSummary.error
-                  ? "border-rose-500/35 bg-rose-500/[0.06] text-rose-100/95"
-                  : "border-cyan-500/30 bg-cyan-500/[0.07] text-cyan-50/95"
-              }`}
-              role="status"
-            >
+            <div className="sb-cp-soft sb-cp-ink px-3 py-2.5 text-sm" role="status">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <p className="min-w-0 leading-relaxed">
                   <span className="font-semibold">Playlist import:</span> {m3uImportSummary.imported} imported
@@ -1176,14 +1109,10 @@ export function MyMusicLibraryWorkspacePanel({
                     : ""}
                   {m3uImportSummary.skipped > 0 ? ` · ${m3uImportSummary.skipped} skipped (duplicates)` : ""}
                   {m3uImportSummary.error ? (
-                    <span className="mt-1 block text-xs opacity-95">{m3uImportSummary.error}</span>
+                    <span className="mt-1 block text-xs text-rose-400">{m3uImportSummary.error}</span>
                   ) : null}
                   {m3uImportSummary.unresolvedHint ? (
-                    <span
-                      className={`mt-1 block font-mono text-[11px] leading-snug ${
-                        m3uImportSummary.error ? "text-rose-100/75" : "text-cyan-100/70"
-                      }`}
-                    >
+                    <span className="sb-cp-2 mt-1 block font-mono text-[11px] leading-snug">
                       Unresolved query: {m3uImportSummary.unresolvedHint}
                     </span>
                   ) : null}
@@ -1194,26 +1123,23 @@ export function MyMusicLibraryWorkspacePanel({
                       type="button"
                       disabled={m3uImportBusy}
                       onClick={() => setYoutubeResolveOpen(true)}
-                      className="rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                      className="rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold shadow-[0_0_0_1px_rgba(29,185,84,0.35)] transition hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                      style={{ color: "#ffffff" }}
                     >
                       Find missing on YouTube
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="shrink-0 rounded border border-white/15 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90 hover:bg-white/10"
-                    onClick={() => setM3uImportSummary(null)}
-                  >
+                  <button type="button" className="sb-cp-act !py-1 !text-xs" onClick={() => setM3uImportSummary(null)}>
                     Dismiss
                   </button>
                 </div>
               </div>
             </div>
           ) : m3uYoutubeResolveContext?.unresolvedRows.length ? (
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800/85 bg-slate-900/50 px-3 py-2.5 text-sm">
-              <span className="text-slate-300">
+            <div className="sb-cp-soft flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
+              <span className="sb-cp-ink">
                 {m3uYoutubeResolveContext.playlistName}
-                <span className="ml-2 font-mono text-xs text-slate-500">
+                <span className="sb-cp-faint ms-2 font-mono text-xs">
                   ({m3uYoutubeResolveContext.unresolvedRows.length} unresolved)
                 </span>
               </span>
@@ -1221,63 +1147,57 @@ export function MyMusicLibraryWorkspacePanel({
                 type="button"
                 disabled={m3uImportBusy}
                 onClick={() => setYoutubeResolveOpen(true)}
-                className="shrink-0 rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(29,185,84,0.35)] hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                className="shrink-0 rounded-lg bg-gradient-to-b from-[#1ed760]/90 to-[#1db954]/90 px-3 py-1.5 text-xs font-semibold shadow-[0_0_0_1px_rgba(29,185,84,0.35)] hover:from-[#2ee770] hover:to-[#1ed760] disabled:opacity-40"
+                      style={{ color: "#ffffff" }}
               >
                 Find missing on YouTube
               </button>
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-slate-800/90 bg-slate-950">
+          <div className="min-h-0 flex-1 overflow-y-auto pe-1">
             {listLoading || list === null ? (
-              <p className="p-8 text-center text-sm font-medium text-slate-500">Loading…</p>
+              <p className="sb-cp-faint p-8 text-center text-sm font-medium">Loading…</p>
             ) : list.status === "error" ? (
               <p className="p-8 text-center text-sm text-rose-400">{list.message}</p>
             ) : list.status === "no_root" ? (
-              <p className="p-8 text-center text-sm text-slate-500">Could not read folder.</p>
+              <p className="sb-cp-faint p-8 text-center text-sm">Could not read folder.</p>
             ) : list.dirs.length === 0 && list.files.length === 0 ? (
-              <p className="p-8 text-center text-sm font-medium text-slate-500">Empty folder.</p>
+              <p className="sb-cp-faint p-8 text-center text-sm font-medium">Empty folder.</p>
             ) : (
-              <div className="p-3 sm:p-4">
+              <div className="space-y-7 pb-2">
                 {list.dirs.length > 0 ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {list.dirs.map((d) => (
-                      <article
-                        key={d.path}
-                        className={`${folderCardClass} overflow-hidden border-l-[3px] ${folderAccentClass(d.path)}`}
-                      >
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          draggable
-                          onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "folder", path: d.path })}
-                          onClick={() => setRelSubpath([...segments, d.name].join("/"))}
-                          onKeyDown={(ev) => {
-                            if (ev.key === "Enter" || ev.key === " ") {
-                              ev.preventDefault();
-                              setRelSubpath([...segments, d.name].join("/"));
-                            }
-                          }}
-                          className="cursor-pointer px-5 pb-4 pt-5 outline-none transition-colors hover:bg-slate-900/40 active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/35"
-                        >
-                          <div className="flex gap-4">
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-sky-500/22 bg-slate-900/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_0_14px_-2px_rgba(56,189,248,0.22)]">
-                              <IconFolderGlyph className="h-8 w-8 text-sky-300/90 drop-shadow-[0_0_7px_rgba(125,211,252,0.4)]" />
-                            </div>
-                            <div className="min-w-0 flex-1 pt-1">
-                              <p className="text-lg font-semibold leading-snug tracking-tight text-slate-50 sm:text-xl">
-                                {d.name}
-                              </p>
-                              <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-500">
-                                Folder · tap to open
-                              </p>
-                            </div>
+                  <section className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="sb-cp-section">Folders</h3>
+                      <span className="sb-cp-meta tabular-nums">{list.dirs.length}</span>
+                    </div>
+                    {/* a folder = one row like the library's "Contributors" row: glyph · name · meta · quiet actions — no card, no inner frame */}
+                    <div className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                      {list.dirs.map((d) => (
+                        <article key={d.path} className="sb-cp-row sb-cp-hit flex items-center gap-1 pe-1.5">
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            draggable
+                            onDragStart={(e) => setMusicLibraryDragData(e.dataTransfer, { kind: "folder", path: d.path })}
+                            onClick={() => setRelSubpath([...segments, d.name].join("/"))}
+                            onKeyDown={(ev) => {
+                              if (ev.key === "Enter" || ev.key === " ") {
+                                ev.preventDefault();
+                                setRelSubpath([...segments, d.name].join("/"));
+                              }
+                            }}
+                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 p-2 outline-none active:cursor-grabbing"
+                          >
+                            <span className="sb-cp-glyph">
+                              <IconFolderGlyph className="h-6 w-6" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="sb-cp-ink sb-cp-clip block text-[15px] font-semibold">{d.name}</span>
+                              <span className="sb-cp-faint mt-0.5 block text-[11px]">Folder</span>
+                            </span>
                           </div>
-                        </div>
-                        <div
-                          className="flex flex-wrap gap-1.5 border-t border-slate-800/80 px-5 py-2.5"
-                          onClick={(ev) => ev.stopPropagation()}
-                        >
                           <button
                             type="button"
                             disabled={scanBusy === d.path || addFlowBusy}
@@ -1285,9 +1205,10 @@ export function MyMusicLibraryWorkspacePanel({
                               ev.stopPropagation();
                               openAddModal({ kind: "folder", path: d.path, defaultName: d.name });
                             }}
-                            className={ghostBtn}
+                            aria-label={`Add ${d.name} to a playlist`}
+                            className="sb-cp-icon-btn"
                           >
-                            Add to Playlist
+                            <IconPlus className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
@@ -1296,25 +1217,26 @@ export function MyMusicLibraryWorkspacePanel({
                               ev.stopPropagation();
                               void scanAndPlayFolder(d.path);
                             }}
-                            className={playOutlineBtn}
+                            aria-label={`Play ${d.name}`}
+                            className="sb-cp-icon-btn"
                           >
-                            {scanBusy === d.path ? "…" : "Play"}
+                            {scanBusy === d.path ? <span className="text-xs">…</span> : <IconPlay className="h-4 w-4" />}
                           </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
                 ) : null}
 
                 {list.files.length > 0 ? (
-                  <div className={list.dirs.length > 0 ? "mt-6" : ""}>
-                    <div className="mb-3 flex items-baseline justify-between gap-3 px-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Tracks</p>
-                      <p className="text-[10px] font-medium text-slate-600">
+                  <section className="space-y-2">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <h3 className="sb-cp-section">Tracks</h3>
+                      <span className="sb-cp-meta text-[11px]">
                         {list.files.length} track{list.files.length === 1 ? "" : "s"} · double-click to play
-                      </p>
+                      </span>
                     </div>
-                    <div className="overflow-hidden rounded-lg border border-slate-800/85 bg-slate-950/65">
+                    <div>
                       <TrackTable
                         files={list.files}
                         scanBusyPath={scanBusy}
@@ -1326,12 +1248,12 @@ export function MyMusicLibraryWorkspacePanel({
                         onDragStartFile={(e, p) => setMusicLibraryDragData(e.dataTransfer, { kind: "file", path: p })}
                       />
                     </div>
-                  </div>
+                  </section>
                 ) : null}
               </div>
             )}
           </div>
-          <p className="text-center text-[11px] text-slate-600">
+          <p className="sb-cp-faint text-center text-[11px]">
             Drag to player or Drop Next: temporary playback only · Add to Playlist saves to your library · files stay local
             {canImportM3u()
               ? " · Drop .m3u / .m3u8 / .pls here to import (tracks must be under your music folder)"
@@ -1340,6 +1262,9 @@ export function MyMusicLibraryWorkspacePanel({
         </div>
       )}
 
+      {/* The two pop-up dialogs stay dark cards in every look. `contents` draws no box; the class pair is the one app/white-look.css already
+          leaves alone (`.sb-anim-rise[class*="bg-slate-950"]`), so the white look does not turn their light text dark on their dark card. */}
+      <div className="sb-anim-rise bg-slate-950 contents">
       {addModalTarget ? (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
@@ -1538,6 +1463,7 @@ export function MyMusicLibraryWorkspacePanel({
           onApplied={handleYoutubeResolveApplied}
         />
       ) : null}
+      </div>
     </div>
   );
 }

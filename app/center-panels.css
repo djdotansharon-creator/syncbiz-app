@@ -1,0 +1,121 @@
+/* ── Center-monitor panels in the library's own language (owner 2026-11-10: "the Royalty-Free bank and My Computer should look like Ori's
+   library — same language, fewer frames inside frames, and the player's transparency / screen-colour rules apply to them too").
+   Used by components/royalty-free-music-workspace-panel.tsx and components/my-music-library-workspace-panel.tsx (class prefix `sb-cp`).
+   - No panel box: the panel is drawn straight on the library page, like a playlist page (title, quiet meta, section titles, tiles).
+   - Colours come ONLY from the tokens below, never from Tailwind text-white / text-slate classes, so the white look (app/white-look.css)
+     never has to guess: dark looks = light ink, white look = dark ink, "song" (transparent) look = light ink with the player's text shadow.
+   - Text over a picture (a pack's art) is always white — it sits on the picture, not on the page.
+   - Hover / keyboard focus: one thin 1px line, like every library tile (globals.css "The Player screen has NO resting frames").
+   - No backdrop blur, no endless animation (cheap in Light graphics). ── */
+
+.sb-cp {
+  --cp-ink: #f5f5f7;
+  --cp-2: rgba(235, 235, 245, 0.64);
+  --cp-3: rgba(235, 235, 245, 0.42);
+  --cp-soft: rgba(255, 255, 255, 0.05);
+  --cp-soft-2: rgba(255, 255, 255, 0.09);
+  --cp-line: rgba(255, 255, 255, 0.08);
+  --cp-focus: rgba(255, 255, 255, 0.62);
+  --cp-accent: #0a84ff;
+  --cp-accent-ink: #64a8ff;
+  color: var(--cp-ink);
+  background: transparent;
+}
+html[data-sb-display="song"] .sb-cp { --cp-soft: rgba(0, 0, 0, 0.26); --cp-soft-2: rgba(0, 0, 0, 0.36); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55); }
+html[data-sb-display="white"] .sb-cp {
+  --cp-ink: #1c1c1e;
+  --cp-2: rgba(28, 28, 30, 0.62);
+  --cp-3: rgba(28, 28, 30, 0.46);
+  --cp-soft: rgba(255, 255, 255, 0.55);
+  --cp-soft-2: rgba(255, 255, 255, 0.82);
+  --cp-line: rgba(0, 0, 0, 0.08);
+  --cp-focus: rgba(28, 28, 30, 0.42);
+  --cp-accent-ink: #0a6fd8;
+  text-shadow: none;
+}
+
+/* type */
+.sb-cp-title { color: var(--cp-ink); font-weight: 700; font-size: 20px; letter-spacing: 0.04em; line-height: 1.2; }
+.sb-cp-meta { color: var(--cp-2); font-size: 12px; }
+.sb-cp-faint { color: var(--cp-3); }
+.sb-cp-ink { color: var(--cp-ink); }
+.sb-cp-2 { color: var(--cp-2); }
+.sb-cp-accent { color: var(--cp-accent-ink); }
+.sb-cp-section {
+  color: var(--cp-ink);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", inherit;
+}
+
+/* one-line clip — NOT Tailwind's `truncate`, which the white look turns to ink everywhere in the library (white-look.css), even on a picture */
+.sb-cp-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* quiet actions: text + icon, no frame; a soft pill only on hover */
+.sb-cp-act {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 9999px; padding: 6px 10px;
+  color: var(--cp-2); font-size: 13px; font-weight: 600;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+.sb-cp-act:hover:not(:disabled) { color: var(--cp-ink); background: var(--cp-soft); }
+.sb-cp-act:disabled { opacity: 0.4; cursor: not-allowed; }
+.sb-cp-act.is-on { color: var(--cp-ink); background: var(--cp-soft-2); }
+.sb-cp-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 9999px; color: var(--cp-2);
+  transition: color 150ms ease, background-color 150ms ease;
+}
+.sb-cp-icon-btn:hover:not(:disabled) { color: var(--cp-ink); background: var(--cp-soft); }
+.sb-cp-icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* the one solid button (a primary action) */
+.sb-cp-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 9999px; padding: 8px 16px;
+  background: var(--cp-ink); color: #101014; font-size: 13px; font-weight: 700; text-shadow: none;
+  transition: opacity 150ms ease;
+}
+html[data-sb-display="white"] .sb-cp-primary { color: #ffffff; }
+.sb-cp-primary:hover:not(:disabled) { opacity: 0.88; }
+.sb-cp-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* filter tabs — the library's chips row: plain words, the chosen one in full ink */
+.sb-cp-tab { flex-shrink: 0; white-space: nowrap; padding: 4px 2px; font-size: 13px; font-weight: 600; color: var(--cp-3); transition: color 150ms ease; }
+.sb-cp-tab:hover { color: var(--cp-2); }
+.sb-cp-tab.is-on { color: var(--cp-ink); }
+
+/* a soft surface (one level only — never a frame inside a frame) */
+.sb-cp-soft { background: var(--cp-soft); border-radius: 14px; }
+
+/* hover / focus: the library's single thin line */
+.sb-cp-hit { outline: 1px solid transparent; outline-offset: -1px; transition: outline-color 150ms ease, background-color 150ms ease; }
+.sb-cp-hit:is(:hover, :focus-visible) { outline-color: var(--cp-focus); }
+
+/* a row in a list (folders, tracks): no box at rest, a soft fill on hover */
+.sb-cp-row { border-radius: 12px; transition: background-color 150ms ease; }
+.sb-cp-row:hover { background: var(--cp-soft); }
+.sb-cp-row.is-on { background: var(--cp-soft-2); }
+
+/* a tile with a picture: rounded art, words on a dark fog at the bottom (like the library cards) */
+.sb-cp-tile { position: relative; overflow: hidden; border-radius: 12px; isolation: isolate; text-shadow: none; }
+.sb-cp-tile-fog { position: absolute; inset: auto 0 0 0; z-index: 1; padding: 2.25rem 0.85rem 0.7rem; background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.62) 55%, rgba(0, 0, 0, 0.25) 82%, transparent 100%); }
+.sb-cp-on-art { color: #ffffff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.sb-cp-on-art-2 { color: rgba(255, 255, 255, 0.82); }
+.sb-cp-badge { position: absolute; left: 10px; top: 9px; z-index: 1; color: #ffffff; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); }
+
+/* folder glyph tile (the library's "Contributors" row icon) */
+.sb-cp-glyph { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 52px; height: 52px; border-radius: 10px; background: var(--cp-soft-2); color: var(--cp-accent-ink); }
+
+/* track table: no frame, no zebra, a quiet line between rows */
+.sb-cp-table th { color: var(--cp-3); font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; }
+.sb-cp-table tbody tr { border-bottom: 1px solid var(--cp-line); }
+.sb-cp-table tbody tr:hover { background: var(--cp-soft); }
+
+/* scrollbars like the library: thumb only */
+.sb-cp ::-webkit-scrollbar { width: 8px; height: 8px; }
+.sb-cp ::-webkit-scrollbar-track { background: transparent; }
+.sb-cp ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 9999px; }
+html[data-sb-display="white"] .sb-cp ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); }
+.sb-cp ::-webkit-scrollbar-button { display: none; height: 0; }

@@ -192,43 +192,45 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   const totalSamples = catalog.totalTracks;
 
+  /* 2026-11-10 (owner): drawn straight on the library page in Ori's language — no panel box, quiet actions, section titles,
+     picture tiles; colours from app/center-panels.css (`sb-cp`) so the dark / transparent / white looks all apply. */
   return (
-    <div className="sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c0f] text-[#f5f5f7]">
-      {/* Header */}
-      <header className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#0a84ff]/15 text-[#7db8ff]"><PlayIcon className="h-3 w-3" /></span>
-          <h2 className="text-sm font-semibold tracking-tight">Royalty-Free Music</h2>
-          <span className="hidden text-xs text-[#6b6b70] sm:inline">· {genres.length} Genre Packs · {totalSamples} samples</span>
+    <div className="sb-cp sb-anim-rise flex max-h-[min(85vh,760px)] w-full min-h-0 flex-col gap-4 px-1 pb-1">
+      {/* Header — like a playlist page: title + quiet meta, quiet actions on the end side */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="min-w-0">
+          <h2 className="sb-cp-title">Royalty-Free Music</h2>
+          <p className="sb-cp-meta mt-1">{genres.length} Genre Packs · {totalSamples} samples</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {/* Stage A A/B toggle (dev): Stream = SyncBiz HTTPS media transport; Local = preview-cache path. */}
-          <div className="inline-flex overflow-hidden rounded-md border border-white/[0.1] text-[11px]">
-            {(["stream", "local"] as PlaybackMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setPlaybackMode(m)}
-                className={`px-2.5 py-1 font-medium transition ${playbackMode === m ? "bg-[#0a84ff] text-white" : "text-[#a1a1a6] hover:text-[#f5f5f7]"}`}
-                title={m === "stream" ? "SyncBiz HTTPS media streaming" : "Local preview cache (POC)"}
-              >
-                {m === "stream" ? "Stream" : "Local"}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={onClose} className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs text-[#a1a1a6] transition hover:border-white/20 hover:text-[#f5f5f7]">Close</button>
+          {(["stream", "local"] as PlaybackMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setPlaybackMode(m)}
+              aria-pressed={playbackMode === m}
+              className={`sb-cp-act${playbackMode === m ? " is-on" : ""}`}
+            >
+              {m === "stream" ? "Stream" : "Local"}
+            </button>
+          ))}
+          <button type="button" onClick={onClose} aria-label="Close" className="sb-cp-icon-btn ms-1">
+            <CloseIcon className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
-      {/* Genre navigation — dynamic, horizontal scroll */}
-      <nav className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-white/[0.06] px-4 py-2 [scrollbar-width:thin]">
+      {/* Genre navigation — the library's chips row: plain words */}
+      <nav className="flex shrink-0 items-center gap-5 overflow-x-auto [scrollbar-width:none]">
         <GenreNavPill label="All" active={view === "all"} onClick={() => setView("all")} />
         {genres.map((g) => (
           <GenreNavPill key={g.id} label={g.name} active={view === g.id} onClick={() => setView(g.id)} />
         ))}
       </nav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* key = the view: a pack (or All) always opens at its top, not where the previous view was scrolled to */}
+      <div key={view} className="min-h-0 flex-1 overflow-y-auto pe-1">
         {selectedGenre ? (
           <GenreDetail
             genre={selectedGenre}
@@ -247,15 +249,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   );
 }
 
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
 function GenreNavPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition ${
-        active ? "bg-[#0a84ff] text-white" : "border border-white/[0.08] text-[#a1a1a6] hover:border-white/20 hover:text-[#f5f5f7]"
-      }`}
-    >
+    <button type="button" onClick={onClick} aria-pressed={active} className={`sb-cp-tab${active ? " is-on" : ""}`}>
       {label}
     </button>
   );
@@ -278,70 +282,83 @@ function CatalogHome({
   notPlayableHint: string | null;
 }) {
   return (
-    <>
-      {/* Genre Packs */}
-      <div className="grid grid-cols-1 gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3">
-        {genres.map((genre) => {
-          const total = totalDuration(genre.tracks);
-          return (
-            <div key={genre.id} className="group flex flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.015] transition hover:border-white/20 hover:shadow-[0_16px_40px_-24px_rgba(0,0,0,0.85)]">
-              <button type="button" onClick={() => onOpen(genre.id)} className="relative flex aspect-[16/10] items-end p-3.5 text-left">
-                <GenreCover genre={genre} />
-                <span className="absolute left-3 top-3 rounded-full bg-black/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/85 backdrop-blur-sm">Genre Pack</span>
-                <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white opacity-0 backdrop-blur-sm transition group-hover:opacity-100"><PlayIcon className="h-3.5 w-3.5" /></span>
-                <div className="relative">
-                  <h3 className="text-lg font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h3>
-                  <p className="mt-0.5 text-[11px] font-medium text-white/85">
-                    {genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}
-                  </p>
-                </div>
-              </button>
-              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <button type="button" onClick={() => onOpen(genre.id)} className="text-xs font-medium text-[#0a84ff] transition hover:text-[#7db8ff]">Listen to samples →</button>
-                <span className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold tabular-nums text-[#f5f5f7]">{GENRE_PRICE_LABEL}</span>
-                  <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-md border border-white/[0.12] px-2.5 py-1 text-[11px] font-semibold text-[#8a8a8f]">Unlock</button>
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Subscription bundles: build-your-own 3, or the Full Music Bank (best value). */}
-      <section className="mx-4 mb-2 grid gap-3 sm:grid-cols-5">
-        {/* CHOICE 1 — Choose 3 Genre Packs */}
-        <div className="flex flex-col justify-between rounded-xl border border-white/[0.1] bg-white/[0.02] p-5 sm:col-span-2">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#a1a1a6]">Build your bundle</p>
-            <h3 className="mt-1 text-lg font-semibold tracking-tight text-[#f5f5f7]">Choose {CHOICE3_PACK_COUNT} Genre Packs</h3>
-            <p className="mt-1 text-sm text-[#a1a1a6]">Any {CHOICE3_PACK_COUNT} packs — your pick.</p>
-          </div>
-          <div className="mt-5 flex items-baseline justify-between gap-3">
-            <span className="text-xl font-bold tabular-nums text-[#f5f5f7]">{CHOICE3_PRICE_LABEL}</span>
-            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-[#c7c7cc]">Unlock</button>
-          </div>
+    <div className="space-y-7 pb-3">
+      {/* Genre Packs — picture tiles like the library cards; price + Unlock under the picture, no box around them */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="sb-cp-section">Genre Packs</h3>
+          <span className="sb-cp-meta tabular-nums">{genres.length}</span>
         </div>
-
-        {/* CHOICE 2 — Full Music Bank, BEST VALUE (hero treatment) */}
-        <div className="relative flex flex-col justify-between overflow-hidden rounded-xl border-2 border-[#0a84ff]/55 bg-gradient-to-br from-[#0a84ff]/[0.18] via-[#4a2b8c]/[0.12] to-[#7a2f8c]/[0.18] p-5 shadow-[0_0_0_1px_rgba(10,132,255,0.25),0_28px_60px_-28px_rgba(10,132,255,0.65)] sm:col-span-3">
-          <div className="absolute inset-0 opacity-[0.35]" style={{ background: "radial-gradient(120% 80% at 88% 0%, rgba(10,132,255,0.40), transparent 60%)" }} aria-hidden="true" />
-          <span className="absolute right-4 top-4 rounded-full bg-[#0a84ff] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white shadow">Best value</span>
-          <div className="relative min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-[#7db8ff]">Everything, one subscription</p>
-            <h3 className="mt-1 text-xl font-semibold tracking-tight text-[#f5f5f7]">Full Music Bank</h3>
-            <p className="mt-1 text-sm text-[#c7c7cc]">All {genres.length} Genre Packs · {totalSamples} samples.</p>
-          </div>
-          <div className="relative mt-5 flex items-center justify-between gap-3">
-            <span className="text-3xl font-bold tabular-nums text-white">{FULL_BANK_PRICE_LABEL}</span>
-            <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg bg-[#0a84ff] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[#0a84ff]/30">Unlock Full Music Bank</button>
-          </div>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-x-3 gap-y-4">
+          {genres.map((genre) => {
+            const total = totalDuration(genre.tracks);
+            return (
+              <div key={genre.id} className="group flex flex-col gap-2">
+                <button type="button" onClick={() => onOpen(genre.id)} className="sb-cp-tile sb-cp-hit block aspect-[16/9] w-full text-start" aria-label={`Open ${genre.name}`}>
+                  <GenreCover genre={genre} />
+                  <span className="sb-cp-badge">Genre Pack</span>
+                  <span className="absolute end-2.5 top-2 z-[1] inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/40 opacity-0 transition group-hover:opacity-100" style={{ color: "#ffffff" }}>
+                    <PlayIcon className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="sb-cp-tile-fog block">
+                    <span className="sb-cp-on-art sb-cp-clip block text-[17px] font-bold leading-tight">{genre.name}</span>
+                    <span className="sb-cp-on-art-2 mt-0.5 block text-[11px] font-medium">
+                      {genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}
+                    </span>
+                  </span>
+                </button>
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <button type="button" onClick={() => onOpen(genre.id)} className="sb-cp-accent whitespace-nowrap text-xs font-semibold hover:underline">
+                    Listen to samples
+                  </button>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="sb-cp-ink text-sm font-semibold tabular-nums">{GENRE_PRICE_LABEL}</span>
+                    <button type="button" disabled title="Coming soon" className="sb-cp-act !px-2 !py-0.5 !text-[11px]">Unlock</button>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
-      <p className="mx-4 mb-5 text-[11px] text-[#8a8a8f]">Proposed monthly pricing for the demo. Payments &amp; entitlements coming soon; samples preview now and are not marked Offline Ready.</p>
 
-      {notPlayableHint ? <p className="px-5 pb-5 text-[11px] text-[#6b6b70]">{notPlayableHint}</p> : null}
-    </>
+      {/* Subscription bundles — one soft surface each, no borders, no glow */}
+      <section className="space-y-3">
+        <h3 className="sb-cp-section">Bundles</h3>
+        <div className="grid gap-3 sm:grid-cols-5">
+          {/* CHOICE 1 — Choose 3 Genre Packs */}
+          <div className="sb-cp-soft flex flex-col justify-between p-5 sm:col-span-2">
+            <div>
+              <p className="sb-cp-meta text-[11px] font-semibold uppercase tracking-[0.14em]">Build your bundle</p>
+              <p className="sb-cp-ink mt-1 text-lg font-bold">Choose {CHOICE3_PACK_COUNT} Genre Packs</p>
+              <p className="sb-cp-2 mt-1 text-sm">Any {CHOICE3_PACK_COUNT} packs — your pick.</p>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <span className="sb-cp-ink text-xl font-bold tabular-nums">{CHOICE3_PRICE_LABEL}</span>
+              <button type="button" disabled title="Coming soon" className="sb-cp-act">Unlock</button>
+            </div>
+          </div>
+
+          {/* CHOICE 2 — Full Music Bank, best value: the same soft surface, a quiet blue word instead of a glowing frame */}
+          <div className="sb-cp-soft flex flex-col justify-between p-5 sm:col-span-3">
+            <div className="min-w-0">
+              <p className="sb-cp-accent text-[11px] font-semibold uppercase tracking-[0.14em]">Best value · everything, one subscription</p>
+              <p className="sb-cp-ink mt-1 text-xl font-bold">Full Music Bank</p>
+              <p className="sb-cp-2 mt-1 text-sm">All {genres.length} Genre Packs · {totalSamples} samples.</p>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <span className="sb-cp-ink text-3xl font-bold tabular-nums">{FULL_BANK_PRICE_LABEL}</span>
+              <button type="button" disabled title="Coming soon" className="sb-cp-primary">Unlock Full Music Bank</button>
+            </div>
+          </div>
+        </div>
+        <p className="sb-cp-faint px-1 text-[11px]">
+          Proposed monthly pricing for the demo. Payments &amp; entitlements coming soon; samples preview now and are not marked Offline Ready.
+        </p>
+      </section>
+
+      {notPlayableHint ? <p className="sb-cp-faint px-1 text-[11px]">{notPlayableHint}</p> : null}
+    </div>
   );
 }
 
@@ -365,62 +382,75 @@ function GenreDetail({
   const total = totalDuration(genre.tracks);
   const genrePlayable = genre.tracks.some((t) => trackPlayable(t.id));
   return (
-    <>
-      {/* Genre header */}
-      <section className="relative overflow-hidden px-5 py-5">
-        <GenreCover genre={genre} />
-        <div className="absolute inset-0 bg-black/25" aria-hidden="true" />
-        <div className="relative">
-          <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1 rounded-md border border-white/25 px-2.5 py-1 text-xs text-white/90 transition hover:bg-white/10">
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+    <div className="space-y-6 pb-3">
+      {/* Pack header — like a playlist page: cover + title + meta + actions, no box */}
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="sb-cp-tile aspect-[16/9] w-full shrink-0 sm:w-64">
+          <GenreCover genre={genre} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={onBack} className="sb-cp-act -ms-2 mb-1">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 rtl:rotate-180" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
             All genres
           </button>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80">Genre Pack</p>
-          <h1 className="mt-0.5 text-2xl font-semibold leading-tight tracking-tight text-white drop-shadow">{genre.name}</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-white/85">{genre.description}</p>
-          <p className="mt-1.5 text-[11px] font-medium text-white/75">{genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <p className="sb-cp-meta text-[11px] font-semibold uppercase tracking-[0.14em]">Genre Pack</p>
+          <h3 className="sb-cp-title mt-0.5">{genre.name}</h3>
+          <p className="sb-cp-2 mt-1 max-w-2xl text-sm leading-relaxed">{genre.description}</p>
+          <p className="sb-cp-faint mt-1 text-[11px] font-medium">
+            {genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {/* Single CTA — plays the pack's FULL sample set through the existing playlist queue. */}
-            <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#101014] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-white/60">
+            <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="sb-cp-primary">
               <PlayIcon className="h-3.5 w-3.5" />
               Listen to Samples
             </button>
             <span className="ms-auto flex items-center gap-2">
-              <span className="text-lg font-bold tabular-nums text-white">{GENRE_PRICE_LABEL}</span>
-              <button type="button" disabled title="Coming soon" className="cursor-not-allowed rounded-lg border border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">Unlock Genre Pack</button>
+              <span className="sb-cp-ink text-lg font-bold tabular-nums">{GENRE_PRICE_LABEL}</span>
+              <button type="button" disabled title="Coming soon" className="sb-cp-act">Unlock Genre Pack</button>
             </span>
           </div>
         </div>
       </section>
 
-      {notPlayableHint ? <p className="px-5 pt-3 text-[11px] text-[#6b6b70]">{notPlayableHint}</p> : null}
+      {notPlayableHint ? <p className="sb-cp-faint text-[11px]">{notPlayableHint}</p> : null}
 
-      {/* Dense track list */}
-      <ul className="px-2 py-2">
-        {genre.tracks.map((track, i) => {
-          const isPlayable = trackPlayable(track.id);
-          const active = nowPlaying?.genreId === genre.id && nowPlaying?.trackId === track.id;
-          return (
-            <li key={track.id} className={`group flex items-center gap-3 rounded-md px-2.5 py-1.5 transition ${active ? "bg-[#0a84ff]/12" : "hover:bg-white/[0.03]"}`}>
-              <span className={`w-5 shrink-0 text-right text-[11px] tabular-nums ${active ? "text-[#7db8ff]" : "text-[#5a5a5f]"}`}>{i + 1}</span>
-              <button
-                type="button"
-                disabled={!isPlayable}
-                onClick={() => onPlayTrack(track)}
-                className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded text-white transition disabled:cursor-not-allowed"
-                style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)` }}
-                aria-label={`Play ${track.title}`}
-              >
-                <span className={`absolute inset-0 transition ${isPlayable ? "bg-black/30 group-hover:bg-black/10" : "bg-black/55"}`} />
-                <PlayIcon className={`relative h-3.5 w-3.5 ${isPlayable ? "" : "opacity-40"}`} />
-              </button>
-              <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-medium text-[#f5f5f7]" : "text-[#d1d1d6]"}`}>{track.title}</span>
-              {active ? <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#7db8ff]">Playing</span> : null}
-              <span className="shrink-0 text-xs tabular-nums text-[#8a8a8f]">{typeof track.durationSeconds === "number" ? formatDuration(track.durationSeconds) : "—"}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </>
+      {/* Samples — a plain list: no box, a soft fill under the row you point at or the one playing */}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="sb-cp-section">Samples</h3>
+          <span className="sb-cp-meta tabular-nums">{genre.tracks.length}</span>
+        </div>
+        <ul>
+          {genre.tracks.map((track, i) => {
+            const isPlayable = trackPlayable(track.id);
+            const active = nowPlaying?.genreId === genre.id && nowPlaying?.trackId === track.id;
+            return (
+              <li key={track.id} className={`sb-cp-row group flex items-center gap-3 px-2.5 py-1.5${active ? " is-on" : ""}`}>
+                <span className={`w-5 shrink-0 text-end text-[11px] tabular-nums ${active ? "sb-cp-accent" : "sb-cp-faint"}`}>{i + 1}</span>
+                <button
+                  type="button"
+                  disabled={!isPlayable}
+                  onClick={() => onPlayTrack(track)}
+                  className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md transition disabled:cursor-not-allowed"
+                  style={{ backgroundImage: `linear-gradient(140deg, ${genre.gradient[0]} 0%, ${genre.gradient[1]} 100%)`, color: "#ffffff" }}
+                  aria-label={`Play ${track.title}`}
+                >
+                  <span className={`absolute inset-0 transition ${isPlayable ? "bg-black/30 group-hover:bg-black/10" : "bg-black/55"}`} />
+                  <PlayIcon className={`relative h-3.5 w-3.5 ${isPlayable ? "" : "opacity-40"}`} />
+                </button>
+                <span className={`sb-cp-ink sb-cp-clip flex-1 text-sm${active ? " font-semibold" : ""}`}>{track.title}</span>
+                {active ? <span className="sb-cp-accent shrink-0 text-[10px] font-bold uppercase tracking-wide">Playing</span> : null}
+                <span className="sb-cp-faint shrink-0 text-xs tabular-nums">
+                  {typeof track.durationSeconds === "number" ? formatDuration(track.durationSeconds) : "—"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </div>
   );
 }
