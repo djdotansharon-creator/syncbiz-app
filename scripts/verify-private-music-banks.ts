@@ -1,0 +1,102 @@
+/**
+ * 2026-11-10 (owner): PRIVATE music banks — a bank (first: "All Day Mix", the Shufersal songs) shows and plays ONLY for the
+ * businesses the platform owner opened it to in Platform → Businesses. Checks the server lock, that the song list never ships
+ * to the browser, the additive migration, the admin routes, and the catalog wiring.
+ * Run: npx tsx scripts/verify-private-music-banks.ts
+ */
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import Module from "node:module";
+import os from "node:os";
+import path from "node:path";
+
+// `server-only` is a Next.js build marker (not an npm package here) — stand in an empty module so the real access logic loads.
+const stub = path.join(os.tmpdir(), "vono-server-only-stub.cjs");
+writeFileSync(stub, "module.exports = {};\n");
+const M = Module as unknown as { _resolveFilename: (req: string, ...rest: unknown[]) => string };
+const origResolve = M._resolveFilename;
+M._resolveFilename = function (req: string, ...rest: unknown[]) {
+  return req === "server-only" ? stub : origResolve.call(this, req, ...rest);
+};
+
+let pass = 0, fail = 0;
+function assert(name: string, cond: boolean): void {
+  console.log(`${cond ? "PASS" : "FAIL"}  ${name}`);
+  if (cond) pass++; else { fail++; process.exitCode = 1; }
+}
+const root = path.join(__dirname, "..");
+const read = (p: string) => readFileSync(path.join(root, p), "utf-8").replace(/\r\n/g, "\n");
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const n of readdirSync(path.join(root, dir))) {
+    const rel = path.join(dir, n);
+    if (/node_modules|\.next/.test(rel)) continue;
+    if (statSync(path.join(root, rel)).isDirectory()) walk(rel, out);
+    else if (/\.(tsx?|jsx?)$/.test(n)) out.push(rel);
+  }
+  return out;
+}
+
+async function main() {
+  // P1 — the song list never reaches the browser bundle
+  const clientFiles = [...walk("components"), ...walk("app"), ...walk("lib")].filter((f) => /^\s*["']use client["']/.test(read(f)));
+  // an import (static or dynamic) of the module — not the API path "/api/music-bank/private-banks" a client may fetch
+  const leaking = clientFiles.filter((f) => /(from|import)\s*\(?\s*["'][^"']*lib\/music-bank\/(shufersal-demo-catalog|private-banks|bank-access)["']/.test(read(f)));
+  assert(`P1 no client file imports the private song list (${clientFiles.length} client files checked)`, leaking.length === 0);
+  assert("P2 the private registry and the access check are server-only",
+    /import "server-only";/.test(read("lib/music-bank/private-banks.ts")) && /import "server-only";/.test(read("lib/music-bank/bank-access.ts")));
+
+  // P3 — the lock is in the media token: a business without a grant never gets the bank's genre
+  const { scopeGenres, isGrantLive } = await import("../lib/music-bank/bank-access");
+  const { PRIVATE_BANKS, privateBankById } = await import("../lib/music-bank/private-banks");
+  const ready = ["jazz", "dance", "shufersal-demo"];
+  assert("P3a no grant → the private genre is removed, every public genre stays", JSON.stringify(scopeGenres(ready, [])) === JSON.stringify(["jazz", "dance"]));
+  assert("P3b a grant for All Day Mix → its genre is in the token", JSON.stringify(scopeGenres(ready, ["all-day-mix"])) === JSON.stringify(ready));
+  assert("P3c an unknown bank id opens nothing", JSON.stringify(scopeGenres(ready, ["nope"])) === JSON.stringify(["jazz", "dance"]));
+  const now = new Date("2026-11-10T12:00:00Z");
+  assert("P3d a grant with no end date is live; a past end date is not; a future one is",
+    isGrantLive({ expiresAt: null }, now) && !isGrantLive({ expiresAt: new Date("2026-11-09T00:00:00Z") }, now) && isGrantLive({ expiresAt: new Date("2026-12-01T00:00:00Z") }, now));
+  const auth = read("app/api/music-bank/authorize/route.ts");
+  assert("P3e the authorize route (station + signed-in person) scopes the token by the business's open banks",
+    /accessiblePrivateBanks\(station \? \{ workspaceId: station\.workspaceId, userId: null \} : \{ workspaceId: user!\.tenantId \?\? null, userId: user!\.id \}\)/.test(auth)
+    && /const allowedGenres = scopeGenres\(\[\.\.\.new Set\(\[\.\.\.dbGenres, \.\.\.pocGenres\]\)\], openBanks\.map\(\(b\) => b\.id\)\);/.test(auth));
+  assert("P3f /api/media still refuses a genre that is not in the token (unchanged scope check)", /allowedGenres/.test(read("app/api/media/[assetId]/route.ts")));
+  const access = read("lib/music-bank/bank-access.ts");
+  assert("P3g a failed grant lookup closes private banks only (never throws, public catalog unaffected)", /catch \(e\) \{[\s\S]*?private banks closed[\s\S]*?return \[\];/.test(access));
+
+  // P4 — All Day Mix = the 100 Shufersal songs, mixed
+  const mix = privateBankById("all-day-mix");
+  const { SHUFERSAL_DEMO_TRACKS } = await import("../lib/music-bank/shufersal-demo-catalog");
+  assert("P4 All Day Mix holds all 100 songs once each, in a mixed order", !!mix && mix.tracks.length === 100 && new Set(mix.tracks.map((t) => t.id)).size === 100
+    && mix.tracks.map((t) => t.id).join() !== SHUFERSAL_DEMO_TRACKS.map((t) => t.id).join() && mix.genreIds.join() === "shufersal-demo" && PRIVATE_BANKS.length >= 1);
+
+  // P5 — the migration is additive only
+  const sql = read("prisma/migrations/20261110120000_music_bank_grants/migration.sql").replace(/--.*$/gm, "");
+  const stmts = sql.split(";").map((s) => s.trim()).filter(Boolean);
+  assert("P5 the migration only creates the new table, its indexes and its key (nothing existing changes)",
+    stmts.length === 4 && stmts.every((s) => /^(CREATE TABLE "MusicBankGrant"|CREATE (UNIQUE )?INDEX "MusicBankGrant_|ALTER TABLE "MusicBankGrant" ADD CONSTRAINT)/.test(s)));
+
+  // P6 — admin routes: platform owner only, change + audit row in one transaction
+  const put = read("app/api/admin/platform/workspaces/[id]/music-banks/route.ts");
+  const list = read("app/api/admin/platform/music-banks/route.ts");
+  assert("P6a both admin routes answer 403 to anyone but the platform owner",
+    /const admin = await getSuperAdminOrNull\(\);\s*if \(!admin\) return NextResponse\.json\(\{ error: "Forbidden" \}, \{ status: 403 \}\);/.test(put)
+    && /const admin = await getSuperAdminOrNull\(\);\s*if \(!admin\) return NextResponse\.json\(\{ error: "Forbidden" \}, \{ status: 403 \}\);/.test(list));
+  assert("P6b open/close and its audit row commit together; closing deletes the grant",
+    /prisma\.\$transaction\(async \(tx\) => \{[\s\S]*tx\.musicBankGrant\.upsert[\s\S]*tx\.musicBankGrant\.deleteMany[\s\S]*writePlatformAuditLog\(tx,/.test(put)
+    && /"music_bank\.open"[\s\S]*"music_bank\.close"/.test(read("lib/admin/platform-audit.ts")));
+  assert("P6c only a known bank, and an end date in the future", /Unknown bank/.test(put) && /The end date must be in the future/.test(put));
+
+  // P7 — the screens
+  const rfm = read("components/royalty-free-music-workspace-panel.tsx");
+  assert("P7a the Royalty-Free catalog asks the server for the private banks and shows them only when there are some",
+    /fetch\("\/api\/music-bank\/private-banks"/.test(rfm) && /\{privatePacks\.length > 0 \? \(/.test(rfm));
+  const hub = read("components/admin/businesses-hub.tsx");
+  assert("P7b Platform → Businesses: squares like People, a business page with tabs (Music banks / Chains & branches / Account)",
+    /className="sb-pg-tile"/.test(hub) && /Music banks<\/button>/.test(hub) && /Chains &amp; branches<\/button>/.test(hub) && /Account<\/button>/.test(hub)
+    && /href="\/admin\/platform\/businesses"/.test(read("app/admin/platform/page.tsx")));
+  assert("P7c the old Shufersal panel reads the list from the server too", /fetch\("\/api\/music-bank\/private-banks"/.test(read("components/shufersal-bank-workspace-panel.tsx")));
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(process.exitCode ?? 0);
+}
+void main();

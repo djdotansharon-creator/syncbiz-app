@@ -1,0 +1,29 @@
+/* Platform → BUSINESSES (owner 2026-11-10): the permissions room's language (people-grid.css + permissions-hub.css) with businesses
+   instead of people. Only the few new pieces live here. Frameless, soft, no blur, no endless animation. */
+
+.sb-bz { max-width: 1180px; }
+.sb-bz-count { margin-inline-start: 6px; font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.45); }
+.sb-bz-banks { color: #8ff0c2; }
+
+/* the Music banks top tab: one block per bank, a switch per business */
+.sb-bz-banks-tab { display: flex; flex-direction: column; gap: 34px; max-width: 720px; }
+.sb-bz-bankicon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: rgba(255, 255, 255, 0.08); color: #ffcf5c; }
+.sb-bz-bankname { font-size: 19px !important; font-weight: 650 !important; }
+.sb-bz-mini { flex: none; width: 34px !important; height: 34px !important; font-size: 14px !important; }
+
+/* a business page */
+.sb-bz-sec { max-width: 720px; }
+.sb-bz-sec h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); }
+.sb-bz-sec h3 small { margin-inline-start: 4px; font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; color: rgba(255, 255, 255, 0.4); }
+.sb-bz-until { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-top: 2px; font-size: 12.5px; color: rgba(255, 255, 255, 0.55); }
+.sb-bz-until label { display: inline-flex; align-items: center; gap: 8px; }
+.sb-bz-until input { border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.09); color: #fff; padding: 6px 12px; font: inherit; font-size: 12.5px; color-scheme: dark; outline: none; }
+.sb-bz-until input:focus-visible { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4); }
+.sb-bz-chain { padding: 4px 0 20px; }
+.sb-bz-chain + .sb-bz-chain { border-top: 1px solid rgba(255, 255, 255, 0.07); padding-top: 20px; }
+.sb-bz-branches { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.sb-bz-branches li { border-radius: 999px; padding: 7px 15px; background: rgba(255, 255, 255, 0.07); font-size: 13px; font-weight: 550; color: rgba(255, 255, 255, 0.85); }
+.sb-bz-facts { max-width: 460px; }
+.sb-bz-facts > div { grid-template-columns: 110px minmax(0, 1fr); }
+.sb-bz-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px !important; }
+.sb-bz-full { display: inline-block; margin-top: 18px; }

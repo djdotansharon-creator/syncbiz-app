@@ -20,8 +20,12 @@ import { EPHEMERAL_LOCAL_PLAYLIST_PREFIX } from "@/lib/local-playlist-artwork";
 import { formatDuration } from "@/lib/format-utils";
 import type { Playlist, PlaylistTrack } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
-import { SHUFERSAL_DEMO_BANK, SHUFERSAL_DEMO_TRACKS } from "@/lib/music-bank/shufersal-demo-catalog";
-import type { MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
+import type { MusicBankGenrePack, MusicBankSampleTrack } from "@/lib/music-bank/catalog-types";
+
+// owner 2026-11-10: the Shufersal songs are a PRIVATE bank ("All Day Mix") now — their list lives on the server only and comes
+// from /api/music-bank/private-banks for a business it was opened to. This panel no longer ships the list in the browser bundle.
+const BANK_ID = "all-day-mix";
+const SHUFERSAL_DEMO_BANK = { bankName: "Shufersal (Demo)" } as const;
 
 function PlayIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>;
@@ -49,7 +53,21 @@ export function ShufersalBankWorkspacePanel({ onClose }: { onClose: () => void }
   const streamReady = deviceMode === "CONTROL" ? true : hasMasterToken;
 
   const [nowPlaying, setNowPlaying] = useState<string | null>(null);
-  const tracks = SHUFERSAL_DEMO_TRACKS;
+  const [tracks, setTracks] = useState<MusicBankSampleTrack[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/music-bank/private-banks", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { banks?: MusicBankGenrePack[] } | null) => {
+        if (!cancelled) setTracks(j?.banks?.find((b) => b.id === BANK_ID)?.tracks ?? []);
+      })
+      .catch(() => {
+        /* offline — nothing to list */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const total = useMemo(() => totalDuration(tracks), [tracks]);
 
   const buildSource = useCallback(
