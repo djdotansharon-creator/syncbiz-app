@@ -38,6 +38,7 @@ import type {
   VideoOutputState,
 } from "../shared/mvp-types";
 import { MVP_IPC } from "../shared/mvp-types";
+import { startSelfUpdate } from "./self-update";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { WhatsAppWindow } from "./whatsapp-view";
 import { updateFromMpv } from "./heartbeat-writer";
@@ -417,6 +418,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   });
 
   ipcMain.handle(MVP_IPC.GET_APP_VERSION, (): string => app.getVersion());
+  // owner 2026-11-02: the "Update" pill → download + verify + silent install (self-update.ts); never touches playback
+  ipcMain.handle(MVP_IPC.START_UPDATE, () => startSelfUpdate());
 
   // ── GUESTS × WhatsApp Web (desktop-only) ──
   const whatsapp = new WhatsAppWindow(

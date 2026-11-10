@@ -190,6 +190,8 @@ type SuccessBody = {
   url: string;
   fileName: string;
   sizeBytes: number | null;
+  /** SHA-256 of the installer (GitHub's asset digest) — the player's self-update verifies the download against it; null when unknown */
+  sha256: string | null;
   downloads: Array<{ name: string; url: string; sizeBytes: number }>;
   releasesPageUrl: string;
   source: "github" | "env" | "bundle";
@@ -204,6 +206,7 @@ function successJson(
     url: string;
     fileName: string;
     sizeBytes: number | null;
+    sha256?: string | null;
     downloads: Array<{ name: string; url: string; sizeBytes: number }>;
     source: "github" | "env" | "bundle";
   },
@@ -216,6 +219,7 @@ function successJson(
     url: part.url,
     fileName: part.fileName,
     sizeBytes: part.sizeBytes,
+    sha256: part.sha256 ?? null,
     downloads: part.downloads,
     releasesPageUrl: releasesUrl,
     source: part.source,
@@ -317,6 +321,7 @@ export async function GET(req: Request) {
         url: "/api/desktop/installer",
         fileName: latest.fileName,
         sizeBytes: latest.sizeBytes,
+        sha256: latest.sha256,
         downloads: [{ name: latest.fileName, url: "/api/desktop/installer", sizeBytes: latest.sizeBytes }],
         source: "github",
       });

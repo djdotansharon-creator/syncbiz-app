@@ -42,6 +42,8 @@ export type SyncBizDesktopMvp = {
   getStatus: () => Promise<MvpStatusSnapshot>;
   /** Running desktop app SemVer (`app.getVersion()`), for the in-app update check. */
   getAppVersion: () => Promise<string>;
+  /** Self-update (engines >= 2.3.2; older engines do not have it — the pill then falls back to the installer link). `unsupported` = not a packaged Windows app. */
+  startUpdate: () => Promise<{ ok: boolean; reason?: string }>;
   saveConfig: (patch: MvpConfigPatch) => Promise<DesktopRuntimeConfig>;
   connectCloud: () => Promise<MvpStatusSnapshot>;
   disconnectCloud: () => Promise<MvpStatusSnapshot>;

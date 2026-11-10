@@ -207,7 +207,7 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
                 {newer && engine?.latest ? (
                   <>
                     {" · "}
-                    <a className="sb-devdet-update" href={engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases"} target="_blank" rel="noopener noreferrer">{t.updateTo.replace("{v}", engine.latest)}</a>
+                    <a className="sb-devdet-update" href={engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases"} target="_blank" rel="noopener noreferrer" onClick={(e) => { const b = (window as Window & { syncbizDesktop?: { startUpdate?: () => Promise<unknown> } }).syncbizDesktop; if (typeof b?.startUpdate !== "function") return; e.preventDefault(); void b.startUpdate().catch(() => undefined); }}>{t.updateTo.replace("{v}", engine.latest)}</a>
                   </>
                 ) : null}
               </dd>
