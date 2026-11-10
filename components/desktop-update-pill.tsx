@@ -41,8 +41,8 @@ const PILL_AMBER = " bg-[#fbbf24] text-[#1c1400] hover:bg-[#fcd34d]";
 const PILL_RED = " bg-[#dc2626] text-white hover:bg-[#b91c1c]";
 
 const CARD_W = 236;
-/** the card's end of the exit animation (CSS transition is 300 ms) */
-const CLOSE_MS = 240;
+/** the card's end of the exit animation (the CSS fold-back transition is 340 ms) */
+const CLOSE_MS = 360;
 
 type Target = { version: string; href: string; required: boolean };
 

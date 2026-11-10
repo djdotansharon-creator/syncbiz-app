@@ -7,6 +7,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * The text climbs up into the blur; the top blur appears only once the reader has scrolled, the bottom one only while more text follows; the scrollbar is hidden.
  * Plain text nodes only (never HTML). Fewer lines than fit → no scrolling and no blur at all.
  */
+/** the first line rises out of the mist at 380 ms and every next one 85 ms later (the lines below the first screenful all share the last delay, so a long list never keeps the reader waiting) */
+const lineDelay = (i: number) => ({ "--d": `${380 + Math.min(i, 9) * 85}ms` }) as React.CSSProperties;
+
 export function WhatsNewNotes({ paragraphs, items, label }: { paragraphs: string[]; items: string[]; label: string }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [edge, setEdge] = useState({ top: false, bottom: false });
@@ -35,12 +38,12 @@ export function WhatsNewNotes({ paragraphs, items, label }: { paragraphs: string
     <div className="sb-wn-wrap">
       <div ref={scrollRef} className="sb-wn-scroll" tabIndex={0} role="region" aria-label={label} onScroll={sync}>
         {paragraphs.map((p, i) => (
-          <p key={`p${i}`} className="sb-wn-para">{p}</p>
+          <p key={`p${i}`} className="sb-wn-para sb-wn-rise" style={lineDelay(i)}>{p}</p>
         ))}
         {items.length > 0 ? (
           <ul className="sb-wn-list">
             {items.map((it, i) => (
-              <li key={`i${i}`}>
+              <li key={`i${i}`} className="sb-wn-rise" style={lineDelay(paragraphs.length + i)}>
                 <span aria-hidden className="sb-wn-dot" />
                 <span dir="auto">{it}</span>
               </li>
