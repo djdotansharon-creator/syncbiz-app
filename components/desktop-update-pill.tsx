@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "@/lib/locale-context";
+import { useTr } from "@/lib/i18n/use-tr";
 import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-version";
 
 /**
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
  * Compares the running desktop app version (`window.syncbizDesktop.getAppVersion()`) against the canonical version
  * advertised by `/api/desktop/download`. When the API version is newer it shows the pill, linking to the installer
- * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. Amber = an update is available;
+ * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10: the pill now opens a small CARD first (version number, "What's new" = /whats-new on our site, "Update now" = the installer); a click anywhere else or Escape closes it. Amber = an update is available;
  * red + "Update required" = this engine is older than MIN_ENGINE_VERSION (lib/desktop-version.ts).
  *
  * Backward compatibility: desktop builds <= 0.1.2 shipped before the `getAppVersion` bridge existed. Those clients
@@ -42,6 +44,65 @@ export function DesktopUpdatePill() {
   const { t } = useTranslations();
   const tr = t as unknown as Record<string, string | undefined>;
   const [target, setTarget] = useState<{ version: string; href: string; required: boolean } | null>(null);
+  const trp = useTr();
+  // the card (owner 2026-11-10): the ellipse opens a small rectangle with the version number, "What's new" (our site) and "Update now"; it opens with an effect and closes by a click anywhere else
+  const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const place = useCallback(() => {
+    const el = btnRef.current;
+    if (!el || typeof window === "undefined") return;
+    const r = el.getBoundingClientRect();
+    const rtl = document.documentElement.getAttribute("dir") === "rtl";
+    setPos(rtl ? { top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) } : { top: r.bottom + 8, left: Math.max(8, r.left) });
+  }, []);
+  const closeCard = useCallback(() => {
+    setClosing(true);
+    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setOpen(false);
+      setClosing(false);
+    }, 170);
+  }, []);
+  const toggleCard = useCallback(() => {
+    if (open && !closing) {
+      closeCard();
+      return;
+    }
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    place();
+    setClosing(false);
+    setOpen(true);
+  }, [open, closing, closeCard, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const n = e.target as Node | null;
+      if (n && (cardRef.current?.contains(n) || btnRef.current?.contains(n))) return;
+      closeCard();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeCard();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", place);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, closeCard, place]);
+  useEffect(() => () => { if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current); }, []);
 
   useEffect(() => {
     const bridge = desktopBridge();
@@ -103,17 +164,40 @@ export function DesktopUpdatePill() {
   const title = (tr.desktopUpdateAvailable ?? "Update available v{v}").replaceAll("{v}", target.version);
   const text = target.required ? (tr.desktopUpdateRequiredPill ?? "Update required") : (tr.desktopUpdatePill ?? "Update");
 
+  const kicker = target.required ? (tr.desktopUpdateRequiredPill ?? "Update required") : trp("Update available");
+
   return (
-    <a
-      href={target.href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={PILL_BASE + (target.required ? PILL_RED : PILL_AMBER)}
-      title={title}
-      aria-label={title}
-      data-sb-update={target.required ? "required" : "available"}
-    >
-      <span className="sb-pill-t">{text}</span>
-    </a>
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggleCard}
+        aria-haspopup="dialog"
+        aria-expanded={open && !closing}
+        className={PILL_BASE + (target.required ? PILL_RED : PILL_AMBER)}
+        title={title}
+        aria-label={title}
+        data-sb-update={target.required ? "required" : "available"}
+      >
+        <span className="sb-pill-t">{text}</span>
+      </button>
+      {open && pos
+        ? createPortal(
+            <div
+              ref={cardRef}
+              role="dialog"
+              aria-label={title}
+              className={`sb-update-card${closing ? " is-closing" : ""}`}
+              style={{ top: pos.top, left: pos.left, right: pos.right }}
+            >
+              <p className="sb-update-card-kicker">{kicker}</p>
+              <p className="sb-update-card-ver" dir="ltr">{target.version}</p>
+              <a className="sb-update-card-btn" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
+              <a className="sb-update-card-btn sb-update-card-btn--go" href={target.href} target="_blank" rel="noopener noreferrer">{trp("Update now")}</a>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

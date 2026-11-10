@@ -8127,6 +8127,30 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
   .cr-row-update { padding-bottom: 2px; }
   [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
 }
+/* ── the update card (owner 2026-11-10): the amber ellipse opens a small rectangle — the version number, "What's new" (our site), "Update now". A dark card in every look (like the gear menu). ── */
+.sb-update-pill { cursor: pointer; border: 0; }
+.sb-update-card {
+  position: fixed; z-index: 2147482500; width: 228px; box-sizing: border-box; padding: 16px 16px 14px; border-radius: 18px;
+  display: flex; flex-direction: column; gap: 10px; background: #1c1c1e; color: #f5f5f7;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transform-origin: top left; animation: sb-upd-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+html[dir="rtl"] .sb-update-card { transform-origin: top right; }
+.sb-update-card.is-closing { animation: sb-upd-out 170ms ease-in both; }
+.sb-update-card-kicker { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.55); }
+.sb-update-card-ver { margin: 0 0 2px; font-size: 30px; font-weight: 700; line-height: 1.05; letter-spacing: -0.01em; }
+.sb-update-card-btn {
+  display: flex; align-items: center; justify-content: center; height: 36px; border-radius: 999px; text-decoration: none;
+  background: rgba(255, 255, 255, 0.09); color: #f5f5f7; font-size: 13px; font-weight: 600;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+.sb-update-card-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.sb-update-card-btn:active { transform: scale(0.98); }
+.sb-update-card-btn--go { background: #fbbf24; color: #1c1400; }
+.sb-update-card-btn--go:hover { background: #fcd34d; }
+@keyframes sb-upd-in { from { opacity: 0; transform: translateY(-8px) scale(0.94); filter: blur(4px); } to { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes sb-upd-out { to { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .sb-update-card, .sb-update-card.is-closing { animation-duration: 1ms; } }
 
 /* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
    a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */
