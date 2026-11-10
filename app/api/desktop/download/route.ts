@@ -2,7 +2,6 @@ import { existsSync, readFileSync, statSync } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
 import { resolveLatestWindowsInstaller } from "@/lib/desktop-installer-resolve";
-import { parseReleaseNotes, type ParsedNotes } from "@/lib/release-notes";
 
 /**
  * Returns JSON with a direct `url` to the Windows installer (.exe) when available.
@@ -194,8 +193,6 @@ type SuccessBody = {
   downloads: Array<{ name: string; url: string; sizeBytes: number }>;
   releasesPageUrl: string;
   source: "github" | "env" | "bundle";
-  /** the short headlines of the release (plain text) — shown in the Update card; only the GitHub path carries them */
-  notes?: ParsedNotes;
 };
 
 function successJson(
@@ -209,7 +206,6 @@ function successJson(
     sizeBytes: number | null;
     downloads: Array<{ name: string; url: string; sizeBytes: number }>;
     source: "github" | "env" | "bundle";
-    notes?: ParsedNotes;
   },
 ) {
   const body: SuccessBody = {
@@ -223,7 +219,6 @@ function successJson(
     downloads: part.downloads,
     releasesPageUrl: releasesUrl,
     source: part.source,
-    ...(part.notes ? { notes: part.notes } : {}),
   };
   return NextResponse.json(body);
 }
@@ -324,7 +319,6 @@ export async function GET(req: Request) {
         sizeBytes: latest.sizeBytes,
         downloads: [{ name: latest.fileName, url: "/api/desktop/installer", sizeBytes: latest.sizeBytes }],
         source: "github",
-        notes: parseReleaseNotes(latest.notes),
       });
     }
     // else fall through — the block below produces the proper "no build published" JSON.

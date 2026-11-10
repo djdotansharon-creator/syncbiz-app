@@ -8127,8 +8127,8 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
   .cr-row-update { padding-bottom: 2px; }
   [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
 }
-/* ── the update card (owner 2026-11-10): the amber "Update" ellipse ITSELF grows into a rectangle (same colour, so it reads as one shape) — the word "Update" (the install link), under it the version and the release date, a small borderless
-   "What's new", and the release's headlines with no frame, fading into a soft blur above and below (the top one only once the reader has scrolled). Colours: amber + dark text on the black / song looks; a deeper orange + WHITE text on the white look
+/* ── the update card (owner 2026-11-10): the amber "Update" ellipse ITSELF grows into a rectangle (same colour, so it reads as one shape) — the version and the release date, a small borderless "What's new" (our site, where the details are),
+   and the one-word "Update" button at the bottom. Colours: amber + dark text on the black / song looks; a deeper orange + WHITE text on the white look
    (white on pale amber would not read). The pill (closed) takes the same colours so the shape does not change colour while it grows. ── */
 .sb-update-pill { cursor: pointer; border: 0; }
 .sb-update-pill[data-sb-update="available"], .sb-update-card[data-sb-update="available"] { --upd-bg: #fbbf24; --upd-fg: #1c1400; --upd-btn: rgba(28, 20, 0, 0.13); --upd-btn-h: rgba(28, 20, 0, 0.22); }
@@ -8152,28 +8152,28 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 .sb-update-go:hover { background: var(--upd-btn-h); }
 .sb-update-go:active { transform: scale(0.98); }
 .sb-update-go:focus-visible { outline: 2px solid var(--upd-fg); outline-offset: 2px; }
-.sb-update-meta { display: flex; align-items: baseline; gap: 5px; font-size: 11px; line-height: 1.2; }
-.sb-update-ver { font-weight: 700; }
+.sb-update-meta { display: flex; align-items: baseline; gap: 5px; font-size: 12px; line-height: 1.2; }
+.sb-update-ver { font-weight: 700; font-size: 15px; }
 .sb-update-date { opacity: 0.72; }
 /* "What's new": small, no frame, not bold — a line appears under it only while the pointer is on it */
-.sb-update-new { margin-inline-start: auto; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: none; background: none; border: 0; padding: 0; opacity: 0.88; text-underline-offset: 2px; }
+.sb-update-new { align-self: flex-start; margin-top: -2px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: none; background: none; border: 0; padding: 0; opacity: 0.88; text-underline-offset: 2px; }
 .sb-update-new:hover, .sb-update-new:focus-visible { text-decoration: underline; opacity: 1; outline: none; }
-/* the headlines: no frame; a soft blur at the top and bottom edge. Text scrolls up into the blur; the scrollbar is hidden (the blur at the bottom says "more"). */
-.sb-update-notes-wrap { position: relative; margin: 0 -14px; }
-.sb-update-notes { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px 4px; scrollbar-width: none; outline: none; }
-.sb-update-notes::-webkit-scrollbar { display: none; }
-.sb-update-notes ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
-.sb-update-notes li { position: relative; padding-inline-start: 11px; font-size: 12px; line-height: 1.4; font-weight: 400; }
-.sb-update-notes li::before { content: ""; position: absolute; inset-inline-start: 0; top: 0.55em; width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.55; }
-.sb-update-fade { position: absolute; inset-inline: 0; height: 28px; pointer-events: none; opacity: 0; transition: opacity 180ms ease; }
-.sb-update-fade.is-on { opacity: 1; }
-.sb-update-fade--top { top: 0; background: linear-gradient(to bottom, var(--upd-bg) 0%, transparent 100%); }
-.sb-update-fade--bot { bottom: 0; background: linear-gradient(to top, var(--upd-bg) 0%, transparent 100%); }
-/* the real blur (only these two 28px strips; the Light look switches live blur off everywhere else, so it is switched back on here on purpose) */
-:root .sb-update-fade { -webkit-backdrop-filter: blur(3px) !important; backdrop-filter: blur(3px) !important; }
-:root .sb-update-fade--top { -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent); mask-image: linear-gradient(to bottom, #000 35%, transparent); }
-:root .sb-update-fade--bot { -webkit-mask-image: linear-gradient(to top, #000 35%, transparent); mask-image: linear-gradient(to top, #000 35%, transparent); }
-@media (prefers-reduced-motion: reduce) { .sb-update-card, .sb-update-in, .sb-update-ghost { transition-duration: 1ms !important; } }
+/* the button sits at the bottom */
+.sb-update-go { margin-top: 3px; }
+
+/* ── "What's new" page (owner 2026-11-10): the headlines have NO frame — plain text scrolling between a soft blur at the top and at the bottom (the top one only once the reader has scrolled; the bottom one only while more text follows). The page's own dark ground is #0b0f16. ── */
+.sb-wn-wrap { position: relative; --wn-bg: #0b0f16; }
+.sb-wn-scroll { max-height: min(50vh, 380px); overflow-y: auto; overscroll-behavior: contain; padding: 6px 0; scrollbar-width: none; outline: none; }
+.sb-wn-scroll::-webkit-scrollbar { display: none; }
+.sb-wn-para { margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
+.sb-wn-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.sb-wn-list li { display: flex; gap: 12px; font-size: 16px; font-weight: 500; line-height: 1.4; }
+.sb-wn-dot { flex: none; margin-top: 9px; width: 6px; height: 6px; border-radius: 50%; background: #fbbf24; }
+.sb-wn-fade { position: absolute; inset-inline: 0; height: 64px; pointer-events: none; opacity: 0; transition: opacity 200ms ease; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.sb-wn-fade.is-on { opacity: 1; }
+.sb-wn-fade--top { top: 0; background: linear-gradient(to bottom, var(--wn-bg) 8%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); }
+.sb-wn-fade--bot { bottom: 0; background: linear-gradient(to top, var(--wn-bg) 8%, transparent 100%); -webkit-mask-image: linear-gradient(to top, #000 40%, transparent); mask-image: linear-gradient(to top, #000 40%, transparent); }
+@media (prefers-reduced-motion: reduce) { .sb-update-card, .sb-update-in, .sb-update-ghost, .sb-wn-fade { transition-duration: 1ms !important; } }
 
 /* ── the red count badge on the control bar's tabs: its ring is the colour of the bar it sits on (owner 2026-11-02: "the 2 has a black frame — why?"). It was a fixed near-black ring — a seamless cut-out on the black bar,
    a black frame on the light one. Black / transparent looks: the bar is pure black → ring #000; light control area: the bar is pearl rgb(236,238,241) → ring the same (see app/control-white.css). The player's way-back icon keeps its own. ── */

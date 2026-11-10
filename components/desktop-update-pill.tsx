@@ -10,7 +10,7 @@ import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-ve
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
  * Compares the running desktop app version (`window.syncbizDesktop.getAppVersion()`) against the canonical version
  * advertised by `/api/desktop/download`. When the API version is newer it shows the pill, linking to the installer
- * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the word "Update" (the install link), under it the version number and the release date, a small borderless "What's new" (our site), and the release's headlines scrolling between a soft blur above and below (no frames); a click anywhere else or Escape folds it back. Amber = an update is available;
+ * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the version number and release date, a small borderless "What's new" (our site, where the details are), and the one-word "Update" button at the bottom; a click anywhere else or Escape folds it back. Amber = an update is available;
  * red + "Update required" = this engine is older than MIN_ENGINE_VERSION (lib/desktop-version.ts).
  *
  * Backward compatibility: desktop builds <= 0.1.2 shipped before the `getAppVersion` bridge existed. Those clients
@@ -40,11 +40,11 @@ const PILL_BASE =
 const PILL_AMBER = " bg-[#fbbf24] text-[#1c1400] hover:bg-[#fcd34d]";
 const PILL_RED = " bg-[#dc2626] text-white hover:bg-[#b91c1c]";
 
-const CARD_W = 272;
+const CARD_W = 236;
 /** the card's end of the exit animation (CSS transition is 300 ms) */
 const CLOSE_MS = 240;
 
-type Target = { version: string; href: string; required: boolean; date: string | null; items: string[] };
+type Target = { version: string; href: string; required: boolean; date: string | null };
 
 export function DesktopUpdatePill() {
   const { t } = useTranslations();
@@ -58,11 +58,9 @@ export function DesktopUpdatePill() {
   const [closing, setClosing] = useState(false);
   const [geo, setGeo] = useState<{ top: number; left?: number; right?: number; pw: number; ph: number } | null>(null);
   const [fullH, setFullH] = useState(0);
-  const [edge, setEdge] = useState({ top: false, bottom: false });
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
-  const notesRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
 
   const place = useCallback(() => {
@@ -76,14 +74,6 @@ export function DesktopUpdatePill() {
         ? { top: r.top, right: Math.min(maxEdge, Math.max(8, window.innerWidth - r.right)), pw: r.width, ph: r.height }
         : { top: r.top, left: Math.min(maxEdge, Math.max(8, r.left)), pw: r.width, ph: r.height },
     );
-  }, []);
-  /** top / bottom blur is shown only where there is more text to scroll to (the top one only after the reader has scrolled) */
-  const syncEdges = useCallback(() => {
-    const el = notesRef.current;
-    if (!el) return;
-    const top = el.scrollTop > 2;
-    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
-    setEdge((p) => (p.top === top && p.bottom === bottom ? p : { top, bottom }));
   }, []);
   const closeCard = useCallback(() => {
     setClosing(true);
@@ -121,14 +111,13 @@ export function DesktopUpdatePill() {
     let id2 = 0;
     const id1 = requestAnimationFrame(() => {
       setFullH(innerRef.current?.offsetHeight ?? 0);
-      syncEdges();
       id2 = requestAnimationFrame(() => setExpanded(true));
     });
     return () => {
       cancelAnimationFrame(id1);
       cancelAnimationFrame(id2);
     };
-  }, [open, syncEdges]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -173,7 +162,6 @@ export function DesktopUpdatePill() {
           url?: string | null;
           releasesPageUrl?: string;
           releasedAt?: string | null;
-          notes?: { items?: unknown; paragraphs?: unknown };
         };
         if (cancelled) return;
 
@@ -197,14 +185,11 @@ export function DesktopUpdatePill() {
           typeof data.releasesPageUrl === "string" && data.releasesPageUrl.startsWith("https://")
             ? data.releasesPageUrl
             : DEFAULT_RELEASES;
-        const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : []);
-        const bullets = strs(data.notes?.items);
         setTarget({
           version: latest,
           href: directUrl.length > 0 ? directUrl : releases,
           required,
           date: typeof data.releasedAt === "string" && data.releasedAt ? data.releasedAt : null,
-          items: bullets.length > 0 ? bullets : strs(data.notes?.paragraphs),
         });
       } catch {
         /* offline / endpoint unreachable / version unreadable — stay silent */
@@ -262,27 +247,14 @@ export function DesktopUpdatePill() {
                 <span className="sb-pill-t">{text}</span>
               </span>
               <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
-                <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
-                  <span className="sb-pill-t">{text}</span>
-                </a>
                 <div className="sb-update-meta">
                   <span className="sb-update-ver" dir="ltr">v{target.version}</span>
                   {dateText ? <span className="sb-update-date">· {dateText}</span> : null}
-                  <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
                 </div>
-                {target.items.length > 0 ? (
-                  <div className="sb-update-notes-wrap">
-                    <div ref={notesRef} className="sb-update-notes" tabIndex={0} role="region" aria-label={trp("What's new")} onScroll={syncEdges}>
-                      <ul>
-                        {target.items.map((it, i) => (
-                          <li key={i}>{it}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <span className={`sb-update-fade sb-update-fade--top${edge.top ? " is-on" : ""}`} aria-hidden />
-                    <span className={`sb-update-fade sb-update-fade--bot${edge.bottom ? " is-on" : ""}`} aria-hidden />
-                  </div>
-                ) : null}
+                <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
+                <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
+                  <span className="sb-pill-t">{text}</span>
+                </a>
               </div>
             </div>,
             document.body,

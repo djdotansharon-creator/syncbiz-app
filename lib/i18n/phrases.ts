@@ -307,6 +307,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Update available": "עדכון זמין",
   "What's new": "מה חדש",
   "Update now": "עדכן עכשיו",
+  "Update": "עדכון",
   "What's new in VONO Player {v}": "מה חדש ב-VONO Player {v}",
   "Version {v}": "גרסה {v}",
   "No details were published for this version.": "לא פורסמו פרטים על הגרסה הזו.",
