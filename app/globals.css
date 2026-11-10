@@ -8127,7 +8127,7 @@ html[data-sb-display="white"]:not([data-sb-control]) .cr-stage[data-cr-colors="c
   .cr-row-update { padding-bottom: 2px; }
   [dir="rtl"] .cr-row-update { padding-bottom: 4px; }
 }
-/* ── the update card (owner 2026-11-10): the amber "Update" ellipse ITSELF grows into a rectangle (same colour, so it reads as one shape) — the version and the release date, a small borderless "What's new" (our site, where the details are),
+/* ── the update card (owner 2026-11-10): the amber "Update" ellipse ITSELF grows into a rectangle (same colour, so it reads as one shape) — the version number (centred), a small borderless "What's new" centred under it (our site, where the details are),
    and the one-word "Update" button at the bottom. Colours: amber + dark text on the black / song looks; a deeper orange + WHITE text on the white look
    (white on pale amber would not read). The pill (closed) takes the same colours so the shape does not change colour while it grows. ── */
 .sb-update-pill { cursor: pointer; border: 0; }
@@ -8143,7 +8143,7 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 }
 .sb-update-ghost { position: absolute; top: 0; inset-inline-start: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; opacity: 1; transition: opacity 110ms ease; pointer-events: none; }
 .sb-update-card.is-open .sb-update-ghost { opacity: 0; }
-.sb-update-in { position: absolute; top: 0; inset-inline-start: 0; box-sizing: border-box; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 9px; opacity: 0; filter: blur(3px); transition: opacity 120ms ease, filter 120ms ease; }
+.sb-update-in { position: absolute; top: 0; inset-inline-start: 0; box-sizing: border-box; padding: 14px 14px 14px; display: flex; flex-direction: column; gap: 8px; opacity: 0; filter: blur(3px); transition: opacity 120ms ease, filter 120ms ease; }
 .sb-update-card.is-open .sb-update-in { opacity: 1; filter: blur(0); transition: opacity 220ms ease 110ms, filter 220ms ease 110ms; }
 .sb-update-go {
   display: flex; align-items: center; justify-content: center; height: 32px; border-radius: 999px; text-decoration: none; background: var(--upd-btn); color: var(--upd-fg);
@@ -8152,18 +8152,16 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 .sb-update-go:hover { background: var(--upd-btn-h); }
 .sb-update-go:active { transform: scale(0.98); }
 .sb-update-go:focus-visible { outline: 2px solid var(--upd-fg); outline-offset: 2px; }
-.sb-update-meta { display: flex; align-items: baseline; gap: 5px; font-size: 12px; line-height: 1.2; }
-.sb-update-ver { font-weight: 700; font-size: 15px; }
-.sb-update-date { opacity: 0.72; }
-/* "What's new": small, no frame, not bold — a line appears under it only while the pointer is on it */
-.sb-update-new { align-self: flex-start; margin-top: -2px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: none; background: none; border: 0; padding: 0; opacity: 0.88; text-underline-offset: 2px; }
+.sb-update-ver { text-align: center; font-weight: 700; font-size: 20px; line-height: 1.1; letter-spacing: -0.01em; }
+/* "What's new": centred under the version, a little lower; small, no frame, not bold — a line appears under it only while the pointer is on it */
+.sb-update-new { align-self: center; margin-top: 4px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: none; background: none; border: 0; padding: 0; opacity: 0.88; text-underline-offset: 2px; }
 .sb-update-new:hover, .sb-update-new:focus-visible { text-decoration: underline; opacity: 1; outline: none; }
 /* the button sits at the bottom */
-.sb-update-go { margin-top: 3px; }
+.sb-update-go { margin-top: 6px; }
 
 /* ── "What's new" page (owner 2026-11-10): the headlines have NO frame — plain text scrolling between a soft blur at the top and at the bottom (the top one only once the reader has scrolled; the bottom one only while more text follows). The page's own dark ground is #0b0f16. ── */
 .sb-wn-wrap { position: relative; --wn-bg: #0b0f16; }
-.sb-wn-scroll { max-height: min(50vh, 380px); overflow-y: auto; overscroll-behavior: contain; padding: 6px 0; scrollbar-width: none; outline: none; }
+.sb-wn-scroll { max-height: min(42vh, 310px); overflow-y: auto; overscroll-behavior: contain; padding: 6px 0; scrollbar-width: none; outline: none; }
 .sb-wn-scroll::-webkit-scrollbar { display: none; }
 .sb-wn-para { margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); }
 .sb-wn-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }

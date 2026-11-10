@@ -46,7 +46,7 @@ export default async function WhatsNewPage() {
 
           <a
             href="/api/desktop/installer"
-            className="mt-6 flex h-12 items-center justify-center rounded-full bg-[#fbbf24] text-[15px] font-bold text-[#1c1400] no-underline transition hover:bg-[#fcd34d] active:scale-[0.99]"
+            className="mt-12 flex h-12 items-center justify-center rounded-full bg-[#fbbf24] text-[15px] font-bold text-[#1c1400] no-underline transition hover:bg-[#fcd34d] active:scale-[0.99]"
           >
             {tr("Update")}
           </a>

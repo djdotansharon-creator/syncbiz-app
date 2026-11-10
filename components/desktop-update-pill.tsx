@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useLocale, useTranslations } from "@/lib/locale-context";
+import { useTranslations } from "@/lib/locale-context";
 import { useTr } from "@/lib/i18n/use-tr";
 import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-version";
 
@@ -10,7 +10,7 @@ import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-ve
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
  * Compares the running desktop app version (`window.syncbizDesktop.getAppVersion()`) against the canonical version
  * advertised by `/api/desktop/download`. When the API version is newer it shows the pill, linking to the installer
- * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the version number and release date, a small borderless "What's new" (our site, where the details are), and the one-word "Update" button at the bottom; a click anywhere else or Escape folds it back. Amber = an update is available;
+ * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the version number (centred), a small borderless "What's new" (our site, where the details are), and the one-word "Update" button at the bottom; a click anywhere else or Escape folds it back. Amber = an update is available;
  * red + "Update required" = this engine is older than MIN_ENGINE_VERSION (lib/desktop-version.ts).
  *
  * Backward compatibility: desktop builds <= 0.1.2 shipped before the `getAppVersion` bridge existed. Those clients
@@ -44,11 +44,10 @@ const CARD_W = 236;
 /** the card's end of the exit animation (CSS transition is 300 ms) */
 const CLOSE_MS = 240;
 
-type Target = { version: string; href: string; required: boolean; date: string | null };
+type Target = { version: string; href: string; required: boolean };
 
 export function DesktopUpdatePill() {
   const { t } = useTranslations();
-  const { locale } = useLocale();
   const tr = t as unknown as Record<string, string | undefined>;
   const [target, setTarget] = useState<Target | null>(null);
   const trp = useTr();
@@ -161,7 +160,6 @@ export function DesktopUpdatePill() {
           expectedVersion?: string;
           url?: string | null;
           releasesPageUrl?: string;
-          releasedAt?: string | null;
         };
         if (cancelled) return;
 
@@ -189,7 +187,6 @@ export function DesktopUpdatePill() {
           version: latest,
           href: directUrl.length > 0 ? directUrl : releases,
           required,
-          date: typeof data.releasedAt === "string" && data.releasedAt ? data.releasedAt : null,
         });
       } catch {
         /* offline / endpoint unreachable / version unreadable — stay silent */
@@ -205,8 +202,6 @@ export function DesktopUpdatePill() {
 
   const title = (tr.desktopUpdateAvailable ?? "Update available v{v}").replaceAll("{v}", target.version);
   const text = target.required ? (tr.desktopUpdateRequiredPill ?? "Update required") : (tr.desktopUpdatePill ?? "Update");
-  const when = target.date ? new Date(target.date) : null;
-  const dateText = when && !Number.isNaN(when.getTime()) ? when.toLocaleDateString(locale === "he" ? "he-IL" : "en-GB", { day: "numeric", month: "short", year: "numeric" }) : null;
   const kind = target.required ? "required" : "available";
 
   return (
@@ -247,10 +242,7 @@ export function DesktopUpdatePill() {
                 <span className="sb-pill-t">{text}</span>
               </span>
               <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
-                <div className="sb-update-meta">
-                  <span className="sb-update-ver" dir="ltr">v{target.version}</span>
-                  {dateText ? <span className="sb-update-date">· {dateText}</span> : null}
-                </div>
+                <span className="sb-update-ver" dir="ltr">v{target.version}</span>
                 <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
                 <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
                   <span className="sb-pill-t">{text}</span>
