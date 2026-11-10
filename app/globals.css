@@ -8143,7 +8143,7 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 }
 .sb-update-ghost { position: absolute; top: 0; inset-inline-start: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; line-height: 1; opacity: 1; transition: opacity 110ms ease; pointer-events: none; }
 .sb-update-card.is-open .sb-update-ghost { opacity: 0; }
-.sb-update-in { position: absolute; top: 0; inset-inline-start: 0; box-sizing: border-box; padding: 14px 14px 14px; display: flex; flex-direction: column; gap: 0; opacity: 0; filter: blur(3px); transition: opacity 120ms ease, filter 120ms ease; }
+.sb-update-in { position: absolute; top: 0; inset-inline-start: 0; box-sizing: border-box; padding: 17px 14px 15px; display: flex; flex-direction: column; gap: 0; opacity: 0; filter: blur(3px); transition: opacity 120ms ease, filter 120ms ease; }
 .sb-update-card.is-open .sb-update-in { opacity: 1; filter: blur(0); transition: opacity 220ms ease 110ms, filter 220ms ease 110ms; }
 .sb-update-go {
   display: flex; align-items: center; justify-content: center; height: 32px; border-radius: 999px; text-decoration: none; background: var(--upd-btn); color: var(--upd-fg);
@@ -8153,11 +8153,10 @@ html[data-sb-display="white"] .sb-update-pill[data-sb-update="available"]:hover 
 .sb-update-go:active { transform: scale(0.98); }
 .sb-update-go:focus-visible { outline: 2px solid var(--upd-fg); outline-offset: 2px; }
 .sb-update-ver { text-align: center; font-weight: 700; font-size: 20px; line-height: 1.1; letter-spacing: -0.01em; }
-/* "What's new": centred, small, no frame, not bold — ALWAYS underlined (owner), and right above the Update button (a small gap), with more room between it and the version above */
-.sb-update-new { align-self: center; margin-top: 16px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; opacity: 0.9; }
+/* the Update button sits under the version; "What's new" is UNDER the button (owner): centred, small, no frame, not bold, always underlined */
+.sb-update-go { margin-top: 13px; }
+.sb-update-new { align-self: center; margin-top: 13px; font-size: 11px; font-weight: 400; color: var(--upd-fg); text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; opacity: 0.9; }
 .sb-update-new:hover, .sb-update-new:focus-visible { opacity: 1; outline: none; }
-/* the button sits at the bottom */
-.sb-update-go { margin-top: 5px; }
 
 /* ── "What's new" page (owner 2026-11-10): the headlines have NO frame — plain text scrolling between a soft blur at the top and at the bottom (the top one only once the reader has scrolled; the bottom one only while more text follows). The page's own dark ground is #0b0f16. ── */
 .sb-wn-wrap { position: relative; --wn-bg: #0b0f16; }

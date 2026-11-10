@@ -10,7 +10,7 @@ import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-ve
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
  * Compares the running desktop app version (`window.syncbizDesktop.getAppVersion()`) against the canonical version
  * advertised by `/api/desktop/download`. When the API version is newer it shows the pill, linking to the installer
- * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the version number (centred), a small borderless "What's new" (our site, where the details are), and the one-word "Update" button at the bottom; a click anywhere else or Escape folds it back. Amber = an update is available;
+ * (`data.url`) or, if no direct installer URL is resolvable, the GitHub releases page. 2026-11-10 (owner): the pill itself EXPANDS into an amber card — the version number (centred), the one-word "Update" button, and under it a small borderless underlined "What's new" (our site, where the details are); a click anywhere else or Escape folds it back. Amber = an update is available;
  * red + "Update required" = this engine is older than MIN_ENGINE_VERSION (lib/desktop-version.ts).
  *
  * Backward compatibility: desktop builds <= 0.1.2 shipped before the `getAppVersion` bridge existed. Those clients
@@ -243,10 +243,10 @@ export function DesktopUpdatePill() {
               </span>
               <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
                 <span className="sb-update-ver" dir="ltr">v{target.version}</span>
-                <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
                 <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
                   <span className="sb-pill-t">{text}</span>
                 </a>
+                <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
               </div>
             </div>,
             document.body,
