@@ -47,7 +47,7 @@ function PlayIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>;
 }
 
-export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => void }) {
+export function RoyaltyFreeMusicWorkspacePanel() {
   const { playSource } = usePlayback(); // RAW playSource — used ONLY for local-preview mode (desktop-local).
   const dp = useDevicePlayer(); // routed play + device role for Stream mode (CONTROL→MASTER).
   const deviceMode = dp?.deviceMode;
@@ -250,13 +250,9 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
           <h2 className="sb-cp-title">Royalty-Free Music</h2>
           <p className="sb-cp-meta mt-1">{genres.length} Genre Packs · {totalSamples} samples</p>
         </div>
-        <div className="flex items-center gap-1">
-          {/* 2026-11-11 (owner): the dev "Stream / Local" A/B toggle is gone from the screen — music streams, and a bank kept on
-              this computer is switched per bank with OFFLINE on its own page. (The Local preview-cache mode stays in code, unused.) */}
-          <button type="button" onClick={onClose} aria-label="Close" className="sb-cp-icon-btn ms-1">
-            <CloseIcon className="h-4 w-4" />
-          </button>
-        </div>
+        {/* 2026-11-11 (owner): the dev "Stream / Local" A/B toggle is gone from the screen — music streams, and a bank kept on
+            this computer is switched per bank with OFFLINE on its own page. (The Local preview-cache mode stays in code, unused.)
+            No X either: this opens like a library view — clicking another place in the rails shows that place. */}
       </header>
 
       {/* Genre navigation — the library's chips row: plain words */}
@@ -292,14 +288,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
         )}
       </div>
     </div>
-  );
-}
-
-function CloseIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-      <path d="M18 6 6 18M6 6l12 12" />
-    </svg>
   );
 }
 

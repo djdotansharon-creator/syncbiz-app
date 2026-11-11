@@ -32,5 +32,19 @@ assert("L5 while the bank / computer panel is open only its row is lit, and a li
   && /if \(bankOrComputerOpen\) setActiveCenterModule\(null\);\s*setSelection\(\{ type: "library_view", id: r\.id \}\);/.test(src));
 assert("L6 Hebrew labels exist", /"Royalty-Free Music": "מוזיקה ללא זכויות"/.test(phrases) && /"My Computer": "המחשב שלי"/.test(phrases) && /"Desktop app only":/.test(phrases));
 
+// owner 2026-11-11: the bank and My Computer open like a library view — no X; any other place chosen in the rails shows that place
+const rfmPanel = readFileSync(path.join(root, "components", "royalty-free-music-workspace-panel.tsx"), "utf-8");
+const pcPanel = readFileSync(path.join(root, "components", "my-music-library-workspace-panel.tsx"), "utf-8");
+assert("L7 neither panel has an X (Close) button",
+  !/aria-label="Close"/.test(rfmPanel) && !/aria-label="Close"/.test(pcPanel)
+  && /<RoyaltyFreeMusicWorkspacePanel \/>/.test(src) && !/<MyMusicLibraryWorkspacePanel\s+onClose=/.test(src));
+assert("L8 a playlist / tile / imported playlist in the rails, or any change of what is shown, leaves the bank or My Computer",
+  /const leaveBankOrComputer = useCallback\(\(\) => \{\s*if \(bankOrComputerModuleOpen\) setActiveCenterModule\(null\);/.test(src)
+  && /const scheduleUserPlaylistRailOpen = useCallback\(\(playlistKey: string\) => \{\s*leaveBankOrComputer\(\);/.test(src)
+  && /const openDaypartTile = useCallback\(\(daypartKey: string\) => \{\s*leaveBankOrComputer\(\);/.test(src)
+  && /leaveBankOrComputer\(\);\s*setSelection\(\{ type: "collection_container", subtype: "external_playlist"/.test(src)
+  && /const bankOrComputerModuleOpen = isRoyaltyFreeMusicModule\(activeCenterModule\) \|\| isMyMusicLibraryModule\(activeCenterModule\);/.test(src)
+  && /if \(!bankOrComputerModuleOpen\) \{\s*selectionKeyForMyMusicDismissRef\.current = key;/.test(src));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(process.exitCode ?? 0);

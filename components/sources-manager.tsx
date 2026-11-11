@@ -1061,12 +1061,19 @@ function SourcesManagerInner({
 
   const djHubRailActive = isDjCreatorHubModule(activeCenterModule);
 
+  /* owner 2026-11-11: Royalty-Free Music and My Computer open like any library view — choosing another place in the rails
+     (a playlist, a tile, a library row) simply shows that place; there is no X to press. */
+  const bankOrComputerModuleOpen = isRoyaltyFreeMusicModule(activeCenterModule) || isMyMusicLibraryModule(activeCenterModule);
+  const leaveBankOrComputer = useCallback(() => {
+    if (bankOrComputerModuleOpen) setActiveCenterModule(null);
+  }, [bankOrComputerModuleOpen, setActiveCenterModule]);
+
   const selectionKeyForMyMusicDismissRef = useRef<string>(
     JSON.stringify({ type: "library_view", id: "all_library" } satisfies LibrarySelection),
   );
   useEffect(() => {
     const key = JSON.stringify(selection);
-    if (!isMyMusicLibraryModule(activeCenterModule)) {
+    if (!bankOrComputerModuleOpen) {
       selectionKeyForMyMusicDismissRef.current = key;
       return;
     }
@@ -1074,7 +1081,7 @@ function SourcesManagerInner({
       setActiveCenterModule(null);
     }
     selectionKeyForMyMusicDismissRef.current = key;
-  }, [selection, activeCenterModule, setActiveCenterModule]);
+  }, [selection, bankOrComputerModuleOpen, setActiveCenterModule]);
 
   const routeEmbedded = useMemo((): SourcesEmbeddedCenter | null => {
     if (!playerWorkspaceMode) return null;
@@ -1700,12 +1707,13 @@ function SourcesManagerInner({
   );
 
   const scheduleUserPlaylistRailOpen = useCallback((playlistKey: string) => {
+    leaveBankOrComputer(); // the same playlist as before may not change `selection` — leave the panel explicitly
     if (userPlaylistRailOpenTimerRef.current) clearTimeout(userPlaylistRailOpenTimerRef.current);
     userPlaylistRailOpenTimerRef.current = setTimeout(() => {
       userPlaylistRailOpenTimerRef.current = null;
       setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: playlistKey });
     }, 220);
-  }, []);
+  }, [leaveBankOrComputer]);
 
   const buildPlaylistEntityDrag = useCallback(
     (source: UnifiedSource) => {
@@ -1717,13 +1725,14 @@ function SourcesManagerInner({
   );
 
   const openDaypartTile = useCallback((daypartKey: string) => {
+    leaveBankOrComputer();
     const assignedPlaylistKey = daypartPlaylistAssignments[daypartKey];
     if (assignedPlaylistKey) {
       setSelection({ type: "collection_container", subtype: "syncbiz_playlist", key: assignedPlaylistKey });
       return;
     }
     setSelection({ type: "collection_container", subtype: "daypart_collection", key: daypartKey });
-  }, [daypartPlaylistAssignments]);
+  }, [daypartPlaylistAssignments, leaveBankOrComputer]);
 
   const extractDroppedSourceIds = useCallback((e: React.DragEvent): string[] => {
     const queueIdsJson = e.dataTransfer.getData("application/syncbiz-queue-source-ids");
@@ -2658,9 +2667,10 @@ function SourcesManagerInner({
                       onDrop={(e) => {
                         void handleExternalPlaylistDrop(e, c.key);
                       }}
-                      onClick={() =>
-                        setSelection({ type: "collection_container", subtype: "external_playlist", key: c.key })
-                      }
+                      onClick={() => {
+                        leaveBankOrComputer();
+                        setSelection({ type: "collection_container", subtype: "external_playlist", key: c.key });
+                      }}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left"
                     >
                       <span className="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[color:var(--lib-surface-card-art)]">
@@ -2987,12 +2997,11 @@ function SourcesManagerInner({
           ) : isJinglesModule(activeCenterModule) ? (
             <JinglesWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : RFM_CATALOG_ENABLED && isRoyaltyFreeMusicModule(activeCenterModule) ? (
-            <RoyaltyFreeMusicWorkspacePanel onClose={() => setActiveCenterModule(null)} />
+            <RoyaltyFreeMusicWorkspacePanel />
           ) : SHUFERSAL_BANK_ENABLED && isShufersalBankModule(activeCenterModule) ? (
             <ShufersalBankWorkspacePanel onClose={() => setActiveCenterModule(null)} />
           ) : isMyMusicLibraryModule(activeCenterModule) ? (
             <MyMusicLibraryWorkspacePanel
-              onClose={() => setActiveCenterModule(null)}
               onAddToLibrary={handleAdd}
               onPlaylistUpdated={handlePlaylistUpdatedFromMyMusic}
               userPlaylists={myMusicPlaylistPickerOptions}
