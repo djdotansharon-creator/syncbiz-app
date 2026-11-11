@@ -64,7 +64,31 @@ html[data-sb-display="white"] .sb-cp {
 .sb-cp-act:disabled { opacity: 0.4; cursor: not-allowed; }
 .sb-cp-act.is-on { color: var(--cp-ink); background: var(--cp-soft-2); }
 /* stage D (owner 2026-11-11): the private bank's Offline switch + the disk it needs, one quiet line */
-.sb-cp-offline { display: inline-flex; align-items: center; gap: 8px; }
+/* Offline switch (owner 2026-11-11): the word + an iOS-style switch; turning it on FILLS the track with VONO blue from the left */
+.sb-cp-offline {
+  --cp-switch-off: rgba(255, 255, 255, 0.22);
+  display: inline-flex; align-items: center; gap: 10px; padding: 4px 2px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; color: var(--cp-2); transition: color 200ms ease;
+}
+html[data-sb-display="white"] .sb-cp-offline { --cp-switch-off: rgba(0, 0, 0, 0.16); }
+.sb-cp-offline.is-on { color: var(--cp-ink); }
+.sb-cp-offline:disabled { cursor: not-allowed; }
+.sb-cp-offline:disabled:not(.is-on) { opacity: 0.55; }
+.sb-cp-offline:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 3px; }
+.sb-cp-switch {
+  position: relative; flex-shrink: 0; width: 40px; height: 24px; border-radius: 9999px;
+  background-color: var(--cp-switch-off);
+  background-image: linear-gradient(var(--cp-accent), var(--cp-accent));
+  background-repeat: no-repeat; background-size: 0% 100%;
+  transition: background-size 450ms ease;
+}
+.sb-cp-offline.is-on .sb-cp-switch { background-size: 100% 100%; }
+.sb-cp-switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 9999px;
+  background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform 300ms ease;
+}
+.sb-cp-offline.is-on .sb-cp-switch-knob { transform: translateX(16px); }
+@media (prefers-reduced-motion: reduce) { .sb-cp-offline, .sb-cp-switch, .sb-cp-switch-knob { transition: none; } }
 .sb-cp-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 34px; height: 34px; border-radius: 9999px; color: var(--cp-2);

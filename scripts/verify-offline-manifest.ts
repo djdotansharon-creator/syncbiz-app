@@ -76,10 +76,14 @@ async function main() {
     && /where: \{ workspaceId_bankId: \{ workspaceId, bankId: body\.bankId \} \}, data: \{ offlineEnabled: body\.offline \}/.test(toggle));
   const pb = read("app/api/music-bank/private-banks/route.ts");
   const panel = read("components/royalty-free-music-workspace-panel.tsx");
-  assert("D3 the catalog shows Offline on a private bank's page with the disk it needs; the dev Stream / Local toggle is gone",
+  assert("D3 the catalog shows Offline on a private bank's page (only owners / admins may switch it); the dev Stream / Local toggle is gone",
     /offline\[b\.id\] = \{ enabled: info\[b\.id\]\?\.enabled \?\? false, bytes: info\[b\.id\]\?\.bytes \?\? 0, canToggle \}/.test(pb)
-    && /role="switch"[\s\S]{0,200}aria-checked=\{offline\.enabled\}/.test(panel) && /Needs \$\{fmtSize\(offline\.bytes\)\} on each computer/.test(panel)
+    && /role="switch"[\s\S]{0,200}aria-checked=\{offline\.enabled\}/.test(panel) && /disabled=\{!offline\.canToggle \|\| offlineBusy\}/.test(panel)
     && /fetch\("\/api\/music-bank\/offline", \{\s*method: "PUT"/.test(panel) && !/\{m === "stream" \? "Stream" : "Local"\}/.test(panel));
+  const css = read("app/center-panels.css");
+  assert("D5 (owner 2026-11-11) the look: only the word Offline + a switch that fills with VONO blue; no long text on screen",
+    /Offline\s*<span className="sb-cp-switch" aria-hidden="true">/.test(panel) && !/Kept on this business's computers/.test(panel)
+    && /\.sb-cp-offline\.is-on \.sb-cp-switch \{ background-size: 100% 100%; \}/.test(css) && /linear-gradient\(var\(--cp-accent\), var\(--cp-accent\)\)/.test(css));
   const mig = read("prisma/migrations/20261111180000_bank_offline_toggle/migration.sql").replace(/--.*$/gm, "").trim();
   assert("D4 the migration only adds one column, default off, idempotent (safe to apply before the code deploy)",
     mig === 'ALTER TABLE "MusicBankGrant" ADD COLUMN IF NOT EXISTS "offlineEnabled" BOOLEAN NOT NULL DEFAULT false;');
