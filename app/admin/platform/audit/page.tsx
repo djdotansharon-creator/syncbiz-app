@@ -42,6 +42,7 @@ const KNOWN_ACTIONS = [
   "user.safe_account_delete",
   "music_bank.open",
   "music_bank.close",
+  "workspace.fallback_playlist",
 ] as const;
 
 function fmtDateTime(d: Date | null | undefined): string {

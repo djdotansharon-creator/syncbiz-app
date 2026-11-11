@@ -18,7 +18,7 @@ import "@/components/roles/permissions-hub.css";
 import "@/components/admin/businesses-hub.css";
 
 type Bank = { id: string; name: string; description: string; trackCount: number; durationSeconds: number };
-type Grant = { bankId: string; expiresAt: string | null; since: string };
+type Grant = { bankId: string; expiresAt: string | null; closesAt: string | null; closeReason: string | null; since: string };
 type Business = {
   id: string;
   name: string;
@@ -41,7 +41,9 @@ type Business = {
   devices: number;
   lastActiveAt: string | null;
   chains:{ id: string; name: string; isDefault: boolean; color: string | null }[];
-  branches: { id: string; name: string; chainId: string | null }[];
+  branches: { id: string; name: string; chainId: string | null; timezone: string }[];
+  fallbackPlaylistId: string | null;
+  playlistOptions: { id: string; name: string }[];
   grants: Grant[];
 };
 
@@ -53,13 +55,26 @@ function toneFor(s: string): string {
 }
 const initialOf = (name: string): string => (name.trim()[0] ?? "?").toUpperCase();
 const fmtDay = (iso: string | null): string => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
-const dayInput = (iso: string | null): string => (iso ? iso.slice(0, 10) : "");
+/** The "until" day: an end date now means 04:00 on the morning AFTER that day (branch time) → show the day before it. */
+const dayInput = (iso: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(Date.parse(iso) - 6 * 3_600_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 function fmtHours(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.round((sec % 3600) / 60);
   return h > 0 ? `${h} h ${m} min` : `${m} min`;
 }
-const isLive = (g: Grant): boolean => g.expiresAt == null || new Date(g.expiresAt).getTime() > Date.now();
+/** When a grant stops: the earlier of its close (next 04:00 after "off") and its end date. */
+const grantEnds = (g: Grant): number => Math.min(g.closesAt ? Date.parse(g.closesAt) : Infinity, g.expiresAt ? Date.parse(g.expiresAt) : Infinity);
+/** Still playing (also while a close is pending — it plays until the 04:00 close). */
+const isLive = (g: Grant): boolean => grantEnds(g) > Date.now();
+/** The switch: on = open with no close pending. */
+const switchOn = (g: Grant | null): boolean => g != null && !g.closesAt && isLive(g);
+/** A close is pending (switched off, still playing until the 04:00 close). */
+const isClosing = (g: Grant | null): boolean => g != null && !!g.closesAt && Date.parse(g.closesAt) > Date.now();
+const fmtWhen = (ms: number): string => new Date(ms).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 const STATUS: Record<string, { label: string; tone: string }> = {
@@ -175,6 +190,30 @@ export function BusinessesHub() {
     }
   }, []);
 
+  /** The business's fallback music (owner 2026-11-11): one of its playlists, or null = the general Royalty-Free mix. */
+  const setFallback = useCallback(async (businessId: string, playlistId: string | null) => {
+    setBusy(`${businessId}:fallback`);
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/platform/workspaces/${encodeURIComponent(businessId)}/fallback-playlist`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistId }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { fallbackPlaylistId?: string | null; error?: string };
+      if (!r.ok) {
+        setError(j.error ?? "The change was not saved.");
+        return;
+      }
+      setBusinesses((list) => (list ?? []).map((b) => (b.id !== businessId ? b : { ...b, fallbackPlaylistId: j.fallbackPlaylistId ?? null })));
+    } catch {
+      setError("The change was not saved.");
+    } finally {
+      setBusy(null);
+    }
+  }, []);
+
   const liveCount = (b: Business): number => b.grants.filter(isLive).length;
 
   const counts = useMemo(() => {
@@ -229,6 +268,7 @@ export function BusinessesHub() {
         now={now}
         onBack={() => setOpenId(null)}
         onSetGrant={setGrant}
+        onSetFallback={setFallback}
         onChanged={() => void load()}
       />
     );
@@ -356,13 +396,13 @@ export function BusinessesHub() {
               : [];
             const row = (b: Business) => {
               const g = b.grants.find((x) => x.bankId === bank.id) ?? null;
-              const on = g != null && isLive(g);
+              const on = switchOn(g);
               return (
                 <div key={b.id} className="sb-rh-row">
                   <span className="sb-pg-avatar sb-bz-mini" style={{ background: toneFor(b.name) }}>{initialOf(b.name)}</span>
                   <div className="sb-rh-rowtext">
                     <b>{b.name}</b>
-                    <small>{g ? (on ? (g.expiresAt ? `Open until ${fmtDay(g.expiresAt)}` : "Open · no end date") : `Ended ${fmtDay(g.expiresAt)}`) : "Closed"}{b.ownerEmail ? ` · ${b.ownerEmail}` : ""}</small>
+                    <small>{g ? (isClosing(g) && g.closesAt ? `Switched off · plays until ${fmtWhen(Date.parse(g.closesAt))}` : on ? (g.expiresAt ? `Open through ${dayInput(g.expiresAt)}` : "Open · no end date") : `Closed ${fmtDay(new Date(grantEnds(g)).toISOString())}`) : "Closed"}{b.ownerEmail ? ` · ${b.ownerEmail}` : ""}</small>
                   </div>
                   <Switch on={on} busy={busy === `${b.id}:${bank.id}`} label={`${bank.name} for ${b.name}`} onChange={(next) => void setGrant(b.id, bank.id, next, null)} />
                 </div>
@@ -413,6 +453,7 @@ function BusinessPage({
   now,
   onBack,
   onSetGrant,
+  onSetFallback,
   onChanged,
 }: {
   business: Business;
@@ -423,6 +464,7 @@ function BusinessPage({
   now: number;
   onBack: () => void;
   onSetGrant: (businessId: string, bankId: string, open: boolean, expiresAt: string | null) => Promise<void>;
+  onSetFallback: (businessId: string, playlistId: string | null) => Promise<void>;
   onChanged: () => void;
 }) {
   const [tab, setTab] = useState<PageTab>("banks");
@@ -459,16 +501,21 @@ function BusinessPage({
       {tab === "banks" ? (
         <section className="sb-bz-sec" aria-label="Music banks">
           <h3>Private banks</h3>
-          <p className="sb-psn-muted">A private bank shows and plays only for the businesses you open it to. Closing it removes it from their catalog and their players stop getting its songs.</p>
+          <p className="sb-psn-muted">A private bank shows and plays only for the businesses you open it to. Opening is immediate. Switching it off never cuts the music mid-day: it keeps playing until 04:00 the next morning (branch time), the station shows a notice, and then the business&apos;s fallback music plays.</p>
           {banks.map((bank) => {
             const g = b.grants.find((x) => x.bankId === bank.id) ?? null;
-            const on = g != null && isLive(g);
+            const on = switchOn(g);
+            const closing = isClosing(g);
             const key = `${b.id}:${bank.id}`;
             return (
               <div key={bank.id} className="sb-rh-row sb-rh-row--scope">
                 <div className="sb-rh-rowtext">
                   <b>{bank.name}</b>
-                  <small>{plural(bank.trackCount, "song", "songs")} · {fmtHours(bank.durationSeconds)}{g && !on ? ` · ended ${fmtDay(g.expiresAt)}` : ""}</small>
+                  <small>
+                    {plural(bank.trackCount, "song", "songs")} · {fmtHours(bank.durationSeconds)}
+                    {closing && g?.closesAt ? <span className="sb-bz-warn">{` · switched off — plays until ${fmtWhen(Date.parse(g.closesAt))}`}</span> : null}
+                    {g && !on && !closing ? ` · closed ${fmtDay(new Date(grantEnds(g)).toISOString())}` : ""}
+                  </small>
                 </div>
                 <Switch on={on} busy={busy === key} label={`${bank.name} for ${b.name}`} onChange={(next) => void onSetGrant(b.id, bank.id, next, null)} />
                 {on && g ? (
@@ -495,6 +542,30 @@ function BusinessPage({
               </div>
             );
           })}
+          <h3 className="sb-bz-sub">Fallback music</h3>
+          <p className="sb-psn-muted">What this business&apos;s stations play after a private bank closes. Never silence.</p>
+          <div className="sb-rh-row">
+            <div className="sb-rh-rowtext">
+              <b>{b.fallbackPlaylistId ? b.playlistOptions.find((p) => p.id === b.fallbackPlaylistId)?.name ?? "A deleted playlist (the general mix plays)" : "General mix"}</b>
+              <small>{b.fallbackPlaylistId ? "One of this business's playlists" : "A mix of all the public Royalty-Free genres"}</small>
+            </div>
+            <select
+              className="sb-bz-select"
+              value={b.fallbackPlaylistId ?? ""}
+              disabled={busy === `${b.id}:fallback`}
+              onChange={(e) => void onSetFallback(b.id, e.target.value || null)}
+              aria-label={`Fallback music for ${b.name}`}
+            >
+              <option value="">General mix (Royalty-Free)</option>
+              {b.playlistOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <p className="sb-psn-muted sb-bz-tz">
+            Branch time: {[...new Set(b.branches.map((br) => br.timezone || "UTC"))].join(", ") || "UTC (no branches)"}
+            {b.branches.some((br) => !br.timezone || br.timezone === "UTC") ? " — a branch on UTC closes at 06:00 Israel time." : ""}
+          </p>
         </section>
       ) : null}
 

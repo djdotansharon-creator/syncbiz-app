@@ -52,7 +52,9 @@ export async function POST(req: NextRequest) {
   const pocGenres = pocMediaFallbackAllowed() ? allPreviewGenreIds() : [];
   // owner 2026-11-10/11: a PRIVATE bank's songs are in the token only for a business it was opened to — no exception,
   // so what a person SEES in the catalog is exactly what their station can PLAY.
-  const openBanks = await accessiblePrivateBanks({ workspaceId: station ? station.workspaceId : user!.tenantId ?? null });
+  // 2026-11-11: "token" = a closed bank stays playable CLOSE_GRACE_MS past its 04:00 close, so the station switches to its
+  // fallback music at a song boundary instead of running into refused tracks (silence).
+  const openBanks = await accessiblePrivateBanks({ workspaceId: station ? station.workspaceId : user!.tenantId ?? null, purpose: "token" });
   const allowedGenres = scopeGenres([...new Set([...dbGenres, ...pocGenres])], openBanks.map((b) => b.id));
   if (allowedGenres.length === 0) {
     return NextResponse.json({ error: "No media catalog is available on this server." }, { status: 503 });
