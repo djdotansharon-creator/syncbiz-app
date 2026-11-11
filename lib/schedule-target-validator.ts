@@ -31,6 +31,8 @@ export async function validateScheduleTarget(
   workspaceId?: string | null,
 ): Promise<TargetValidationResult> {
   const bid = (branchId ?? "").trim() || "default";
+  // a quiet block has no music to look up (it only stops the music at its start)
+  if (targetType === "SILENCE") return { ok: true };
   const tid = (targetId ?? "").trim();
   if (!tid) {
     return { ok: false, error: "targetId is required" };

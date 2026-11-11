@@ -31,10 +31,13 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
   const isBranchConnected = device?.isBranchConnected ?? false;
   const hasMaster = !!device?.masterDeviceId;
   const stationPlay = device?.playSourceOrSend;
+  const stopOrSend = device?.stopOrSend;
 
   return useMemo(() => {
     const route = decideScheduleRoute({ isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster });
     const playSource = route.kind === "station" && stationPlay ? stationPlay : routedPlaySource;
-    return { stop, setQueue, playSource, setLastMessage, route };
-  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster]);
+    // a scheduled END / quiet block stops the music exactly like the Stop button does (on a station or a controller that is MAIN's STOP command)
+    const stopScheduled = stopOrSend ?? stop;
+    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled };
+  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster]);
 }

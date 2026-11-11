@@ -25,6 +25,7 @@ import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
+import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 import {
   DAY_MINUTES,
   WEEK_DAYS,
@@ -56,6 +57,8 @@ const PANEL_KEY = "syncbiz-schedule-lib-panel";
 const VIEW_KEY = "syncbiz-schedule-view";
 const POPOVER_W = 344;
 const BLOCK_COLORS_KEY = "syncbiz-sched-block-colors-v1";
+const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
+const CLOSING_NAME = "Closing"; // the quiet block the Day-hours dialog keeps for each closing time
 
 type RadioRow = { id: string; name: string; branchId?: string | null };
 type BranchRow = { id: string; name: string };
@@ -73,7 +76,7 @@ type LibItem = {
   targetId: string;
   name: string;
   cover: string | null;
-  kind: "playlist" | "song" | "radio";
+  kind: "playlist" | "song" | "radio" | "quiet";
   sub: string;
   branchId: string;
   /** the Apple colour of this music: taken from its own cover (or a stable fallback) */
@@ -109,6 +112,9 @@ function clearLocalAutoPrefs(id: string) {
   }
 }
 
+/** a block that is being dragged on a day it shares with others is drawn as a virtual copy ("#drag") while the pointer is down */
+const baseId = (id: string) => (id.endsWith("#drag") ? id.slice(0, -5) : id);
+const isMultiDayWeekly = (s: Schedule) => s.recurrence !== "one_off" && (s.daysOfWeek?.length ?? 0) > 1;
 const isRtl = () => typeof document !== "undefined" && document.documentElement.getAttribute("dir") === "rtl";
 const pct = (min: number) => ((Math.min(Math.max(min, FIRST_H * 60), LAST_H * 60) - FIRST_H * 60) / SPAN) * 100;
 const topOf = (min: number) => ((Math.max(min, FIRST_H * 60) - FIRST_H * 60) * HOUR_H) / 60;
@@ -130,7 +136,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const T = t as unknown as Record<string, string>;
   const { locale } = useLocale();
   const { engineEnabled, setEngineEnabled } = useScheduleEngine();
-  const { setLastMessage, stop, setQueue, playSource, route } = useSchedulePlaybackHandlers();
+  const { setLastMessage, stop, stopScheduled, setQueue, playSource, route } = useSchedulePlaybackHandlers();
 
   const [items, setItems] = useState<Schedule[]>(initialSchedules);
   useEffect(() => setItems(initialSchedules), [initialSchedules]);
@@ -144,7 +150,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [menu, setMenu] = useState<{ id: string; rect: Rect; day: number } | null>(null);
   const [hover, setHover] = useState<{ key: string; min: number } | null>(null);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; start: number } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string } | null>(null);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const [clipDay, setClipDay] = useState<number | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -201,7 +209,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const lib = useMemo<LibItem[]>(() => {
     const out: LibItem[] = [];
     const colour = (targetType: string, targetId: string) => paletteIndex(`${targetType}:${targetId}`);
-    const bid = (targetType: ScheduleTargetType, targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
+    const bid = (targetType: Exclude<ScheduleTargetType, "SILENCE">, targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
     for (const p of playlists) {
       out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: "playlist", sub: p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id) });
     }
@@ -215,7 +223,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }, [playlists, sources, radioStations, tr]);
   const libMap = useMemo(() => new Map(lib.map((l) => [l.key, l])), [lib]);
   const libFor = useCallback((s: Schedule) => libMap.get(scheduleTargetKey(s.targetType, (s.targetId || s.sourceId || "").trim())) ?? null, [libMap]);
-  const nameOf = (s: Schedule) => libFor(s)?.name ?? s.name ?? tr("Schedule");
+  // "Quiet — no music": a block that stops the music at its start (the engine's SILENCE target). It lives in the music list as the first row.
+  const quietItem = useMemo<LibItem>(() => ({ key: scheduleTargetKey("SILENCE", "silence"), targetType: "SILENCE", targetId: "silence", name: tr("Quiet"), cover: null, kind: "quiet", sub: tr("No music"), branchId: "", ci: 17 }), [tr]);
+  const quietBranch = branchFilter !== "all" ? branchFilter : branchIds[0] ?? branches[0]?.id ?? "default";
+  const nameOf = (s: Schedule) => (isSilenceBlock(s) ? (s.name === CLOSING_NAME ? tr("Closing") : tr("Quiet")) : libFor(s)?.name ?? s.name ?? tr("Schedule"));
   // the colour of a block: the one the owner chose (remembered in this browser), else its base shade of blue
   useEffect(() => {
     try {
@@ -238,7 +249,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       return next;
     });
   }, []);
-  const colourOf = (s: Schedule) => blockColors[s.id] ?? libFor(s)?.ci ?? paletteIndex(`${s.targetType}:${s.targetId}`);
+  const colourOf = (s: Schedule) => blockColors[baseId(s.id)] ?? libFor(s)?.ci ?? paletteIndex(`${s.targetType}:${s.targetId}`);
 
   // ── the time in view ──
   const clock = now ?? new Date();
@@ -264,7 +275,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const isTodayInView = view === "day" ? focusKey === todayKey : weekDates.includes(todayKey);
 
   // ── what is scheduled ──
-  const viewItems = useMemo(() => (drag ? items.map((s) => (s.id === drag.id ? { ...s, startTimeLocal: minutesToTimeLocal(drag.start) } : s)) : items), [items, drag]);
+  const viewItems = useMemo(() => {
+    if (!drag) return items;
+    const src = items.find((s) => s.id === drag.id);
+    if (!src) return items;
+    const start = minutesToTimeLocal(drag.start);
+    const edit = { startTimeLocal: start, ...(drag.end ? { endTimeLocal: drag.end } : {}) };
+    // a block shared by several days: ONLY the day under the pointer moves (the others stay where they are)
+    if (isMultiDayWeekly(src)) {
+      return [...items.filter((s) => s.id !== src.id), { ...src, daysOfWeek: src.daysOfWeek.filter((d) => d !== drag.day) }, { ...src, id: `${src.id}#drag`, daysOfWeek: [drag.day], ...edit }];
+    }
+    return items.map((s) => (s.id === drag.id ? { ...s, ...edit } : s));
+  }, [items, drag]);
   const shownItems = useMemo(() => (branchFilter === "all" ? viewItems : viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === branchFilter)), [viewItems, branchFilter]);
   const weekScenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(shownItems, d, weekDates)), [shownItems, weekDates]);
   const dayRows = useMemo(() => {
@@ -273,6 +295,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates]);
   const todayScenes = useMemo(() => buildDayScenes(items, clock.getDay(), weekDatesFor(clock)), [items, todayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const nowMin = clock.getHours() * 60 + clock.getMinutes();
+  const hoursBranches = useMemo(() => {
+    const ids = Array.from(new Set([...branches.map((b) => b.id), ...branchIds]));
+    return (ids.length ? ids : ["default"]).map((id) => ({ id, name: branchName(id) }));
+  }, [branches, branchIds, branchName]);
   const { now: nowScene, next: nextScene } = useMemo(() => nowAndNext(todayScenes, nowMin), [todayScenes, nowMin]);
   const editing = editor?.kind === "edit" ? items.find((s) => s.id === editor.id) ?? null : null;
 
@@ -321,10 +347,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   );
 
   const create = useCallback(
-    (item: LibItem, day: number, min: number) =>
+    (item: LibItem, day: number, min: number, branchId?: string) =>
       createFromBody({
-        name: item.name,
-        branchId: item.branchId,
+        name: item.targetType === "SILENCE" ? "Quiet" : item.name,
+        // a quiet block belongs to the branch whose row / filter it was added in
+        branchId: item.targetType === "SILENCE" ? branchId ?? quietBranch : item.branchId,
         targetType: item.targetType,
         targetId: item.targetId,
         sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
@@ -334,7 +361,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         enabled: true,
         priority: 1,
       }),
-    [createFromBody],
+    [createFromBody, quietBranch],
   );
 
   const removeNow = useCallback(
@@ -381,6 +408,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }
 
   async function playNow(s: Schedule) {
+    if (isSilenceBlock(s)) {
+      // a quiet block's "play now" is "stop now" — the Stop button's own path
+      (stopScheduled ?? stop)();
+      showToast(tr("Stopped"));
+      return;
+    }
     const sid = s.targetType === "SOURCE" ? s.targetId : s.sourceId;
     const source = sources.find((x) => x.id === (sid ?? "").trim()) ?? null;
     setLastMessage(null);
@@ -393,8 +426,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   // ── copy / paste: the same music at exactly the same hour, one time, on another date ──
   const copyBlock = useCallback(
-    (s: Schedule) => {
+    (s: Schedule, day?: number) => {
       setClip(s);
+      setClipDay(day);
       showToast(tr("Copied — click a day's title to paste it there at the same hour."));
     },
     [showToast, tr],
@@ -410,10 +444,110 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     },
     [clip, createFromBody, removeNow, showToast, tr, blockColors, setBlockColor], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // ── editing ONE day's block: its start (a move) and / or its END (owner 2026-11-11: "when I stand on a specific song, it moves by itself") ──
+  // A block that repeats on several days is one schedule in the data. Editing one day's block detaches that day: the others keep their time, the edited
+  // day becomes its own weekly block (Undo puts it back). A block of one day, or a one-time block, is simply edited. A block that has an END keeps its length when it moves.
+  const editOccurrence = useCallback(
+    async (src: Schedule, day: number, edit: { start?: number; end?: number | null }) => {
+      const oldStart = startMinutes(src);
+      const oldEnd = explicitEndMinutes(src);
+      const newStart = edit.start ?? oldStart;
+      let newEnd: number | null = edit.end !== undefined ? edit.end : oldEnd !== null ? Math.min(END_MAX, oldEnd + (newStart - oldStart)) : null;
+      if (newEnd !== null && newEnd <= newStart) newEnd = null;
+      if (newStart === oldStart && newEnd === oldEnd) return;
+      const patch: Partial<Schedule> = {};
+      if (newStart !== oldStart) patch.startTimeLocal = minutesToTimeLocal(newStart);
+      if (newEnd !== oldEnd) patch.endTimeLocal = newEnd === null ? "23:59:00" : minutesToTimeLocal(newEnd);
+      const endNote = newEnd !== oldEnd ? (newEnd === null ? tr("Runs until the next block") : tr("Ends {time}", { time: formatMinutes(newEnd) })) : "";
+      if (!isMultiDayWeekly(src)) {
+        await update(src.id, patch);
+        if (endNote) showToast(endNote, () => void update(src.id, { endTimeLocal: src.endTimeLocal || "23:59:00" }));
+        return;
+      }
+      const rest = src.daysOfWeek.filter((d) => d !== day);
+      const before = items;
+      const tmp: Schedule = { ...src, id: `tmp-${Date.now()}`, daysOfWeek: [day], ...patch };
+      setItems((prev) => [...prev.map((x) => (x.id === src.id ? { ...x, daysOfWeek: rest } : x)), tmp]);
+      const tid = (src.targetId || src.sourceId || "").trim();
+      try {
+        const created = await api<Schedule>("POST", "/api/schedules", {
+          name: src.name,
+          branchId: src.branchId,
+          targetType: src.targetType,
+          targetId: tid,
+          sourceId: src.targetType === "SOURCE" ? tid : undefined,
+          deviceId: src.deviceId || undefined,
+          recurrence: "weekly",
+          daysOfWeek: [day],
+          startTimeLocal: patch.startTimeLocal ?? src.startTimeLocal,
+          endTimeLocal: patch.endTimeLocal ?? (src.endTimeLocal || undefined),
+          enabled: src.enabled,
+          priority: typeof src.priority === "number" ? src.priority : 1,
+        });
+        try {
+          await api("PATCH", `/api/schedules/${encodeURIComponent(src.id)}`, { daysOfWeek: rest });
+        } catch (e) {
+          await api("DELETE", `/api/schedules/${encodeURIComponent(created.id)}`).catch(() => {});
+          throw e;
+        }
+        setItems((prev) => prev.map((x) => (x.id === tmp.id ? created : x)));
+        if (blockColors[src.id] !== undefined) setBlockColor(created.id, blockColors[src.id]!);
+        showToast(`${endNote || `${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)}`} — ${tr("this day only")}`, () => {
+          void removeNow(created.id).then(() => update(src.id, { daysOfWeek: src.daysOfWeek }));
+        });
+      } catch (e) {
+        setItems(before);
+        showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+      }
+    },
+    [items, update, removeNow, blockColors, setBlockColor, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const removeFromDay = useCallback(
+    (src: Schedule, day: number) => {
+      const rest = src.daysOfWeek.filter((d) => d !== day);
+      if (rest.length === 0) return;
+      void update(src.id, { daysOfWeek: rest });
+      showToast(tr("Removed from {day}", { day: dayName(day, "long") }), () => void update(src.id, { daysOfWeek: src.daysOfWeek }));
+    },
+    [update, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // ── Day hours: a closing time per day = one weekly quiet block named "Closing" for each distinct time (days that share a time share a block) ──
+  // New blocks are created first, then the old ones that are no longer wanted are removed, so a failure never leaves a day without its closing.
+  const saveClosing = useCallback(
+    async (branchId: string, desired: (number | null)[]): Promise<boolean> => {
+      const inBranch = (x: Schedule) => ((x.branchId ?? "default").trim() || "default") === branchId;
+      const existing = items.filter((x) => isSilenceBlock(x) && x.name === CLOSING_NAME && x.recurrence !== "one_off" && inBranch(x));
+      const groups = new Map<number, number[]>();
+      desired.forEach((m, d) => {
+        if (m !== null) groups.set(m, [...(groups.get(m) ?? []), d]);
+      });
+      const keep = new Set<string>();
+      const toCreate: { m: number; days: number[] }[] = [];
+      for (const [m, days] of groups) {
+        const hit = existing.find((e) => !keep.has(e.id) && e.enabled && startMinutes(e) === m && e.daysOfWeek.length === days.length && days.every((d) => e.daysOfWeek.includes(d)));
+        if (hit) keep.add(hit.id);
+        else toCreate.push({ m, days });
+      }
+      for (const g of toCreate) {
+        const created = await createFromBody({ name: CLOSING_NAME, branchId, targetType: "SILENCE", targetId: "silence", recurrence: "weekly", daysOfWeek: g.days, startTimeLocal: minutesToTimeLocal(g.m), enabled: true, priority: 1 });
+        if (!created) return false;
+      }
+      for (const e of existing) {
+        if (keep.has(e.id)) continue;
+        if (!(await removeNow(e.id))) return false;
+      }
+      showToast(tr("Closing saved"));
+      return true;
+    },
+    [items, createFromBody, removeNow, showToast, tr],
+  );
+
   const pasteHint = tr("Point at a day (or open the Day view), then paste.");
-  const latest = useRef({ editing, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint });
+  const editorDay = editor?.day;
+  const latest = useRef({ editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint });
   useEffect(() => {
-    latest.current = { editing, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint };
+    latest.current = { editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -422,7 +556,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "c" && L.editing) {
         e.preventDefault();
-        L.copyBlock(L.editing);
+        L.copyBlock(L.editing, L.editorDay);
       } else if (mod && e.key.toLowerCase() === "v" && L.clip) {
         const ymd = L.hoverDate ?? (L.view === "day" ? L.focusKey : null);
         e.preventDefault();
@@ -461,16 +595,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const m = minuteAtPointer(e.clientX, e.clientY, e.currentTarget, orient);
     if (!hover || hover.key !== key || hover.min !== m) setHover({ key, min: m });
   };
-  const trackDrop = async (e: React.DragEvent<HTMLDivElement>, day: number, orient: Orient) => {
+  const trackDrop = async (e: React.DragEvent<HTMLDivElement>, day: number, orient: Orient, branchId?: string) => {
     const key = e.dataTransfer.getData("application/x-ss-lib");
     if (!key) return;
     e.preventDefault();
     const m = minuteAtPointer(e.clientX, e.clientY, e.currentTarget, orient);
     const rect: Rect = { x: e.clientX, y: e.clientY, w: 0, h: 0 };
     setHover(null);
-    const item = libMap.get(key);
+    const item = key === quietItem.key ? quietItem : libMap.get(key);
     if (!item) return;
-    const created = await create(item, day, m);
+    const created = await create(item, day, m, branchId);
     if (created) setEditor({ kind: "edit", id: created.id, rect, day });
   };
 
@@ -489,7 +623,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (!moved && Math.abs(d) < 5) return;
       moved = true;
       last = snapMinutes(startMin + d / perMin, 5);
-      setDrag({ id: sc.schedule.id, start: last });
+      const own = explicitEndMinutes(sc.schedule);
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}) });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -501,7 +636,36 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         return;
       }
       setDrag(null);
-      if (last !== startMin) void update(sc.schedule.id, { startTimeLocal: minutesToTimeLocal(last) });
+      if (last !== startMin) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
+  // the END of a block: drag its bottom edge (week) / far edge (day) — snapped to 5 minutes; dragged to the very end of the day = "until the next block" again
+  const onEndPointerDown = (e: React.PointerEvent<HTMLElement>, sc: Scene, orient: Orient) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const track = (e.currentTarget.closest(".ss-block") as HTMLElement).parentElement as HTMLElement;
+    const startPt = orient === "v" ? e.clientY : e.clientX;
+    const perMin = orient === "v" ? HOUR_H / 60 : (track.getBoundingClientRect().width / SPAN) * (isRtl() ? -1 : 1);
+    const begin = startMinutes(sc.schedule);
+    const from = explicitEndMinutes(sc.schedule) ?? Math.min(sc.end, DAY_MINUTES - 1);
+    let last: number | null = explicitEndMinutes(sc.schedule);
+    const move = (ev: PointerEvent) => {
+      const d = (orient === "v" ? ev.clientY : ev.clientX) - startPt;
+      const m = snapMinutes(from + d / perMin, 5);
+      last = m >= END_MAX ? null : Math.max(begin + 5, m);
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: begin, end: last === null ? "23:59:00" : minutesToTimeLocal(last) });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setDrag(null);
+      void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { end: last });
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -517,11 +681,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       orient === "v"
         ? { top: topOf(sc.start), height: vHeight }
         : { insetInlineStart: `${pct(sc.start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(sc.start))}% - 4px)` };
-    const cls = `ss-block ss-block--${orient}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag?.id === sc.schedule.id ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id ? " is-copied" : ""}`;
+    const cls = `ss-block ss-block--${orient}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
     const tall = orient === "v" && vHeight > 60;
     return (
       <div
-        key={`${sc.schedule.id}-${orient}-${sc.day}`}
+        key={`${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
         className={cls}
         data-c={colourOf(sc.schedule)}
         style={style}
@@ -542,7 +706,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         }}
         title={sc.shadowed ? tr("Won't play — another block starts at the same time") : sc.paused ? tr("Paused") : undefined}
       >
-        {li?.cover && !sc.paused ? (
+        {li?.cover && !sc.paused && !sc.quiet ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img className="ss-b-cover" src={li.cover} alt="" draggable={false} loading="lazy" />
         ) : null}
@@ -550,6 +714,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           <span className="ss-b-name">{nameOf(sc.schedule)}</span>
           <span className="ss-b-time">{formatMinutes(sc.start)}{!sc.paused && !sc.shadowed && (orient === "h" || tall) ? ` – ${formatMinutes(Math.min(sc.end, DAY_MINUTES - 1))}` : ""}</span>
         </span>
+        {!sc.shadowed && !sc.paused && !sc.quiet ? (
+          <span
+            className="ss-b-resize"
+            onPointerDown={(e) => onEndPointerDown(e, sc, orient)}
+            title={tr("Drag the bottom edge to set when it ends")}
+            aria-hidden
+          />
+        ) : null}
         {!sc.shadowed ? (
           <button
             type="button"
@@ -613,6 +785,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
               <span className="ss-switch-label">{tr("Auto-play")}</span>
               <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
             </button>
+            <button type="button" className="ss-btn ss-btn--ghost" onClick={() => setHoursOpen(true)}>{tr("Day hours")}</button>
             <button type="button" className="ss-btn" onClick={addNow}>
               <span aria-hidden className="ss-plus">+</span> {tr("Add music")}
             </button>
@@ -722,7 +895,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       onClick={(e) => trackClick(e, focusDay, "h", dayRows.length > 1 ? row.id : undefined)}
                       onDragOver={(e) => trackDragOver(e, `r${row.id}`, "h")}
                       onDragLeave={() => setHover(null)}
-                      onDrop={(e) => void trackDrop(e, focusDay, "h")}
+                      onDrop={(e) => void trackDrop(e, focusDay, "h", dayRows.length > 1 ? row.id : undefined)}
                     >
                       {row.scenes.map((sc) => renderBlock(sc, "h"))}
                       {hover?.key === `r${row.id}` ? (
@@ -744,7 +917,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       <li key={sc.schedule.id} className="ss-ag-li">
                         <button
                           type="button"
-                          className={`ss-ag${live ? " is-live" : ""}${sc.paused ? " is-paused" : ""}`}
+                          className={`ss-ag${live ? " is-live" : ""}${sc.paused ? " is-paused" : ""}${sc.quiet ? " is-quiet" : ""}`}
                           data-c={colourOf(sc.schedule)}
                           onClick={(e) => {
                             const r = e.currentTarget.getBoundingClientRect();
@@ -752,7 +925,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                           }}
                         >
                           <span className="ss-ag-time" dir="ltr">{formatMinutes(sc.start)} – {formatMinutes(Math.min(sc.end, DAY_MINUTES - 1))}</span>
-                          {li ? <Cover item={li} /> : <span className="ss-cover ss-cover--ph" aria-hidden>♪</span>}
+                          {sc.quiet ? <Cover item={quietItem} /> : li ? <Cover item={li} /> : <span className="ss-cover ss-cover--ph" aria-hidden>♪</span>}
                           <span className="ss-ag-name"><bdi>{nameOf(sc.schedule)}</bdi></span>
                           {live ? <span className="ss-ag-live">{tr("Now")}</span> : sc.paused ? <span className="ss-ag-live ss-ag-live--dim">{tr("Paused")}</span> : null}
                         </button>
@@ -780,7 +953,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       </div>
 
       <aside className="ss-panel" aria-hidden={!panelOpen} inert={!panelOpen}>
-        <LibraryPanel lib={lib} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), 22 * 60); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
+        <LibraryPanel lib={lib} quiet={quietItem} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), 22 * 60); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
       </aside>
 
       {menu && items.find((x) => x.id === menu.id) ? (
@@ -788,11 +961,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           key={menu.id}
           menu={menu}
           schedule={items.find((x) => x.id === menu.id)!}
+          quiet={isSilenceBlock(items.find((x) => x.id === menu.id)!)}
           onClose={() => setMenu(null)}
           onEdit={() => { setEditor({ kind: "edit", id: menu.id, rect: menu.rect, day: menu.day }); setMenu(null); }}
           onPlay={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void playNow(sc); }}
-          onCopy={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) copyBlock(sc); }}
-          onNudge={(d) => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void update(sc.id, { startTimeLocal: minutesToTimeLocal(Math.min(DAY_MINUTES - 1, Math.max(0, startMinutes(sc) + d))) }); }}
+          onCopy={() => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) copyBlock(sc, d); }}
+          multiDay={isMultiDayWeekly(items.find((x) => x.id === menu.id)!)}
+          dayLabel={dayName(menu.day, "long")}
+          onRemoveDay={() => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) removeFromDay(sc, d); }}
+          onNudge={(delta) => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) void editOccurrence(sc, d, { start: Math.min(DAY_MINUTES - 1, Math.max(0, startMinutes(sc) + delta)) }); }}
           colour={colourOf(items.find((x) => x.id === menu.id)!)}
           onColour={(i) => { setBlockColor(menu.id, i); setMenu(null); }}
           onMoreColours={() => { setEditor({ kind: "edit", id: menu.id, rect: menu.rect, day: menu.day }); setMenu(null); }}
@@ -806,7 +983,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           key={editor.kind === "edit" ? editor.id : `new-${editor.day}-${editor.min}`}
           editor={editor}
           schedule={editing}
-          lib={editor.kind === "new" && editor.branchId ? lib.filter((l) => l.branchId === editor.branchId) : lib}
+          lib={[quietItem, ...(editor.kind === "new" && editor.branchId ? lib.filter((l) => l.branchId === editor.branchId) : lib)]}
           libFor={libFor}
           devices={devices}
           colour={editing ? colourOf(editing) : 0}
@@ -817,23 +994,35 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           onClose={() => setEditor(null)}
           onPick={async (item) => {
             if (editor.kind === "new") {
-              const created = await create(item, editor.day, editor.min);
+              const created = await create(item, editor.day, editor.min, editor.branchId);
               if (created) setEditor({ kind: "edit", id: created.id, rect: editor.rect, day: editor.day });
               else setEditor(null);
             } else if (editing) {
               void update(editing.id, {
-                name: item.name,
+                name: item.targetType === "SILENCE" ? "Quiet" : item.name,
                 targetType: item.targetType,
                 targetId: item.targetId,
                 sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
-                branchId: item.branchId,
+                ...(item.targetType === "SILENCE" ? {} : { branchId: item.branchId }),
               });
             }
           }}
           onPatch={(patch) => editing && void update(editing.id, patch)}
           onDelete={() => { if (!editing) return; setDeleteError(null); setDeleteId(editing.id); setEditor(null); }}
           onPlay={() => editing && void playNow(editing)}
-          onCopy={() => { if (editing) { copyBlock(editing); setEditor(null); } }}
+          onCopy={() => { if (editing) { copyBlock(editing, editor?.day); setEditor(null); } }}
+        />
+      ) : null}
+
+      {hoursOpen ? (
+        <DayHoursDialog
+          branches={hoursBranches}
+          initialBranch={hoursBranches.some((b) => b.id === quietBranch) ? quietBranch : hoursBranches[0]!.id}
+          items={items}
+          weekDates={weekDates}
+          dayName={dayName}
+          onClose={() => setHoursOpen(false)}
+          onSave={saveClosing}
         />
       ) : null}
 
@@ -866,6 +1055,7 @@ function useFilteredLib(lib: LibItem[]) {
 }
 
 function Cover({ item }: { item: LibItem }) {
+  if (item.kind === "quiet") return <span className="ss-cover ss-cover--quiet" aria-hidden />;
   return item.cover ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img className="ss-cover" src={item.cover} alt="" draggable={false} loading="lazy" />
@@ -892,13 +1082,30 @@ function FilterBar({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: st
   );
 }
 
-function LibraryPanel({ lib, onAddNext }: { lib: LibItem[]; onAddNext: (it: LibItem) => void }) {
+function LibraryPanel({ lib, quiet, onAddNext }: { lib: LibItem[]; quiet: LibItem; onAddNext: (it: LibItem) => void }) {
   const tr = useTr();
   const f = useFilteredLib(lib);
   return (
     <div className="ss-panel-in">
       <h2 className="ss-panel-title">{tr("Your music")}</h2>
       <FilterBar f={f} tr={tr} />
+      <ul className="ss-list ss-list--quiet">
+        <li
+          className="ss-row ss-row--quiet"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("application/x-ss-lib", quiet.key);
+            e.dataTransfer.effectAllowed = "copy";
+          }}
+        >
+          <Cover item={quiet} />
+          <span className="ss-row-text">
+            <span className="ss-row-name">{tr("Quiet — no music")}</span>
+            <span className="ss-row-sub">{tr("Quiet block: the music stops when it starts, until the next block.")}</span>
+          </span>
+          <button type="button" className="ss-row-add" onClick={() => onAddNext(quiet)} title={tr("Add quiet")} aria-label={tr("Add quiet")}>+</button>
+        </li>
+      </ul>
       <ul className="ss-list">
         {f.shown.map((it) => (
           <li
@@ -944,10 +1151,14 @@ function ColorSwatches({ value, onPick }: { value: number; onPick: (i: number) =
 const MENU_W = 224;
 
 function BlockMenu({
-  menu, schedule, colour, onColour, onMoreColours, onClose, onEdit, onPlay, onCopy, onNudge, onToggle, onDelete,
+  menu, schedule, quiet, multiDay, dayLabel, onRemoveDay, colour, onColour, onMoreColours, onClose, onEdit, onPlay, onCopy, onNudge, onToggle, onDelete,
 }: {
   menu: { id: string; rect: Rect; day: number };
   schedule: Schedule;
+  quiet: boolean;
+  multiDay: boolean;
+  dayLabel: string;
+  onRemoveDay: () => void;
   colour: number;
   onColour: (i: number) => void;
   onMoreColours: () => void;
@@ -1019,21 +1230,22 @@ function BlockMenu({
       style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: MENU_W, visibility: pos ? "visible" : "hidden" }}
     >
       {item(T.edit ?? tr("Edit"), onEdit)}
-      {item(T.playNow ?? tr("Play now"), onPlay)}
+      {item(quiet ? tr("Stop now") : T.playNow ?? tr("Play now"), onPlay)}
       {item(tr("Copy"), onCopy, { hint: mac ? "⌘C" : "Ctrl+C" })}
       <hr />
       {item(tr("15 minutes earlier"), () => onNudge(-15))}
       {item(tr("15 minutes later"), () => onNudge(15))}
       {item(schedule.enabled ? tr("Pause") : tr("Resume"), onToggle)}
-      <hr />
-      <div className="ss-menu-colors" role="group" aria-label={tr("Color")}>
+      {quiet ? null : <hr />}
+      {quiet ? null : <div className="ss-menu-colors" role="group" aria-label={tr("Color")}>
         {Array.from({ length: BLUE_SHADES }, (_, i) => (
           <button key={i} type="button" className={`ss-sw${colour === i ? " is-on" : ""}`} data-c={i} aria-label={`${tr("Color")} ${i + 1}`} aria-pressed={colour === i} onClick={() => onColour(i)} />
         ))}
         <button type="button" className={`ss-sw ss-sw--more${colour >= BLUE_SHADES ? " is-on" : ""}`} data-c={colour >= BLUE_SHADES ? colour : undefined} aria-label={tr("More colors")} title={tr("More colors")} onClick={onMoreColours}><i /><i /><i /></button>
-      </div>
+      </div>}
       <hr />
-      {item(T.delete ?? tr("Delete"), onDelete, { danger: true })}
+      {multiDay ? item(tr("Remove from {day}", { day: dayLabel }), onRemoveDay) : null}
+      {item(multiDay ? tr("Delete all days") : (T.delete ?? tr("Delete")), onDelete, { danger: true })}
     </div>,
     document.body,
   );
@@ -1102,7 +1314,8 @@ function ScenePopover({
   const [choosing, setChoosing] = useState(editor.kind === "new");
   const f = useFilteredLib(lib);
   const { autoPlaybackOff, setAutoPlaybackOff } = useScheduleBlockAuto(schedule?.id ?? "none");
-  const li = schedule ? libFor(schedule) : null;
+  const quiet = !!schedule && isSilenceBlock(schedule);
+  const li = schedule && !quiet ? libFor(schedule) : null;
   const rtl = isRtl();
 
   // place it beside the block (or the click), keep it inside the window
@@ -1148,7 +1361,19 @@ function ScenePopover({
   };
   const kind = daysKind(days);
   const startMin = schedule ? startMinutes(schedule) : 0;
-  const stepStart = (delta: number) => onPatch({ startTimeLocal: minutesToTimeLocal(Math.min(DAY_MINUTES - 1, Math.max(0, startMin + delta))) });
+  // a block that has an END keeps its length when its start changes
+  const endMin = schedule ? explicitEndMinutes(schedule) : null;
+  const patchStart = (m: number) => {
+    const next: Partial<Schedule> = { startTimeLocal: minutesToTimeLocal(m) };
+    if (endMin !== null) {
+      const e = Math.min(END_MAX, endMin + (m - startMin));
+      next.endTimeLocal = e > m ? minutesToTimeLocal(e) : "23:59:00";
+    }
+    onPatch(next);
+  };
+  const stepStart = (delta: number) => patchStart(Math.min(DAY_MINUTES - 1, Math.max(0, startMin + delta)));
+  const setEnd = (m: number) => onPatch({ endTimeLocal: minutesToTimeLocal(Math.min(END_MAX, Math.max(startMin + 5, m))) });
+  const canEnd = startMin + 5 <= END_MAX;
   const weekdayOfDate = (ymd: string) => new Date(`${ymd}T12:00:00`).getDay();
   const repeatLabel = !oneOff && days.length === 1 ? tr("Repeats every {day}", { day: dayName(days[0]!, "long") }) : tr("Repeats weekly");
 
@@ -1193,10 +1418,10 @@ function ScenePopover({
       ) : (
         <div className="ss-pop-edit">
           <div className="ss-pop-what">
-            {li ? <Cover item={li} /> : <span className="ss-cover ss-cover--ph" data-c={colour} aria-hidden>♪</span>}
+            {quiet ? <span className="ss-cover ss-cover--quiet" aria-hidden /> : li ? <Cover item={li} /> : <span className="ss-cover ss-cover--ph" data-c={colour} aria-hidden>♪</span>}
             <span className="ss-row-text">
-              <span className="ss-row-name">{li?.name ?? schedule.name ?? tr("Schedule")}</span>
-              <span className="ss-row-sub">{li?.sub ?? ""}</span>
+              <span className="ss-row-name">{quiet ? (schedule.name === CLOSING_NAME ? tr("Closing") : tr("Quiet")) : li?.name ?? schedule.name ?? tr("Schedule")}</span>
+              <span className="ss-row-sub">{quiet ? tr("No music") : li?.sub ?? ""}</span>
             </span>
             <button type="button" className="ss-linkbtn" onClick={() => setChoosing(true)}>{tr("Change")}</button>
           </div>
@@ -1205,10 +1430,27 @@ function ScenePopover({
             <span className="ss-label">{tr("Starts at")}</span>
             <div className="ss-stepper">
               <button type="button" onClick={() => stepStart(-15)} aria-label="−15">−</button>
-              <TimeInput key={formatMinutes(startMin)} minutes={startMin} onCommit={(m) => onPatch({ startTimeLocal: minutesToTimeLocal(m) })} label={tr("Starts at")} />
+              <TimeInput key={formatMinutes(startMin)} minutes={startMin} onCommit={(m) => patchStart(m)} label={tr("Starts at")} />
               <button type="button" onClick={() => stepStart(15)} aria-label="+15">+</button>
             </div>
           </div>
+
+          {quiet ? null : (
+            <div className="ss-field">
+              <span className="ss-label">{tr("Ends at")}</span>
+              <div className="ss-endmode" role="group" aria-label={tr("Ends at")}>
+                <button type="button" className={endMin === null ? "is-on" : ""} aria-pressed={endMin === null} onClick={() => endMin !== null && onPatch({ endTimeLocal: "23:59:00" })}>{tr("Until the next block")}</button>
+                <button type="button" className={endMin !== null ? "is-on" : ""} aria-pressed={endMin !== null} disabled={!canEnd} onClick={() => endMin === null && setEnd(startMin + 60)}>{tr("At a time")}</button>
+              </div>
+              {endMin !== null ? (
+                <div className="ss-stepper">
+                  <button type="button" onClick={() => setEnd(endMin - 15)} aria-label="−15">−</button>
+                  <TimeInput key={formatMinutes(endMin)} minutes={endMin} onCommit={setEnd} label={tr("Ends at")} />
+                  <button type="button" onClick={() => setEnd(endMin + 15)} aria-label="+15">+</button>
+                </div>
+              ) : null}
+            </div>
+          )}
 
           <div className="ss-field">
             <button
@@ -1249,12 +1491,14 @@ function ScenePopover({
             )}
           </div>
 
-          <div className="ss-field">
-            <span className="ss-label">{tr("Color")}</span>
-            <ColorSwatches value={colour} onPick={onColour} />
-          </div>
+          {quiet ? null : (
+            <div className="ss-field">
+              <span className="ss-label">{tr("Color")}</span>
+              <ColorSwatches value={colour} onPick={onColour} />
+            </div>
+          )}
 
-          {devices.length > 0 ? (
+          {devices.length > 0 && !quiet ? (
             <div className="ss-field">
               <span className="ss-label">{T.device}</span>
               <select className="ss-select" value={schedule.deviceId ?? ""} onChange={(e) => onPatch({ deviceId: e.target.value || undefined })}>
@@ -1275,7 +1519,7 @@ function ScenePopover({
           </div>
 
           <div className="ss-pop-actions">
-            <button type="button" className="ss-btn ss-btn--ghost" onClick={onPlay}>▶ {T.playNow}</button>
+            <button type="button" className="ss-btn ss-btn--ghost" onClick={onPlay}>{quiet ? `■ ${tr("Stop now")}` : `▶ ${T.playNow}`}</button>
             <button type="button" className="ss-btn ss-btn--ghost" onClick={onCopy} title="Ctrl/⌘ + C">{tr("Copy")}</button>
             <button type="button" className="ss-btn ss-btn--danger" onClick={onDelete}>{T.delete}</button>
             <button type="button" className="ss-btn ss-btn--primary" onClick={onClose}>{tr("Done")}</button>
@@ -1284,5 +1528,129 @@ function ScenePopover({
       )}
     </div>,
     document.body,
+  );
+}
+
+// ───────────────────────────── Day hours: when the music goes quiet, per day ─────────────────────────────
+
+function DayHoursDialog({
+  branches, initialBranch, items, weekDates, dayName, onClose, onSave,
+}: {
+  branches: BranchRow[];
+  initialBranch: string;
+  items: Schedule[];
+  weekDates: string[];
+  dayName: (d: number, style?: "short" | "long") => string;
+  onClose: () => void;
+  onSave: (branchId: string, closes: (number | null)[]) => Promise<boolean>;
+}) {
+  const tr = useTr();
+  const [branch, setBranch] = useState(initialBranch);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return createPortal(
+    <div className="ss-modal-back" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="ss-modal" role="dialog" aria-modal="true" aria-label={tr("Opening and closing")}>
+        <div className="ss-modal-head">
+          <div>
+            <h2 className="ss-modal-title">{tr("Opening and closing")}</h2>
+            <p className="ss-modal-sub">{tr("Music starts the first block of the day and goes quiet at closing time.")}</p>
+          </div>
+          {branches.length > 1 ? (
+            <select className="ss-select ss-select--sm" value={branch} onChange={(e) => setBranch(e.target.value)} aria-label={tr("Branch")}>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          ) : null}
+        </div>
+        <HoursRows key={branch} branch={branch} items={items} weekDates={weekDates} dayName={dayName} onClose={onClose} onSave={onSave} />
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function HoursRows({
+  branch, items, weekDates, dayName, onClose, onSave,
+}: {
+  branch: string;
+  items: Schedule[];
+  weekDates: string[];
+  dayName: (d: number, style?: "short" | "long") => string;
+  onClose: () => void;
+  onSave: (branchId: string, closes: (number | null)[]) => Promise<boolean>;
+}) {
+  const tr = useTr();
+  const inBranch = useMemo(() => items.filter((x) => ((x.branchId ?? "default").trim() || "default") === branch), [items, branch]);
+  const scenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(inBranch, d, weekDates)), [inBranch, weekDates]);
+  const current = useMemo(() => {
+    const out: (number | null)[] = WEEK_DAYS.map(() => null);
+    for (const x of inBranch) {
+      if (!isSilenceBlock(x) || x.name !== CLOSING_NAME || x.recurrence === "one_off" || !x.enabled) continue;
+      const m = startMinutes(x);
+      for (const d of x.daysOfWeek ?? []) if (out[d] === null || m > out[d]!) out[d] = m;
+    }
+    return out;
+  }, [inBranch]);
+  const [draft, setDraft] = useState<(number | null)[]>(current);
+  const [saving, setSaving] = useState(false);
+  const setDay = (d: number, m: number | null) => setDraft((prev) => prev.map((v, i) => (i === d ? m : v)));
+  const firstSet = draft.find((v) => v !== null) ?? null;
+  const changed = draft.some((v, i) => v !== current[i]);
+  const DEFAULT_CLOSE = 22 * 60;
+  return (
+    <>
+      <div className="ss-hours" role="table">
+        <div className="ss-hours-row ss-hours-row--head" role="row">
+          <span role="columnheader" />
+          <span role="columnheader">{tr("Music starts")}</span>
+          <span role="columnheader">{tr("Goes quiet at")}</span>
+        </div>
+        {WEEK_DAYS.map((d) => {
+          const first = scenes[d]!.find((x) => !x.quiet && !x.paused && !x.shadowed) ?? null;
+          const close = draft[d] ?? null;
+          const late = close !== null && scenes[d]!.some((x) => !x.quiet && !x.paused && !x.shadowed && x.start >= close);
+          return (
+            <div key={d} className="ss-hours-row" role="row">
+              <span className="ss-hours-day" role="rowheader">{dayName(d, "long")}</span>
+              <span className="ss-hours-open" dir="ltr">{first ? formatMinutes(first.start) : "—"}</span>
+              <span className="ss-hours-close">
+                {close === null ? (
+                  <button type="button" className="ss-linkbtn" onClick={() => setDay(d, firstSet ?? DEFAULT_CLOSE)}>{tr("Set a closing time")}</button>
+                ) : (
+                  <>
+                    <TimeInput key={formatMinutes(close)} minutes={close} onCommit={(m) => setDay(d, m)} label={`${dayName(d, "long")} — ${tr("Goes quiet at")}`} />
+                    <button type="button" className="ss-hours-x" onClick={() => setDay(d, null)} aria-label={`${tr("No closing")} — ${dayName(d, "long")}`} title={tr("No closing")}>×</button>
+                  </>
+                )}
+              </span>
+              {late ? <span className="ss-hours-warn" role="note">{tr("A block starts after closing — it will still play")}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+      <div className="ss-modal-foot">
+        <button type="button" className="ss-linkbtn" disabled={firstSet === null} onClick={() => setDraft(WEEK_DAYS.map(() => firstSet))}>{tr("Same for every day")}</button>
+        <span className="ss-modal-spacer" />
+        <button type="button" className="ss-btn ss-btn--ghost" onClick={onClose}>{tr("Cancel")}</button>
+        <button
+          type="button"
+          className="ss-btn ss-btn--primary"
+          disabled={!changed || saving}
+          onClick={async () => {
+            setSaving(true);
+            const ok = await onSave(branch, draft);
+            setSaving(false);
+            if (ok) onClose();
+          }}
+        >
+          {tr("Save")}
+        </button>
+      </div>
+    </>
   );
 }

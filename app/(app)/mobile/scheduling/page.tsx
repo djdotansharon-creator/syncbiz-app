@@ -172,6 +172,8 @@ function describeTarget(type: ScheduleTargetType, name: string): string {
       return `Track · ${name}`;
     case "RADIO":
       return `Radio · ${name}`;
+    case "SILENCE":
+      return "Quiet · stops the music";
     default:
       return name;
   }
