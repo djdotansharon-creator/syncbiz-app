@@ -5,6 +5,7 @@ import "./globals.css";
 import "./lite-fx.css";
 import "./white-look.css";
 import "./center-panels.css";
+import "./schedules-studio.css";
 import "./control-white.css";
 import "./kiosk-display.css";
 import "flag-icons/css/flag-icons.min.css";

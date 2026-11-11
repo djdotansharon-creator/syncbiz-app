@@ -51,6 +51,8 @@ function scrollsUp(target: EventTarget | null): boolean {
  * (58 ms/frame → 8 ms/frame with them off). While the list moves, its own `data-scrolling` attribute switches that blur off (CSS block (df)/(dh)); it comes
  * back 180 ms after the last scroll / wheel event. Pure styling — nothing else is touched.
  */
+/** the Schedules screen (owner 2026-11-10) is a full-screen studio: the player stays folded into its slim bar there (what plays now), it never opens on scroll */
+const LOCKED_COMPACT = /^\/schedules(\/|$)/;
 const MANAGEMENT_ROUTE = /^\/(dashboard|access-control|owner\/control-room)(\/|$)/;
 
 function useScrollingFlag(off: boolean) {
@@ -91,6 +93,7 @@ export function PlayerAutoCompact(): null {
   const pathname = usePathname();
   // the management pages (Control Room …) hide the player — nothing to shrink there, and no attribute flips while the operator uses them
   const management = MANAGEMENT_ROUTE.test(pathname ?? "");
+  const locked = LOCKED_COMPACT.test(pathname ?? "");
   useScrollingFlag(management);
   useEffect(() => {
     const root = document.documentElement;
@@ -157,6 +160,13 @@ export function PlayerAutoCompact(): null {
       if (e.deltaY > 0 && !compact) set(true);
       else if (e.deltaY < 0 && compact && !scrollsUp(e.target)) set(false);
     };
+    if (locked) {
+      set(true); // folds (with the usual glide) and stays folded; no scroll / wheel listeners here
+      return () => {
+        timers.forEach(clearTimeout);
+        clearAll();
+      };
+    }
     document.addEventListener("scroll", onScroll, true);
     document.addEventListener("wheel", onWheel, { passive: true, capture: true });
     return () => {
@@ -165,6 +175,6 @@ export function PlayerAutoCompact(): null {
       timers.forEach(clearTimeout);
       clearAll();
     };
-  }, [pathname, management]);
+  }, [pathname, management, locked]);
   return null;
 }
