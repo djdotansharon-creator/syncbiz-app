@@ -144,7 +144,7 @@ html[data-sb-display="white"] .ss-col.is-today { background-color: rgba(255, 69,
 html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), var(--c2)); }
 .ss-block--h { background: linear-gradient(90deg, var(--c1), var(--c2)); }
 html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), var(--c2)); }
-.ss-block:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(0, 0, 0, 0.08), 0 10px 24px color-mix(in srgb, var(--c2) 52%, transparent); filter: brightness(1.05) saturate(1.05); }
+.ss-block:hover { transform: translateY(-2px) scale(1.012); z-index: 5; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(0, 0, 0, 0.08), 0 10px 24px color-mix(in srgb, var(--c2) 52%, transparent); filter: brightness(1.05) saturate(1.05); }
 .ss-block.is-dragging { transition: box-shadow 160ms ease, transform 160ms var(--ss-ease); z-index: 6; cursor: grabbing; transform: scale(1.015); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5); }
 .ss-block.is-selected { box-shadow: inset 0 0 0 2.5px #fff, 0 8px 20px rgba(0, 0, 0, 0.3); }
 .ss-block.is-copied { outline: 2px dashed rgba(255, 255, 255, 0.85); outline-offset: -4px; }

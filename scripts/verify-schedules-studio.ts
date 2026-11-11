@@ -74,6 +74,10 @@ assert("S23 the repeat switch turns a block into a one-time block on the clicked
 
 assert("S26 a block shows its name first and the time UNDER it; the pointer on a block reveals a ⋯ button that opens a menu (edit, play now, copy, 15 min earlier / later, pause, delete) — also on right-click", comp.indexOf('className="ss-b-name"') < comp.indexOf('className="ss-b-time"') && /className="ss-b-more"/.test(comp) && /onContextMenu=\{/.test(comp) && /<BlockMenu/.test(comp) && /onNudge\(-15\)/.test(comp) && /onNudge\(15\)/.test(comp) && /\.ss-block:hover \.ss-b-more/.test(css) && /\.ss-menu-item:hover/.test(css));
 
+assert("S27 a block shared by several days moves ONLY on the day under the pointer: a virtual copy is drawn while dragging, and on drop that day is detached into its own weekly block (with Undo); a one-day or one-time block is simply moved", /isMultiDayWeekly\(src\)/.test(comp) && /id: `\$\{src\.id\}#drag`, daysOfWeek: \[drag\.day\]/.test(comp) && /moveOccurrence\(items\.find/.test(comp) && /\{ daysOfWeek: rest \}/.test(comp) && /await removeNow\(created\.id\)|void removeNow\(created\.id\)\.then/.test(comp));
+assert("S28 the ⋯ menu acts on the block under the pointer: 15 minutes earlier / later move that day only, 'Remove from {day}' appears for a multi-day block, and its Delete then says it deletes all days", /onNudge=\{\(delta\) =>[^}]*moveOccurrence\(sc, d,/.test(comp) && /onRemoveDay=\{/.test(comp) && /tr\("Delete all days"\)/.test(comp));
+assert("S29 only the block you stand on lifts (hover) and shows the dots; selected / menu / copied markers are per day, not for every repeat of the block", /\.ss-block:hover \{ transform: translateY\(-2px\) scale\(1\.012\)/.test(css) && /editor\?\.day === sc\.day/.test(comp) && /menu\.day === sc\.day/.test(comp) && /clipDay === sc\.day/.test(comp));
+
 // ── wiring (static) — filled in as the screen is built ──
 const page = rd("app/(app)/(workspace)/schedules/page.tsx");
 assert("S14 the Schedules page renders the studio and keeps its data loading", /<SchedulesStudio/.test(page) && /authFetch\("\/api\/schedules"\)/.test(page));

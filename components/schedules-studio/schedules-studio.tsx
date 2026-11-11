@@ -109,6 +109,9 @@ function clearLocalAutoPrefs(id: string) {
   }
 }
 
+/** a block that is being dragged on a day it shares with others is drawn as a virtual copy ("#drag") while the pointer is down */
+const baseId = (id: string) => (id.endsWith("#drag") ? id.slice(0, -5) : id);
+const isMultiDayWeekly = (s: Schedule) => s.recurrence !== "one_off" && (s.daysOfWeek?.length ?? 0) > 1;
 const isRtl = () => typeof document !== "undefined" && document.documentElement.getAttribute("dir") === "rtl";
 const pct = (min: number) => ((Math.min(Math.max(min, FIRST_H * 60), LAST_H * 60) - FIRST_H * 60) / SPAN) * 100;
 const topOf = (min: number) => ((Math.max(min, FIRST_H * 60) - FIRST_H * 60) * HOUR_H) / 60;
@@ -144,7 +147,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [menu, setMenu] = useState<{ id: string; rect: Rect; day: number } | null>(null);
   const [hover, setHover] = useState<{ key: string; min: number } | null>(null);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; start: number } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number } | null>(null);
+  const [clipDay, setClipDay] = useState<number | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -238,7 +242,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       return next;
     });
   }, []);
-  const colourOf = (s: Schedule) => blockColors[s.id] ?? libFor(s)?.ci ?? paletteIndex(`${s.targetType}:${s.targetId}`);
+  const colourOf = (s: Schedule) => blockColors[baseId(s.id)] ?? libFor(s)?.ci ?? paletteIndex(`${s.targetType}:${s.targetId}`);
 
   // ── the time in view ──
   const clock = now ?? new Date();
@@ -264,7 +268,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const isTodayInView = view === "day" ? focusKey === todayKey : weekDates.includes(todayKey);
 
   // ── what is scheduled ──
-  const viewItems = useMemo(() => (drag ? items.map((s) => (s.id === drag.id ? { ...s, startTimeLocal: minutesToTimeLocal(drag.start) } : s)) : items), [items, drag]);
+  const viewItems = useMemo(() => {
+    if (!drag) return items;
+    const src = items.find((s) => s.id === drag.id);
+    if (!src) return items;
+    const start = minutesToTimeLocal(drag.start);
+    // a block shared by several days: ONLY the day under the pointer moves (the others stay where they are)
+    if (isMultiDayWeekly(src)) {
+      return [...items.filter((s) => s.id !== src.id), { ...src, daysOfWeek: src.daysOfWeek.filter((d) => d !== drag.day) }, { ...src, id: `${src.id}#drag`, daysOfWeek: [drag.day], startTimeLocal: start }];
+    }
+    return items.map((s) => (s.id === drag.id ? { ...s, startTimeLocal: start } : s));
+  }, [items, drag]);
   const shownItems = useMemo(() => (branchFilter === "all" ? viewItems : viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === branchFilter)), [viewItems, branchFilter]);
   const weekScenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(shownItems, d, weekDates)), [shownItems, weekDates]);
   const dayRows = useMemo(() => {
@@ -393,8 +407,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   // ── copy / paste: the same music at exactly the same hour, one time, on another date ──
   const copyBlock = useCallback(
-    (s: Schedule) => {
+    (s: Schedule, day?: number) => {
       setClip(s);
+      setClipDay(day);
       showToast(tr("Copied — click a day's title to paste it there at the same hour."));
     },
     [showToast, tr],
@@ -410,10 +425,69 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     },
     [clip, createFromBody, removeNow, showToast, tr, blockColors, setBlockColor], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // ── moving ONE day's block (owner 2026-11-11: "when I stand on a specific song, it moves by itself") ──
+  // A block that repeats on several days is one schedule in the data. Moving one day's block detaches that day: the others keep their time, the moved
+  // day becomes its own weekly block at the new time (Undo puts it back). A block of one day, or a one-time block, is simply moved.
+  const moveOccurrence = useCallback(
+    async (src: Schedule, day: number, newStart: number) => {
+      if (startMinutes(src) === newStart) return;
+      const startStr = minutesToTimeLocal(newStart);
+      if (!isMultiDayWeekly(src)) {
+        await update(src.id, { startTimeLocal: startStr });
+        return;
+      }
+      const rest = src.daysOfWeek.filter((d) => d !== day);
+      const before = items;
+      const tmp: Schedule = { ...src, id: `tmp-${Date.now()}`, daysOfWeek: [day], startTimeLocal: startStr };
+      setItems((prev) => [...prev.map((s) => (s.id === src.id ? { ...s, daysOfWeek: rest } : s)), tmp]);
+      const tid = (src.targetId || src.sourceId || "").trim();
+      try {
+        const created = await api<Schedule>("POST", "/api/schedules", {
+          name: src.name,
+          branchId: src.branchId,
+          targetType: src.targetType,
+          targetId: tid,
+          sourceId: src.targetType === "SOURCE" ? tid : undefined,
+          deviceId: src.deviceId || undefined,
+          recurrence: "weekly",
+          daysOfWeek: [day],
+          startTimeLocal: startStr,
+          enabled: src.enabled,
+          priority: typeof src.priority === "number" ? src.priority : 1,
+        });
+        try {
+          await api("PATCH", `/api/schedules/${encodeURIComponent(src.id)}`, { daysOfWeek: rest });
+        } catch (e) {
+          await api("DELETE", `/api/schedules/${encodeURIComponent(created.id)}`).catch(() => {});
+          throw e;
+        }
+        setItems((prev) => prev.map((s) => (s.id === tmp.id ? created : s)));
+        if (blockColors[src.id] !== undefined) setBlockColor(created.id, blockColors[src.id]!);
+        showToast(`${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)} — ${tr("this day only")}`, () => {
+          void removeNow(created.id).then(() => update(src.id, { daysOfWeek: src.daysOfWeek }));
+        });
+      } catch (e) {
+        setItems(before);
+        showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+      }
+    },
+    [items, update, removeNow, blockColors, setBlockColor, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const removeFromDay = useCallback(
+    (src: Schedule, day: number) => {
+      const rest = src.daysOfWeek.filter((d) => d !== day);
+      if (rest.length === 0) return;
+      void update(src.id, { daysOfWeek: rest });
+      showToast(tr("Removed from {day}", { day: dayName(day, "long") }), () => void update(src.id, { daysOfWeek: src.daysOfWeek }));
+    },
+    [update, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const pasteHint = tr("Point at a day (or open the Day view), then paste.");
-  const latest = useRef({ editing, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint });
+  const editorDay = editor?.day;
+  const latest = useRef({ editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint });
   useEffect(() => {
-    latest.current = { editing, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint };
+    latest.current = { editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -422,7 +496,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "c" && L.editing) {
         e.preventDefault();
-        L.copyBlock(L.editing);
+        L.copyBlock(L.editing, L.editorDay);
       } else if (mod && e.key.toLowerCase() === "v" && L.clip) {
         const ymd = L.hoverDate ?? (L.view === "day" ? L.focusKey : null);
         e.preventDefault();
@@ -489,7 +563,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (!moved && Math.abs(d) < 5) return;
       moved = true;
       last = snapMinutes(startMin + d / perMin, 5);
-      setDrag({ id: sc.schedule.id, start: last });
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -501,7 +575,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         return;
       }
       setDrag(null);
-      if (last !== startMin) void update(sc.schedule.id, { startTimeLocal: minutesToTimeLocal(last) });
+      if (last !== startMin) void moveOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, last);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -517,11 +591,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       orient === "v"
         ? { top: topOf(sc.start), height: vHeight }
         : { insetInlineStart: `${pct(sc.start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(sc.start))}% - 4px)` };
-    const cls = `ss-block ss-block--${orient}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag?.id === sc.schedule.id ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id ? " is-copied" : ""}`;
+    const cls = `ss-block ss-block--${orient}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
     const tall = orient === "v" && vHeight > 60;
     return (
       <div
-        key={`${sc.schedule.id}-${orient}-${sc.day}`}
+        key={`${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
         className={cls}
         data-c={colourOf(sc.schedule)}
         style={style}
@@ -791,8 +865,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           onClose={() => setMenu(null)}
           onEdit={() => { setEditor({ kind: "edit", id: menu.id, rect: menu.rect, day: menu.day }); setMenu(null); }}
           onPlay={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void playNow(sc); }}
-          onCopy={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) copyBlock(sc); }}
-          onNudge={(d) => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void update(sc.id, { startTimeLocal: minutesToTimeLocal(Math.min(DAY_MINUTES - 1, Math.max(0, startMinutes(sc) + d))) }); }}
+          onCopy={() => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) copyBlock(sc, d); }}
+          multiDay={isMultiDayWeekly(items.find((x) => x.id === menu.id)!)}
+          dayLabel={dayName(menu.day, "long")}
+          onRemoveDay={() => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) removeFromDay(sc, d); }}
+          onNudge={(delta) => { const sc = items.find((x) => x.id === menu.id); const d = menu.day; setMenu(null); if (sc) void moveOccurrence(sc, d, Math.min(DAY_MINUTES - 1, Math.max(0, startMinutes(sc) + delta))); }}
           colour={colourOf(items.find((x) => x.id === menu.id)!)}
           onColour={(i) => { setBlockColor(menu.id, i); setMenu(null); }}
           onMoreColours={() => { setEditor({ kind: "edit", id: menu.id, rect: menu.rect, day: menu.day }); setMenu(null); }}
@@ -833,7 +910,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           onPatch={(patch) => editing && void update(editing.id, patch)}
           onDelete={() => { if (!editing) return; setDeleteError(null); setDeleteId(editing.id); setEditor(null); }}
           onPlay={() => editing && void playNow(editing)}
-          onCopy={() => { if (editing) { copyBlock(editing); setEditor(null); } }}
+          onCopy={() => { if (editing) { copyBlock(editing, editor?.day); setEditor(null); } }}
         />
       ) : null}
 
@@ -944,10 +1021,13 @@ function ColorSwatches({ value, onPick }: { value: number; onPick: (i: number) =
 const MENU_W = 224;
 
 function BlockMenu({
-  menu, schedule, colour, onColour, onMoreColours, onClose, onEdit, onPlay, onCopy, onNudge, onToggle, onDelete,
+  menu, schedule, multiDay, dayLabel, onRemoveDay, colour, onColour, onMoreColours, onClose, onEdit, onPlay, onCopy, onNudge, onToggle, onDelete,
 }: {
   menu: { id: string; rect: Rect; day: number };
   schedule: Schedule;
+  multiDay: boolean;
+  dayLabel: string;
+  onRemoveDay: () => void;
   colour: number;
   onColour: (i: number) => void;
   onMoreColours: () => void;
@@ -1033,7 +1113,8 @@ function BlockMenu({
         <button type="button" className={`ss-sw ss-sw--more${colour >= BLUE_SHADES ? " is-on" : ""}`} data-c={colour >= BLUE_SHADES ? colour : undefined} aria-label={tr("More colors")} title={tr("More colors")} onClick={onMoreColours}><i /><i /><i /></button>
       </div>
       <hr />
-      {item(T.delete ?? tr("Delete"), onDelete, { danger: true })}
+      {multiDay ? item(tr("Remove from {day}", { day: dayLabel }), onRemoveDay) : null}
+      {item(multiDay ? tr("Delete all days") : (T.delete ?? tr("Delete")), onDelete, { danger: true })}
     </div>,
     document.body,
   );
