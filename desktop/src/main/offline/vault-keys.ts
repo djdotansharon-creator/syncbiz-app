@@ -49,8 +49,11 @@ export function loadOrCreateMasterKey(dir: string, protector: KeyProtector): { k
 
 /** Electron safeStorage (DPAPI on Windows) as a KeyProtector. Imported lazily so this module stays testable in plain Node. */
 export function electronSafeStorageProtector(): KeyProtector {
+  // A local structural type, NOT `typeof import("electron")`: the root scripts/ type-check this file during the web app's
+  // `next build`, where the electron package is not installed (PROD deploy 497456f3 failed on exactly that, 2026-11-11).
+  type SafeStorage = { isEncryptionAvailable(): boolean; encryptString(plain: string): Buffer; decryptString(sealed: Buffer): string };
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { safeStorage } = require("electron") as typeof import("electron");
+  const { safeStorage } = require("electron") as { safeStorage: SafeStorage };
   return {
     available: () => safeStorage.isEncryptionAvailable(),
     protect: (plain) => safeStorage.encryptString(plain.toString("base64")),
