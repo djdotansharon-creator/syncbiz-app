@@ -293,6 +293,10 @@ model Workspace {
   /// Control Room: organization-level Station ID prefix (Station ID = "<prefix>-<Branch.locationCode>", e.g. AROMA-192).
   /// Globally unique — a Station ID must resolve to exactly one organization. Null until the owner sets it.
   stationIdPrefix String? @unique
+  /// 2026-11-11 (owner): FALLBACK MUSIC — the playlist a station plays instead of a private bank that was closed / locked
+  /// (switched at a song boundary after the 04:00 close). A plain id, not an FK: a deleted playlist simply means "use the
+  /// default" (a general mix of the public Royalty-Free catalog). Never silence.
+  fallbackPlaylistId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2746,6 +2750,12 @@ model MusicBankGrant {
   /// Bank id from lib/music-bank/private-banks.ts (e.g. "all-day-mix") — code registry, not a FK.
   bankId          String
   expiresAt       DateTime?
+  /// 2026-11-11 (owner): a close never cuts music mid-day. Switching a bank off sets closesAt = the next 04:00 in the
+  /// business's branch time; until then it plays as before and the station shows a notice; afterwards the station
+  /// switches to its fallback music at a song boundary. Null = open. Re-opening clears it.
+  closesAt        DateTime?
+  /// "manual" (switched off in Platform → Accounts) | "payment" (future billing lock) — picks the notice text.
+  closeReason     String?
   grantedByUserId String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

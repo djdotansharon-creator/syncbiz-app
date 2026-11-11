@@ -35,6 +35,7 @@ import { LanguageSelector } from "@/components/language-selector";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { DesktopDownloadButton } from "@/components/desktop-download-button";
 import { DesktopUpdatePill } from "@/components/desktop-update-pill";
+import { PrivateBankNotice } from "@/components/private-bank-notice";
 import { CenterModuleContext, type CenterModule, isJinglesModule, isMyMusicLibraryModule, isRoyaltyFreeMusicModule, isShufersalBankModule, isGuestsModule } from "@/lib/center-module-context";
 import { RFM_CATALOG_ENABLED, shufersalBankVisibleFor } from "@/lib/feature-flags";
 import { MainMenuPopover, type MainMenuItem } from "@/components/main-menu-popover";
@@ -1424,6 +1425,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {/* "Update" / "עדכון" (owner 2026-11-02): desktop app only, right next to the logo — a flat ellipse, no frame */}
               <DesktopUpdatePill />
+              {/* owner 2026-11-11: a private bank was switched off → when it stops (next 04:00) / that the fallback plays (station window only) */}
+              <PrivateBankNotice />
               {/* MASTER / On Air / device mode indicators — hidden from the display (owner, 2026-10-14);
                   the component keeps running, see `.sb-device-indicators` in globals.css */}
               <span className="sb-device-indicators contents">
