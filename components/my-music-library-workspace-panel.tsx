@@ -527,13 +527,11 @@ type ListResult =
   | { status: "no_root" };
 
 export function MyMusicLibraryWorkspacePanel({
-  onClose,
   onAddToLibrary,
   userPlaylists,
   onAppendLocalUnifiedToPlaylist,
   onPlaylistUpdated,
 }: {
-  onClose: () => void;
   onAddToLibrary: (source: UnifiedSource) => void;
   userPlaylists: MyMusicPlaylistPickerOption[];
   onAppendLocalUnifiedToPlaylist: (playlistKey: string, items: UnifiedSource[]) => Promise<void>;
@@ -966,11 +964,7 @@ export function MyMusicLibraryWorkspacePanel({
           <h2 className="sb-cp-title">My Computer</h2>
           <p className="sb-cp-meta mt-1">Music files on this PC · they stay on this computer</p>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close" className="sb-cp-icon-btn">
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
+        {/* owner 2026-11-11: no X — this opens like a library view; clicking another place in the rails shows that place */}
       </header>
 
       {webOnly ? (
