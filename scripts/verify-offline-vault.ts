@@ -137,10 +137,10 @@ async function main() {
     vault.remove("a_song1");
     assert("A14 Offline OFF removes the encrypted file and its index entry", vault.lookup("a_song1") === null && !vault.hasObjectFile(e.opaqueId));
 
-    // ── isolation: stage A is not wired into playback ──
+    // ── isolation: playback reaches the vault ONLY through offline-runtime (stage C: one resolver line in MPV + init in IPC) ──
     const wired = ["desktop/src/main/mpv-manager.ts", "desktop/src/main/playback-orchestrator.ts", "desktop/src/device-websocket-client/device-ws-manager.ts", "desktop/src/main/ipc-mvp.ts"]
       .filter((f) => { try { return /offline\/vault-/.test(read(f)); } catch { return false; } });
-    assert("A15 stage A is inert: no playback file imports the vault yet (MPV / orchestrator / WS / IPC untouched)", wired.length === 0);
+    assert("A15 no playback file imports the vault directly (only through offline/offline-runtime — stage C)", wired.length === 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
