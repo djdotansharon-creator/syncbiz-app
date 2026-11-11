@@ -147,8 +147,9 @@ async function main() {
     /getSuperAdminOrNull\(\);\s*if \(!admin\) return NextResponse\.json\(\{ error: "Forbidden" \}, \{ status: 403 \}\);/.test(fb)
     && /prisma\.playlist\.findFirst\(\{ where: \{ id: playlistId, workspaceId \}/.test(fb) && /"workspace\.fallback_playlist"/.test(fb));
   const mig2 = read("prisma/migrations/20261111120000_bank_close_next_morning/migration.sql").replace(/--.*$/gm, "");
-  assert("P8g the migration only adds three nullable columns",
-    /ALTER TABLE "Workspace" ADD COLUMN "fallbackPlaylistId" TEXT;/.test(mig2) && /ADD COLUMN "closesAt" TIMESTAMP\(3\),\s*ADD COLUMN "closeReason" TEXT;/.test(mig2)
+  assert("P8g the migration only adds three nullable columns, idempotent (applied to PROD before the code deploy)",
+    /ALTER TABLE "Workspace" ADD COLUMN IF NOT EXISTS "fallbackPlaylistId" TEXT;/.test(mig2)
+    && /ADD COLUMN IF NOT EXISTS "closesAt" TIMESTAMP\(3\),\s*ADD COLUMN IF NOT EXISTS "closeReason" TEXT;/.test(mig2)
     && !/DROP|NOT NULL|UPDATE |DELETE /i.test(mig2));
   const { buildGeneralMixFallbackSource, isMusicBankSourceOf } = await import("../lib/music-bank/stream-source");
   const mixSrc = buildGeneralMixFallbackSource("https://x.test");
