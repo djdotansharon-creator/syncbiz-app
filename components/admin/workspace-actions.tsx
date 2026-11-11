@@ -28,6 +28,8 @@ type Props = {
   trialEndsAtRelative: string;
   /** ISO string for the current `trialEndsAt` (or null) — used to preview new end client-side. */
   trialEndsAtIso: string | null;
+  /** Optional (2026-11-11): called after a successful write so a client-fetched list (Platform → Accounts) reloads itself. */
+  onChanged?: () => void;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -71,6 +73,7 @@ export default function WorkspaceActions({
   trialEndsAtLabel,
   trialEndsAtRelative,
   trialEndsAtIso,
+  onChanged,
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -168,6 +171,7 @@ export default function WorkspaceActions({
       startTransition(() => {
         router.refresh();
       });
+      onChanged?.();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -235,6 +239,7 @@ export default function WorkspaceActions({
       startTransition(() => {
         router.refresh();
       });
+      onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

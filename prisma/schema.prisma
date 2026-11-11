@@ -293,6 +293,10 @@ model Workspace {
   /// Control Room: organization-level Station ID prefix (Station ID = "<prefix>-<Branch.locationCode>", e.g. AROMA-192).
   /// Globally unique — a Station ID must resolve to exactly one organization. Null until the owner sets it.
   stationIdPrefix String? @unique
+  /// 2026-11-11 (owner): FALLBACK MUSIC — the playlist a station plays instead of a private bank that was closed / locked
+  /// (switched at a song boundary after the 04:00 close). A plain id, not an FK: a deleted playlist simply means "use the
+  /// default" (a general mix of the public Royalty-Free catalog). Never silence.
+  fallbackPlaylistId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -331,6 +335,8 @@ model Workspace {
   roles             WorkspaceRole[]
   memberRoles       WorkspaceMemberRole[]
   accessCodeRow     WorkspaceAccessCode?
+  /// Private music banks opened to this business by the platform owner (owner 2026-11-10).
+  musicBankGrants   MusicBankGrant[]
 
   @@index([ownerId])
 }
@@ -2732,4 +2738,33 @@ model LogicalAssetSource {
   @@unique([source, externalId]) // a source file id belongs to at most one logicalId
   @@index([logicalId])
   @@index([logicalId, isCurrent])
+}
+
+/// A private ("secret") music bank opened to one business by the platform owner (owner 2026-11-10).
+/// The bank's songs play — and later download for Offline — only for businesses holding a live grant.
+/// A grant with `expiresAt` in the past is not live. Removing access deletes the row (the platform audit
+/// log keeps the history). The same row will later carry paid per-playlist access (with expiry + grace).
+model MusicBankGrant {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  /// Bank id from lib/music-bank/private-banks.ts (e.g. "all-day-mix") — code registry, not a FK.
+  bankId          String
+  expiresAt       DateTime?
+  /// 2026-11-11 (owner): a close never cuts music mid-day. Switching a bank off sets closesAt = the next 04:00 in the
+  /// business's branch time; until then it plays as before and the station shows a notice; afterwards the station
+  /// switches to its fallback music at a song boundary. Null = open. Re-opening clears it.
+  closesAt        DateTime?
+  /// "manual" (switched off in Platform → Accounts) | "payment" (future billing lock) — picks the notice text.
+  closeReason     String?
+  /// 2026-11-11 (owner, stage D): the business switched OFFLINE on for this bank in the catalog → its stations keep the
+  /// songs encrypted on disk (offline manifest lists only these). Off = streams only; switching off deletes the copies.
+  offlineEnabled  Boolean   @default(false)
+  grantedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, bankId])
+  @@index([bankId])
 }

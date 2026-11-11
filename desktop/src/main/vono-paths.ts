@@ -76,3 +76,16 @@ export function vonoControlPath(): string {
 export function vonoDesignationPath(): string {
   return path.join(vonoStateDir(), "designation.json");
 }
+
+/**
+ * Music Bank Phase 2 (owner 2026-11-11): the encrypted OFFLINE vault folder (`…\VONO\offline`) — vault.key (DPAPI-protected),
+ * license.bin, index.json, objects/*.vono. Created by the offline service only when Offline is enabled on this machine.
+ */
+export function vonoOfflineDir(): string {
+  return path.join(vonoRootDir(), "offline");
+}
+
+/** `…\VONO\state\offline.json` — { "enabled": true } turns the offline vault on for THIS machine (default: off). */
+export function vonoOfflineFlagPath(): string {
+  return path.join(vonoStateDir(), "offline.json");
+}

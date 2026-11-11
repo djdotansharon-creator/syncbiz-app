@@ -17,6 +17,7 @@ import { existsSync } from "node:fs";
 import net from "node:net";
 import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
 import { withStationMediaToken } from "./media-token-provider";
+import { resolveOfflineUrl } from "./offline/offline-runtime";
 import { redactMediaToken } from "../shared/redact-media-token";
 import { fileLog } from "./file-logger";
 
@@ -794,7 +795,9 @@ export class MpvManager {
       return;
     }
     // beta.22: our own /api/media URLs get the station media token here (identity for every other URL).
-    const { target, kind } = normalizeMpvLoadTarget(withStationMediaToken(u));
+    // Music Bank Phase 2 (owner 2026-11-11): a song stored ENCRYPTED on this station and still licensed plays from the
+    // local loopback server instead (sync, in-memory, never throws; anything else → unchanged → streams as before).
+    const { target, kind } = normalizeMpvLoadTarget(withStationMediaToken(resolveOfflineUrl(u)));
     if (!target) return;
     this.cmdQueue = [];
     // Tag THIS loadfile with a request_id so its reply (carrying playlist_entry_id) can be tied back

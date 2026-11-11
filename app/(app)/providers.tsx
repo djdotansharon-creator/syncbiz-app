@@ -15,6 +15,7 @@ import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 import { MasterMediaSession } from "@/components/master-media-session";
 import { DesktopPerfDiag } from "@/components/desktop-perf-diag";
+import { PrivateBankGuard } from "@/components/private-bank-guard";
 
 /**
  * Single client boundary for all app providers.
@@ -31,6 +32,8 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
               <DevicePlayerProvider>
                 {children}
                 <ScheduleAutoPlayer />
+                {/* owner 2026-11-11: a switched-off private bank → the station moves to its fallback music after the 04:00 close, at a song boundary (station window only, renders null) */}
+                <PrivateBankGuard />
                 <JingleScheduleAutoPlayer />
                 {/* round 8: a lone YouTube song is followed by what YouTube recommends (fills Play Next; renders null) */}
                 <AutoplayRecommender />

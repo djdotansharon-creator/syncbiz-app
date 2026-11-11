@@ -63,6 +63,8 @@ html[data-sb-display="white"] .sb-cp {
 .sb-cp-act:hover:not(:disabled) { color: var(--cp-ink); background: var(--cp-soft); }
 .sb-cp-act:disabled { opacity: 0.4; cursor: not-allowed; }
 .sb-cp-act.is-on { color: var(--cp-ink); background: var(--cp-soft-2); }
+/* stage D (owner 2026-11-11): the private bank's Offline switch + the disk it needs, one quiet line */
+.sb-cp-offline { display: inline-flex; align-items: center; gap: 8px; }
 .sb-cp-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 34px; height: 34px; border-radius: 9999px; color: var(--cp-2);

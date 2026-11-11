@@ -79,8 +79,11 @@ async function main(): Promise<void> {
   assert("T12 logs never contain a token (only reason / status / validity)", !/tok-[AB]|desk-tok/.test(logText) && /MEDIA_TOKEN_REFRESHED/.test(logText));
 
   const mpv = readFileSync(path.join(__dirname, "../src/main/mpv-manager.ts"), "utf8");
-  assert("S1 single hook: MpvManager.play normalizes withStationMediaToken(u) and logs only the redacted target",
-    /normalizeMpvLoadTarget\(withStationMediaToken\(u\)\)/.test(mpv) && /preview: redactMediaToken\(target\)/.test(mpv) && (mpv.match(/withStationMediaToken\(/g) ?? []).length === 1);
+  // 2026-11-11 (Music Bank Phase 2, owner-approved): the offline resolver runs first inside the SAME single hook — a stored +
+  // licensed song becomes a loopback URL (withStationMediaToken then leaves it alone: not our /api/media URL); anything else
+  // reaches withStationMediaToken unchanged. The invariant is the same: one hook, token only on our media URLs, redacted logs.
+  assert("S1 single hook: MpvManager.play normalizes withStationMediaToken(resolveOfflineUrl(u)) and logs only the redacted target",
+    /normalizeMpvLoadTarget\(withStationMediaToken\(resolveOfflineUrl\(u\)\)\)/.test(mpv) && /preview: redactMediaToken\(target\)/.test(mpv) && (mpv.match(/withStationMediaToken\(/g) ?? []).length === 1);
   const ipc = readFileSync(path.join(__dirname, "../src/main/ipc-mvp.ts"), "utf8");
   assert("S2 MAIN wiring: init at startup + refresh on desktop-auth apply", /initStationMediaToken\(\{ getConfig: \(\) => getEffectiveRuntimeConfig\(\)/.test(ipc) && /refreshStationMediaToken\("desktop-auth"\)/.test(ipc));
   const wsm = readFileSync(path.join(__dirname, "../src/device-websocket-client/device-ws-manager.ts"), "utf8");

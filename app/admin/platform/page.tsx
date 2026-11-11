@@ -149,6 +149,12 @@ export default async function AdminPlatformPage({
               initialQ={typeof sp.q === "string" ? sp.q : ""}
             />
             <Link
+              href="/admin/platform/accounts"
+              className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
+            >
+              Accounts
+            </Link>
+            <Link
               href="/admin/platform/users"
               className="rounded border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-neutral-200 hover:bg-neutral-800"
             >

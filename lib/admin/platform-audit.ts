@@ -32,7 +32,10 @@ export type PlatformAuditAction =
   | "user.platform_enable"
   | "user.set_password"
   | "user.orphan_delete"
-  | "user.safe_account_delete";
+  | "user.safe_account_delete"
+  | "music_bank.open"
+  | "music_bank.close"
+  | "workspace.fallback_playlist";
 
 export type PlatformAuditInput = {
   action: PlatformAuditAction;
