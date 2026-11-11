@@ -35,10 +35,6 @@ type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
 /** stage D (owner 2026-11-11): a private bank's Offline switch — on/off, disk the bank needs, may this person change it. */
 type OfflineInfo = { enabled: boolean; bytes: number; canToggle: boolean };
-function fmtSize(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
-}
 type PlaybackMode = "stream" | "local"; // Stage A: "stream" = token-free /api/media/<id> via SyncBiz; "local" = preview-cache path
 
 function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
@@ -299,17 +295,6 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   );
 }
 
-/** stage D: a calm "kept on this computer" mark — a down-arrow into a tray. */
-function OfflineIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 4v11" />
-      <path d="M7.5 10.5 12 15l4.5-4.5" />
-      <path d="M5 19h14" />
-    </svg>
-  );
-}
-
 function CloseIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
@@ -519,28 +504,22 @@ function GenreDetail({
               <PlayIcon className="h-3.5 w-3.5" />
               {isPrivate ? "Play the mix" : "Listen to Samples"}
             </button>
-            {/* stage D (owner 2026-11-11): OFFLINE — keep this bank on the business's computers, encrypted. Quiet: no progress
-                bar, only the disk space it needs (owner: "whoever doesn't know shouldn't need to know it downloads"). */}
+            {/* stage D (owner 2026-11-11): OFFLINE — keep this bank on the business's computers, encrypted. Owner: a switch with
+                the word "Offline" that fills with VONO blue when pressed (like Spotify's download fill); no long text on screen
+                (and no hover tip — components/no-native-tooltips.tsx strips every `title`, owner 2026-10-26). A person who may not
+                change it (not the business owner / an admin) sees it dimmed. */}
             {isPrivate && offline ? (
-              <span className="sb-cp-offline">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={offline.enabled}
-                  disabled={!offline.canToggle || offlineBusy}
-                  title={offline.canToggle ? undefined : "Only the business owner or an admin can change Offline"}
-                  onClick={() => onToggleOffline?.(!offline.enabled)}
-                  className={`sb-cp-act${offline.enabled ? " is-on" : ""}`}
-                >
-                  <OfflineIcon className="h-3.5 w-3.5" />
-                  Offline
-                </button>
-                <span className="sb-cp-faint text-[11px] font-medium">
-                  {offline.enabled
-                    ? `Kept on this business's computers${offline.bytes > 0 ? ` · ${fmtSize(offline.bytes)}` : ""}`
-                    : offline.bytes > 0 ? `Needs ${fmtSize(offline.bytes)} on each computer` : "Keep it on this business's computers"}
-                </span>
-              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={offline.enabled}
+                disabled={!offline.canToggle || offlineBusy}
+                onClick={() => onToggleOffline?.(!offline.enabled)}
+                className={`sb-cp-offline${offline.enabled ? " is-on" : ""}`}
+              >
+                Offline
+                <span className="sb-cp-switch" aria-hidden="true"><span className="sb-cp-switch-knob" /></span>
+              </button>
             ) : null}
             {isPrivate ? null : (
               <span className="ms-auto flex items-center gap-2">
