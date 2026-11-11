@@ -9,5 +9,7 @@ export function redactMediaToken(s: string): string {
   return String(s)
     .replace(/([?&]mt=)[^&\s"']*/gi, "$1[REDACTED]")
     .replace(/([?&]X-Amz-Signature=)[^&\s"']*/gi, "$1[REDACTED]")
-    .replace(/([?&]X-Amz-Credential=)[^&\s"']*/gi, "$1[REDACTED]");
+    .replace(/([?&]X-Amz-Credential=)[^&\s"']*/gi, "$1[REDACTED]")
+    // Music Bank Phase 2: the offline vault's loopback session token (http://127.0.0.1:<port>/o/<id>?k=…)
+    .replace(/([?&]k=)[^&\s"']*/g, "$1[REDACTED]");
 }
