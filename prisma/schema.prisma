@@ -331,6 +331,8 @@ model Workspace {
   roles             WorkspaceRole[]
   memberRoles       WorkspaceMemberRole[]
   accessCodeRow     WorkspaceAccessCode?
+  /// Private music banks opened to this business by the platform owner (owner 2026-11-10).
+  musicBankGrants   MusicBankGrant[]
 
   @@index([ownerId])
 }
@@ -2732,4 +2734,24 @@ model LogicalAssetSource {
   @@unique([source, externalId]) // a source file id belongs to at most one logicalId
   @@index([logicalId])
   @@index([logicalId, isCurrent])
+}
+
+/// A private ("secret") music bank opened to one business by the platform owner (owner 2026-11-10).
+/// The bank's songs play — and later download for Offline — only for businesses holding a live grant.
+/// A grant with `expiresAt` in the past is not live. Removing access deletes the row (the platform audit
+/// log keeps the history). The same row will later carry paid per-playlist access (with expiry + grace).
+model MusicBankGrant {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  /// Bank id from lib/music-bank/private-banks.ts (e.g. "all-day-mix") — code registry, not a FK.
+  bankId          String
+  expiresAt       DateTime?
+  grantedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, bankId])
+  @@index([bankId])
 }

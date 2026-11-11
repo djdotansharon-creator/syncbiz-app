@@ -5,6 +5,7 @@ import { allPreviewGenreIds, pocMediaFallbackAllowed } from "@/lib/media/media-a
 import { getReadyMediaAssetGenreIds } from "@/lib/media/media-asset-db";
 import { verifyDesktopStationToken } from "@/lib/auth-ws-token";
 import { prisma } from "@/lib/prisma";
+import { accessiblePrivateBanks, scopeGenres } from "@/lib/music-bank/bank-access";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -49,7 +50,9 @@ export async function POST(req: NextRequest) {
 
   const dbGenres = await getReadyMediaAssetGenreIds();
   const pocGenres = pocMediaFallbackAllowed() ? allPreviewGenreIds() : [];
-  const allowedGenres = [...new Set([...dbGenres, ...pocGenres])];
+  // owner 2026-11-10: a PRIVATE bank's songs are in the token only for a business it was opened to (or the platform owner).
+  const openBanks = await accessiblePrivateBanks(station ? { workspaceId: station.workspaceId, userId: null } : { workspaceId: user!.tenantId ?? null, userId: user!.id });
+  const allowedGenres = scopeGenres([...new Set([...dbGenres, ...pocGenres])], openBanks.map((b) => b.id));
   if (allowedGenres.length === 0) {
     return NextResponse.json({ error: "No media catalog is available on this server." }, { status: 503 });
   }

@@ -27,8 +27,13 @@ export const GENRE_ART: Record<string, GenreArt> = {
 
 export const DEFAULT_ART: GenreArt = { from: "#141420", via: "#2a2a3a", to: "#5a5a72", accent: "#9ab0ff", motif: "beams" };
 
+/** Private banks (owner 2026-11-10) — drawn art only (no photo cover), so they are NOT in GENRE_ART / PHOTO_COVERS. */
+const PRIVATE_ART: Record<string, GenreArt> = {
+  "all-day-mix": { from: "#0f1a2e", via: "#7a3a5c", to: "#f0a050", accent: "#ffd27a", motif: "sunset" },
+};
+
 export function genreArt(id: string): GenreArt {
-  return GENRE_ART[id] ?? DEFAULT_ART;
+  return GENRE_ART[id] ?? PRIVATE_ART[id] ?? DEFAULT_ART;
 }
 
 function Motif({ motif, accent }: { motif: MotifKey; accent: string }) {

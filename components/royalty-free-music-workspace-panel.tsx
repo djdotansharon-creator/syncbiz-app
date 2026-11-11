@@ -66,7 +66,25 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
 
   const catalog = POC_MUSIC_BANK_CATALOG;
   const genres = catalog.genres;
-  const selectedGenre = useMemo(() => (view === "all" ? null : genres.find((g) => g.id === view) ?? null), [genres, view]);
+  // owner 2026-11-10: PRIVATE banks (e.g. All Day Mix) come from the server, only the ones this business was opened to.
+  const [privatePacks, setPrivatePacks] = useState<MusicBankGenrePack[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/music-bank/private-banks", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { banks?: MusicBankGenrePack[] } | null) => {
+        if (!cancelled && Array.isArray(j?.banks)) setPrivatePacks(j.banks);
+      })
+      .catch(() => {
+        /* offline / signed out — the public catalog still shows */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const allPacks = useMemo(() => [...privatePacks, ...genres], [privatePacks, genres]);
+  const selectedGenre = useMemo(() => (view === "all" ? null : allPacks.find((g) => g.id === view) ?? null), [allPacks, view]);
+  const selectedIsPrivate = selectedGenre != null && privatePacks.some((p) => p.id === selectedGenre.id);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,6 +242,9 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
       {/* Genre navigation — the library's chips row: plain words */}
       <nav className="flex shrink-0 items-center gap-5 overflow-x-auto [scrollbar-width:none]">
         <GenreNavPill label="All" active={view === "all"} onClick={() => setView("all")} />
+        {privatePacks.map((g) => (
+          <GenreNavPill key={g.id} label={g.name} active={view === g.id} onClick={() => setView(g.id)} />
+        ))}
         {genres.map((g) => (
           <GenreNavPill key={g.id} label={g.name} active={view === g.id} onClick={() => setView(g.id)} />
         ))}
@@ -234,6 +255,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
         {selectedGenre ? (
           <GenreDetail
             genre={selectedGenre}
+            isPrivate={selectedIsPrivate}
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
@@ -242,7 +264,7 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
             notPlayableHint={notPlayableHint}
           />
         ) : (
-          <CatalogHome genres={genres} totalSamples={totalSamples} onOpen={(id) => setView(id)} notPlayableHint={notPlayableHint} />
+          <CatalogHome genres={genres} privatePacks={privatePacks} totalSamples={totalSamples} onOpen={(id) => setView(id)} notPlayableHint={notPlayableHint} />
         )}
       </div>
     </div>
@@ -272,17 +294,56 @@ function GenreCover({ genre }: { genre: MusicBankGenrePack }) {
 
 function CatalogHome({
   genres,
+  privatePacks,
   totalSamples,
   onOpen,
   notPlayableHint,
 }: {
   genres: MusicBankGenrePack[];
+  privatePacks: MusicBankGenrePack[];
   totalSamples: number;
   onOpen: (id: string) => void;
   notPlayableHint: string | null;
 }) {
   return (
     <div className="space-y-7 pb-3">
+      {/* owner 2026-11-10: PRIVATE banks — only the ones this business was opened to (none → the section is absent) */}
+      {privatePacks.length > 0 ? (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="sb-cp-section">Private</h3>
+            <span className="sb-cp-meta tabular-nums">{privatePacks.length}</span>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-x-3 gap-y-4">
+            {privatePacks.map((pack) => {
+              const total = totalDuration(pack.tracks);
+              return (
+                <div key={pack.id} className="group flex flex-col gap-2">
+                  <button type="button" onClick={() => onOpen(pack.id)} className="sb-cp-tile sb-cp-hit block aspect-[16/9] w-full text-start" aria-label={`Open ${pack.name}`}>
+                    <GenreCover genre={pack} />
+                    <span className="sb-cp-badge">Private</span>
+                    <span className="absolute end-2.5 top-2 z-[1] inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/40 opacity-0 transition group-hover:opacity-100" style={{ color: "#ffffff" }}>
+                      <PlayIcon className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="sb-cp-tile-fog block">
+                      <span className="sb-cp-on-art sb-cp-clip block text-[17px] font-bold leading-tight">{pack.name}</span>
+                      <span className="sb-cp-on-art-2 mt-0.5 block text-[11px] font-medium">
+                        {pack.tracks.length} songs{total != null ? ` · ${formatDuration(total)}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <button type="button" onClick={() => onOpen(pack.id)} className="sb-cp-accent whitespace-nowrap text-xs font-semibold hover:underline">
+                      Open the mix
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       {/* Genre Packs — picture tiles like the library cards; price + Unlock under the picture, no box around them */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
@@ -364,6 +425,7 @@ function CatalogHome({
 
 function GenreDetail({
   genre,
+  isPrivate = false,
   trackPlayable,
   nowPlaying,
   onPlaySamples,
@@ -372,6 +434,8 @@ function GenreDetail({
   notPlayableHint,
 }: {
   genre: MusicBankGenrePack;
+  /** a PRIVATE bank (owner 2026-11-10): full songs, no price / unlock */
+  isPrivate?: boolean;
   trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   onPlaySamples: () => void;
@@ -395,22 +459,24 @@ function GenreDetail({
             </svg>
             All genres
           </button>
-          <p className="sb-cp-meta text-[11px] font-semibold uppercase tracking-[0.14em]">Genre Pack</p>
+          <p className="sb-cp-meta text-[11px] font-semibold uppercase tracking-[0.14em]">{isPrivate ? "Private bank" : "Genre Pack"}</p>
           <h3 className="sb-cp-title mt-0.5">{genre.name}</h3>
           <p className="sb-cp-2 mt-1 max-w-2xl text-sm leading-relaxed">{genre.description}</p>
           <p className="sb-cp-faint mt-1 text-[11px] font-medium">
-            {genre.tracks.length} samples{total != null ? ` · ${formatDuration(total)}` : ""}
+            {genre.tracks.length} {isPrivate ? "songs" : "samples"}{total != null ? ` · ${formatDuration(total)}` : ""}
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {/* Single CTA — plays the pack's FULL sample set through the existing playlist queue. */}
             <button type="button" disabled={!genrePlayable} onClick={onPlaySamples} className="sb-cp-primary">
               <PlayIcon className="h-3.5 w-3.5" />
-              Listen to Samples
+              {isPrivate ? "Play the mix" : "Listen to Samples"}
             </button>
-            <span className="ms-auto flex items-center gap-2">
-              <span className="sb-cp-ink text-lg font-bold tabular-nums">{GENRE_PRICE_LABEL}</span>
-              <button type="button" disabled title="Coming soon" className="sb-cp-act">Unlock Genre Pack</button>
-            </span>
+            {isPrivate ? null : (
+              <span className="ms-auto flex items-center gap-2">
+                <span className="sb-cp-ink text-lg font-bold tabular-nums">{GENRE_PRICE_LABEL}</span>
+                <button type="button" disabled title="Coming soon" className="sb-cp-act">Unlock Genre Pack</button>
+              </span>
+            )}
           </div>
         </div>
       </section>
@@ -420,7 +486,7 @@ function GenreDetail({
       {/* Samples — a plain list: no box, a soft fill under the row you point at or the one playing */}
       <section className="space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="sb-cp-section">Samples</h3>
+          <h3 className="sb-cp-section">{isPrivate ? "Songs" : "Samples"}</h3>
           <span className="sb-cp-meta tabular-nums">{genre.tracks.length}</span>
         </div>
         <ul>
