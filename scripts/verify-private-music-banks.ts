@@ -57,11 +57,17 @@ async function main() {
     isGrantLive({ expiresAt: null }, now) && !isGrantLive({ expiresAt: new Date("2026-11-09T00:00:00Z") }, now) && isGrantLive({ expiresAt: new Date("2026-12-01T00:00:00Z") }, now));
   const auth = read("app/api/music-bank/authorize/route.ts");
   assert("P3e the authorize route (station + signed-in person) scopes the token by the business's open banks",
-    /accessiblePrivateBanks\(station \? \{ workspaceId: station\.workspaceId, userId: null \} : \{ workspaceId: user!\.tenantId \?\? null, userId: user!\.id \}\)/.test(auth)
+    /accessiblePrivateBanks\(\{ workspaceId: station \? station\.workspaceId : user!\.tenantId \?\? null \}\)/.test(auth)
     && /const allowedGenres = scopeGenres\(\[\.\.\.new Set\(\[\.\.\.dbGenres, \.\.\.pocGenres\]\)\], openBanks\.map\(\(b\) => b\.id\)\);/.test(auth));
   assert("P3f /api/media still refuses a genre that is not in the token (unchanged scope check)", /allowedGenres/.test(read("app/api/media/[assetId]/route.ts")));
   const access = read("lib/music-bank/bank-access.ts");
   assert("P3g a failed grant lookup closes private banks only (never throws, public catalog unaffected)", /catch \(e\) \{[\s\S]*?private banks closed[\s\S]*?return \[\];/.test(access));
+
+  // 2026-11-11 owner rule: "only when I switch it on should it be SEEN and HEARD" — no see-everything bypass (not even the owner)
+  const pbRoute = read("app/api/music-bank/private-banks/route.ts");
+  assert("P3h seen == heard: no SUPER_ADMIN bypass; the catalog and the media token use the same per-business grant check",
+    !/SUPER_ADMIN|isSuperAdminUser|userId/.test(access.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, ""))
+    && /accessiblePrivateBanks\(\{ workspaceId: user\.tenantId \?\? null \}\)/.test(pbRoute));
 
   // P4 — All Day Mix = the 100 Shufersal songs, mixed
   const mix = privateBankById("all-day-mix");
