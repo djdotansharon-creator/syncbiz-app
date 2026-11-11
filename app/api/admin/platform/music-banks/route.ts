@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSuperAdminOrNull } from "@/lib/auth/guards";
 import { prisma } from "@/lib/prisma";
 import { PRIVATE_BANKS } from "@/lib/music-bank/private-banks";
+import { buildQuotaChecks } from "@/lib/admin/platform-quotas";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,9 +24,15 @@ export async function GET() {
         name: true,
         slug: true,
         createdAt: true,
-        owner: { select: { email: true } },
-        entitlement: { select: { status: true, planCode: true, trialEndsAt: true } },
-        _count: { select: { members: true, branches: true } },
+        ownerId: true,
+        owner: { select: { email: true, role: true } },
+        entitlement: {
+          select: {
+            status: true, planCode: true, trialEndsAt: true, suspendedAt: true, suspendedReason: true,
+            maxBranches: true, maxDevices: true, maxUsers: true, maxPlaylists: true,
+          },
+        },
+        _count: { select: { members: true, branches: true, playlists: true } },
         brands: { where: { archivedAt: null }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], select: { id: true, name: true, isDefault: true, color: true } },
         branches: { orderBy: { createdAt: "asc" }, select: { id: true, name: true, brandId: true } },
         musicBankGrants: { select: { bankId: true, expiresAt: true, createdAt: true } },
@@ -45,23 +52,37 @@ export async function GET() {
         trackCount: b.tracks.length,
         durationSeconds: Math.round(b.tracks.reduce((s, t) => s + (t.durationSeconds ?? 0), 0)),
       })),
-      businesses: workspaces.map((w) => ({
+      adminId: admin.id,
+      businesses: workspaces.map((w) => {
+        const e = w.entitlement;
+        const deviceCount = devices.get(w.id) ?? 0;
+        // the same quota check as Platform · Workspaces (UI only — no enforcement)
+        const quota = buildQuotaChecks(e, { branches: w._count.branches, devices: deviceCount, members: w._count.members, playlists: w._count.playlists });
+        return {
         id: w.id,
         name: w.name,
         slug: w.slug,
+        ownerId: w.ownerId,
         ownerEmail: w.owner?.email ?? null,
+        ownerIsSuperAdmin: w.owner?.role === "SUPER_ADMIN",
         createdAt: w.createdAt.toISOString(),
-        status: w.entitlement?.status ?? null,
-        plan: w.entitlement?.planCode ?? null,
-        trialEndsAt: w.entitlement?.trialEndsAt?.toISOString() ?? null,
+        status: e?.status ?? null,
+        plan: e?.planCode ?? null,
+        trialEndsAt: e?.trialEndsAt?.toISOString() ?? null,
+        suspendedAt: e?.suspendedAt?.toISOString() ?? null,
+        suspendedReason: e?.suspendedReason ?? null,
+        limits: e ? { branches: e.maxBranches, devices: e.maxDevices, users: e.maxUsers, playlists: e.maxPlaylists } : null,
+        overLimit: quota.anyOver,
         users: w._count.members,
+        playlists: w._count.playlists,
         branchCount: w._count.branches,
-        devices: devices.get(w.id) ?? 0,
+        devices: deviceCount,
         lastActiveAt: lastSeen.get(w.id) ?? null,
         chains: w.brands.map((b) => ({ id: b.id, name: b.name, isDefault: b.isDefault, color: b.color })),
         branches: w.branches.map((b) => ({ id: b.id, name: b.name, chainId: b.brandId })),
         grants: w.musicBankGrants.map((g) => ({ bankId: g.bankId, expiresAt: g.expiresAt?.toISOString() ?? null, since: g.createdAt.toISOString() })),
-      })),
+        };
+      }),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

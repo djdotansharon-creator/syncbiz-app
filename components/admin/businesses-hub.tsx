@@ -11,6 +11,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import WorkspaceActions from "@/components/admin/workspace-actions";
+import WorkspaceTestDeleteButton from "@/components/admin/workspace-test-delete-button";
 import "@/components/roles/people-grid.css";
 import "@/components/roles/permissions-hub.css";
 import "@/components/admin/businesses-hub.css";
@@ -21,12 +23,20 @@ type Business = {
   id: string;
   name: string;
   slug: string;
+  ownerId: string;
   ownerEmail: string | null;
+  ownerIsSuperAdmin: boolean;
   createdAt: string;
   status: string | null;
   plan: string | null;
   trialEndsAt: string | null;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  /** WorkspaceEntitlement maxes (null = no entitlement row) */
+  limits: { branches: number; devices: number; users: number; playlists: number } | null;
+  overLimit: boolean;
   users: number;
+  playlists: number;
   branchCount: number;
   devices: number;
   lastActiveAt: string | null;
@@ -73,8 +83,24 @@ function fmtAgo(iso: string | null, now: number): string {
   const d = Math.round(h / 24);
   return d < 60 ? `${d} days ago` : fmtDay(iso);
 }
-type SortKey = "name" | "branches" | "devices" | "banks" | "active" | "created";
-type Filter = "all" | "ACTIVE" | "TRIALING" | "PAST_DUE" | "SUSPENDED" | "CANCELLED" | "banks";
+/** "in 5 days" / "ended 3 days ago" for a trial end (the same idea as Platform · Workspaces). */
+function fmtUntil(iso: string | null, now: number): string {
+  if (!iso) return "";
+  const d = Math.round((new Date(iso).getTime() - now) / 86_400_000);
+  if (d === 0) return "today";
+  return d > 0 ? `in ${plural(d, "day", "days")}` : `ended ${plural(-d, "day", "days")} ago`;
+}
+/** used / max — the max comes from the account's plan limits; over the limit is marked (UI only, not enforced). */
+function Usage({ used, max }: { used: number; max: number | undefined }) {
+  if (max == null) return <>{used}</>;
+  return (
+    <span className={used > max ? "sb-bz-over" : undefined} title={used > max ? "Over the plan limit" : undefined}>
+      {used}<span className="sb-bz-max"> / {max}</span>
+    </span>
+  );
+}
+type SortKey = "name" | "trial" | "users" | "branches" | "devices" | "playlists" | "banks" | "active" | "created";
+type Filter = "all" | "ACTIVE" | "TRIALING" | "PAST_DUE" | "SUSPENDED" | "CANCELLED" | "over" | "noplan" | "banks";
 
 function Switch({ on, busy, label, onChange }: { on: boolean; busy: boolean; label: string; onChange: (next: boolean) => void }) {
   return (
@@ -96,6 +122,7 @@ export function BusinessesHub() {
   const [bankQ, setBankQ] = useState<Record<string, string>>({});
   const [now] = useState(() => Date.now()); // "last active" is relative to when the list loaded
   const [busy, setBusy] = useState<string | null>(null);
+  const [adminId, setAdminId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -104,7 +131,8 @@ export function BusinessesHub() {
         setError(r.status === 403 ? "Only the platform owner can open this page." : "Could not load the businesses.");
         return;
       }
-      const j = (await r.json()) as { banks: Bank[]; businesses: Business[] };
+      const j = (await r.json()) as { banks: Bank[]; businesses: Business[]; adminId: string };
+      setAdminId(j.adminId);
       setBanks(j.banks);
       setBusinesses(j.businesses);
       setError(null);
@@ -150,11 +178,13 @@ export function BusinessesHub() {
   const liveCount = (b: Business): number => b.grants.filter(isLive).length;
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: 0, banks: 0 };
+    const c: Record<string, number> = { all: 0, banks: 0, over: 0, noplan: 0 };
     for (const b of businesses ?? []) {
       c.all++;
       if (b.status) c[b.status] = (c[b.status] ?? 0) + 1;
       if (b.grants.some(isLive)) c.banks++;
+      if (b.overLimit) c.over++;
+      if (!b.limits) c.noplan++;
     }
     return c;
   }, [businesses]);
@@ -162,11 +192,17 @@ export function BusinessesHub() {
   const shown = useMemo(() => {
     const n = q.trim().toLowerCase();
     const list = (businesses ?? []).filter((b) => {
-      if (filter === "banks" ? !b.grants.some(isLive) : filter !== "all" && b.status !== filter) return false;
+      if (filter === "banks") { if (!b.grants.some(isLive)) return false; }
+      else if (filter === "over") { if (!b.overLimit) return false; }
+      else if (filter === "noplan") { if (b.limits) return false; }
+      else if (filter !== "all" && b.status !== filter) return false;
       return !n || [b.name, b.slug, b.ownerEmail ?? "", ...b.chains.map((c) => c.name)].some((s) => s.toLowerCase().includes(n));
     });
     const val = (b: Business): number | string => {
       switch (sort.key) {
+        case "trial": return b.trialEndsAt ? new Date(b.trialEndsAt).getTime() : sort.dir === 1 ? Number.MAX_SAFE_INTEGER : 0; // no trial end = last
+        case "users": return b.users;
+        case "playlists": return b.playlists;
         case "branches": return b.branchCount;
         case "devices": return b.devices;
         case "banks": return b.grants.filter(isLive).length;
@@ -183,11 +219,23 @@ export function BusinessesHub() {
 
   const open = openId ? (businesses ?? []).find((b) => b.id === openId) ?? null : null;
   if (open) {
-    return <BusinessPage business={open} banks={banks} busy={busy} error={error} onBack={() => setOpenId(null)} onSetGrant={setGrant} />;
+    return (
+      <BusinessPage
+        business={open}
+        banks={banks}
+        busy={busy}
+        error={error}
+        adminId={adminId}
+        now={now}
+        onBack={() => setOpenId(null)}
+        onSetGrant={setGrant}
+        onChanged={() => void load()}
+      />
+    );
   }
 
   const sortBy = (key: SortKey) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "name" ? 1 : -1 }));
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "name" || key === "trial" ? 1 : -1 }));
   const th = (k: SortKey, label: string, className?: string) => (
     <th className={className} aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
       <button type="button" className="sb-bz-th" onClick={() => sortBy(k)}>
@@ -203,6 +251,8 @@ export function BusinessesHub() {
     { id: "PAST_DUE", label: "Past due" },
     { id: "SUSPENDED", label: "Suspended" },
     { id: "CANCELLED", label: "Cancelled" },
+    { id: "over", label: "Over limit" },
+    { id: "noplan", label: "No plan" },
     { id: "banks", label: "With private banks" },
   ];
 
@@ -237,10 +287,13 @@ export function BusinessesHub() {
               <thead>
                 <tr>
                   {th("name", "Account")}
-                  <th>Plan</th>
                   <th>Status</th>
+                  <th>Plan</th>
+                  {th("trial", "Trial ends")}
+                  {th("users", "Users", "sb-bz-num")}
                   {th("branches", "Branches", "sb-bz-num")}
-                  {th("devices", "Devices", "sb-bz-num sb-bz-opt")}
+                  {th("devices", "Devices", "sb-bz-num")}
+                  {th("playlists", "Playlists", "sb-bz-num sb-bz-opt")}
                   {th("banks", "Private banks", "sb-bz-num")}
                   {th("active", "Last active")}
                   {th("created", "Created", "sb-bz-opt")}
@@ -257,13 +310,27 @@ export function BusinessesHub() {
                           <span className="sb-bz-acctname">
                             <b>{b.name}</b>
                             <small>{b.ownerEmail ?? "No owner"}</small>
+                            <small className="sb-bz-mono">{b.slug}</small>
                           </span>
                         </button>
                       </td>
-                      <td className="sb-bz-plan">{b.plan ?? "—"}</td>
-                      <td><StatusPill status={b.status} /></td>
-                      <td className="sb-bz-num">{b.branchCount}</td>
-                      <td className="sb-bz-num sb-bz-opt">{b.devices}</td>
+                      <td>
+                        <StatusPill status={b.status} />
+                        {b.overLimit ? <span className="sb-bz-pill sb-bz-overpill" data-tone="warn" title="Uses more than the plan allows (not enforced)">Over limit</span> : null}
+                      </td>
+                      <td className="sb-bz-plan">{b.plan ?? <span className="sb-bz-dim">—</span>}</td>
+                      <td>
+                        {b.trialEndsAt ? (
+                          <span className="sb-bz-two">
+                            <span>{fmtDay(b.trialEndsAt)}</span>
+                            <small className={new Date(b.trialEndsAt).getTime() < now ? "sb-bz-warn" : undefined}>{fmtUntil(b.trialEndsAt, now)}</small>
+                          </span>
+                        ) : <span className="sb-bz-dim">—</span>}
+                      </td>
+                      <td className="sb-bz-num"><Usage used={b.users} max={b.limits?.users} /></td>
+                      <td className="sb-bz-num"><Usage used={b.branchCount} max={b.limits?.branches} /></td>
+                      <td className="sb-bz-num"><Usage used={b.devices} max={b.limits?.devices} /></td>
+                      <td className="sb-bz-num sb-bz-opt"><Usage used={b.playlists} max={b.limits?.playlists} /></td>
                       <td className="sb-bz-num">{live > 0 ? <span className="sb-bz-banks">{live}</span> : <span className="sb-bz-dim">—</span>}</td>
                       <td className={b.lastActiveAt ? "" : "sb-bz-dim"}>{fmtAgo(b.lastActiveAt, now)}</td>
                       <td className="sb-bz-opt sb-bz-dim">{fmtDay(b.createdAt)}</td>
@@ -274,6 +341,7 @@ export function BusinessesHub() {
             </table>
             {shown.length === 0 ? <p className="sb-pg-empty">No account matches.</p> : null}
           </div>
+          <p className="sb-bz-note">Users, branches, devices and playlists show used / plan limit. Over the limit is marked only — it is not enforced.</p>
         </section>
       ) : null}
 
@@ -341,15 +409,21 @@ function BusinessPage({
   banks,
   busy,
   error,
+  adminId,
+  now,
   onBack,
   onSetGrant,
+  onChanged,
 }: {
   business: Business;
   banks: Bank[];
   busy: string | null;
   error: string | null;
+  adminId: string;
+  now: number;
   onBack: () => void;
   onSetGrant: (businessId: string, bankId: string, open: boolean, expiresAt: string | null) => Promise<void>;
+  onChanged: () => void;
 }) {
   const [tab, setTab] = useState<PageTab>("banks");
   const [minDay] = useState(() => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)); // the earliest end date: tomorrow
@@ -458,15 +532,44 @@ function BusinessPage({
         <section className="sb-bz-sec" aria-label="Account">
           <dl className="sb-pg-facts sb-bz-facts">
             <div><dt>Owner</dt><dd>{b.ownerEmail ?? "—"}</dd></div>
-            <div><dt>Status</dt><dd>{b.status ?? "—"}</dd></div>
-            <div><dt>Plan</dt><dd>{b.plan ?? "—"}</dd></div>
-            <div><dt>Trial ends</dt><dd>{fmtDay(b.trialEndsAt)}</dd></div>
-            <div><dt>Users</dt><dd>{b.users}</dd></div>
-            <div><dt>Branches</dt><dd>{b.branchCount}</dd></div>
-            <div><dt>Devices</dt><dd>{b.devices}</dd></div>
+            <div><dt>Status</dt><dd><StatusPill status={b.status} />{b.overLimit ? <span className="sb-bz-pill sb-bz-overpill" data-tone="warn">Over limit</span> : null}</dd></div>
+            {b.suspendedAt ? <div><dt>Suspended</dt><dd>{fmtDay(b.suspendedAt)}{b.suspendedReason ? ` · ${b.suspendedReason}` : ""}</dd></div> : null}
+            <div><dt>Plan</dt><dd>{b.plan ?? "No plan"}</dd></div>
+            <div><dt>Trial ends</dt><dd>{fmtDay(b.trialEndsAt)}{b.trialEndsAt ? ` · ${fmtUntil(b.trialEndsAt, now)}` : ""}</dd></div>
+            <div><dt>Users</dt><dd><Usage used={b.users} max={b.limits?.users} /></dd></div>
+            <div><dt>Branches</dt><dd><Usage used={b.branchCount} max={b.limits?.branches} /></dd></div>
+            <div><dt>Devices</dt><dd><Usage used={b.devices} max={b.limits?.devices} /></dd></div>
+            <div><dt>Playlists</dt><dd><Usage used={b.playlists} max={b.limits?.playlists} /></dd></div>
+            <div><dt>Last active</dt><dd>{fmtAgo(b.lastActiveAt, now)}</dd></div>
             <div><dt>Created</dt><dd>{fmtDay(b.createdAt)}</dd></div>
             <div><dt>Id</dt><dd className="sb-bz-mono">{b.slug}</dd></div>
           </dl>
+          {/* the same actions as the Platform · Workspaces row (suspend / unsuspend / extend trial, test tear-down) */}
+          <div className="sb-bz-actions">
+            <WorkspaceActions
+              workspaceId={b.id}
+              workspaceName={b.name}
+              workspaceSlug={b.slug}
+              ownerEmail={b.ownerEmail ?? ""}
+              status={(b.status ?? null) as "TRIALING" | "ACTIVE" | "PAST_DUE" | "SUSPENDED" | "CANCELLED" | null}
+              hasEntitlement={b.limits != null}
+              trialEndsAtLabel={fmtDay(b.trialEndsAt)}
+              trialEndsAtRelative={b.trialEndsAt ? fmtUntil(b.trialEndsAt, now) : ""}
+              trialEndsAtIso={b.trialEndsAt}
+              onChanged={onChanged}
+            />
+            {adminId ? (
+              <WorkspaceTestDeleteButton
+                workspaceId={b.id}
+                name={b.name}
+                slug={b.slug}
+                ownerId={b.ownerId}
+                ownerEmail={b.ownerEmail ?? ""}
+                adminId={adminId}
+                ownerIsSuperAdmin={b.ownerIsSuperAdmin}
+              />
+            ) : null}
+          </div>
           <a className="sb-psn-link sb-bz-full" href={`/admin/platform/workspaces/${encodeURIComponent(b.id)}`}>Open the full admin page (members, devices, limits, log)</a>
         </section>
       ) : null}
