@@ -2756,6 +2756,9 @@ model MusicBankGrant {
   closesAt        DateTime?
   /// "manual" (switched off in Platform → Accounts) | "payment" (future billing lock) — picks the notice text.
   closeReason     String?
+  /// 2026-11-11 (owner, stage D): the business switched OFFLINE on for this bank in the catalog → its stations keep the
+  /// songs encrypted on disk (offline manifest lists only these). Off = streams only; switching off deletes the copies.
+  offlineEnabled  Boolean   @default(false)
   grantedByUserId String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

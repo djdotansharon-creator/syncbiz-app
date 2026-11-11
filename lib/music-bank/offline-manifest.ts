@@ -2,7 +2,8 @@
  * OFFLINE MANIFEST (Music Bank Phase 2, stage B; owner 2026-11-10/11). Server-only.
  *
  * What a station may keep OFFLINE (encrypted, desktop/src/main/offline/*) and until when. Owner rules:
- *  - Offline only for music the business is entitled to. Today that is a PRIVATE bank opened to it (All Day Mix);
+ *  - Offline only for a bank the business switched OFFLINE on in the catalog (stage D, MusicBankGrant.offlineEnabled) AND is
+ *    entitled to. Today that is a PRIVATE bank opened to it (All Day Mix);
  *    public Royalty-Free genre packs are not offline-entitled until billing exists (paid packs → later).
  *  - A bank that was switched off stops at its close (the next 04:00, lib/music-bank/day-boundary.ts) — offline copies
  *    follow the same end, so seen == heard == offline.
@@ -23,7 +24,8 @@ export type OfflineTrack = { logicalId: string; title: string; contentHash: stri
 export type OfflineBank = { bankId: string; name: string; endsAt: string | null; validUntil: string; tracks: OfflineTrack[]; totalBytes: number };
 export type OfflineManifest = { version: number; issuedAt: string; workspaceId: string; banks: OfflineBank[]; totalBytes: number };
 
-type GrantRow = { bankId: string; expiresAt: Date | null; closesAt: Date | null };
+/** offlineEnabled: the business switched OFFLINE on for this bank in the catalog (stage D). Missing / false → streams only. */
+type GrantRow = { bankId: string; expiresAt: Date | null; closesAt: Date | null; offlineEnabled?: boolean };
 type AssetRow = { logicalId: string | null; contentHash: string; contentHashAlgorithm: string; sizeBytes: bigint | number; mimeType: string; durationSeconds: number | null };
 
 /** PURE: compose the manifest from grant rows + READY assets (testable without a database). */
@@ -34,6 +36,7 @@ export function composeOfflineManifest(input: { now: Date; workspaceId: string; 
   const licenseCap = now + OFFLINE_LICENSE_DAYS * 24 * 60 * 60 * 1000;
   const banks: OfflineBank[] = [];
   for (const g of input.grants) {
+    if (g.offlineEnabled !== true) continue; // stage D: Offline is switched on per bank by the business — off = stream only
     const bank = PRIVATE_BANKS.find((b) => b.id === g.bankId);
     if (!bank) continue;
     const end = grantEndsAt({ closesAt: g.closesAt, expiresAt: g.expiresAt });
@@ -67,7 +70,7 @@ export function composeOfflineManifest(input: { now: Date; workspaceId: string; 
 /** The business's offline manifest. Never throws (a failed lookup = nothing offline-entitled — the station keeps what it has until its license runs out). */
 export async function offlineManifestForWorkspace(workspaceId: string): Promise<OfflineManifest | null> {
   try {
-    const grants = await prisma.musicBankGrant.findMany({ where: { workspaceId }, select: { bankId: true, expiresAt: true, closesAt: true } });
+    const grants = await prisma.musicBankGrant.findMany({ where: { workspaceId }, select: { bankId: true, expiresAt: true, closesAt: true, offlineEnabled: true } });
     const ids = new Set<string>();
     for (const g of grants) for (const t of PRIVATE_BANKS.find((b) => b.id === g.bankId)?.tracks ?? []) ids.add(t.id);
     const assets = ids.size
@@ -80,5 +83,28 @@ export async function offlineManifestForWorkspace(workspaceId: string): Promise<
   } catch (e) {
     console.warn("[music-bank/offline-manifest] lookup failed:", e instanceof Error ? e.message : String(e));
     return null;
+  }
+}
+
+
+/**
+ * The catalog's Offline switch per private bank of a business (stage D): on/off + how much disk the bank needs (the sum of
+ * its READY songs). Never throws (failure → empty: the switch is simply not shown).
+ */
+export async function offlineInfoForWorkspace(workspaceId: string | null | undefined): Promise<Record<string, { enabled: boolean; bytes: number }>> {
+  if (!workspaceId) return {};
+  try {
+    const grants = await prisma.musicBankGrant.findMany({ where: { workspaceId }, select: { bankId: true, offlineEnabled: true } });
+    const out: Record<string, { enabled: boolean; bytes: number }> = {};
+    for (const g of grants) {
+      const bank = PRIVATE_BANKS.find((b) => b.id === g.bankId);
+      if (!bank) continue;
+      const rows = await prisma.mediaAsset.findMany({ where: { status: "READY", logicalId: { in: bank.tracks.map((t) => t.id) } }, select: { sizeBytes: true } });
+      out[bank.id] = { enabled: g.offlineEnabled === true, bytes: rows.reduce((s, r) => s + Number(r.sizeBytes), 0) };
+    }
+    return out;
+  } catch (e) {
+    console.warn("[music-bank/offline-info] lookup failed:", e instanceof Error ? e.message : String(e));
+    return {};
   }
 }

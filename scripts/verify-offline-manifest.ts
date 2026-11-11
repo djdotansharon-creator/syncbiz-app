@@ -33,7 +33,7 @@ async function main() {
   const assets: Array<{ logicalId: string; contentHash: string; contentHashAlgorithm: string; sizeBytes: bigint; mimeType: string; durationSeconds: number | null }> = mix.tracks.slice(0, 3).map((t, i) => ({ logicalId: t.id, contentHash: h(i + 1), contentHashAlgorithm: "sha256", sizeBytes: BigInt(1000 + i), mimeType: "audio/mpeg", durationSeconds: 200 }));
   assets.push({ logicalId: mix.tracks[3].id, contentHash: "abc", contentHashAlgorithm: "md5", sizeBytes: BigInt(5), mimeType: "audio/mpeg", durationSeconds: null });
 
-  const open = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: null }], assets });
+  const open = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: null, offlineEnabled: true }], assets });
   const b = open.banks[0];
   assert("B1 an open bank is offline-entitled: only songs with a READY sha256 asset, sizes + hashes, total bytes",
     open.banks.length === 1 && b.bankId === "all-day-mix" && b.tracks.length === 3 && b.totalBytes === 1000 + 1001 + 1002 && open.totalBytes === b.totalBytes
@@ -42,11 +42,11 @@ async function main() {
     b.validUntil === new Date(now.getTime() + OFFLINE_LICENSE_DAYS * 86_400_000).toISOString() && b.endsAt === null);
 
   const closesAt = new Date("2026-11-12T02:00:00Z");
-  const closing = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt }], assets });
+  const closing = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt, offlineEnabled: true }], assets });
   assert("B3 a switched-off bank stays offline only until its 04:00 close (offline == seen == heard)",
     closing.banks[0]?.validUntil === closesAt.toISOString() && closing.banks[0]?.endsAt === closesAt.toISOString());
-  const closed = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: new Date("2026-11-11T02:00:00Z") }], assets });
-  const unknown = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "nope", expiresAt: null, closesAt: null }], assets });
+  const closed = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: new Date("2026-11-11T02:00:00Z"), offlineEnabled: true }], assets });
+  const unknown = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "nope", expiresAt: null, closesAt: null, offlineEnabled: true }], assets });
   assert("B4 a closed bank and an unknown bank are not offline-entitled (the station removes its copies)", closed.banks.length === 0 && unknown.banks.length === 0);
   const none = composeOfflineManifest({ now, workspaceId: "ws1", grants: [], assets });
   assert("B5 no grant → nothing offline (public genre packs are not offline-entitled until billing)", none.banks.length === 0 && none.totalBytes === 0);
@@ -63,6 +63,26 @@ async function main() {
   assert("B8 station auth = the signed station token AND a registered StationDevice of that same business (as /authorize); else a signed-in person",
     /verifyDesktopStationToken\(/.test(route) && /station\.workspaceId !== claims\.workspaceId\) return "invalid";/.test(route)
     && /status: 401/.test(route) && /getCurrentUserFromCookies\(\)/.test(route));
+
+  // ── stage D (owner 2026-11-11): the per-bank Offline switch in the catalog ──
+  const offOff = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: null, offlineEnabled: false }], assets });
+  const offMissing = composeOfflineManifest({ now, workspaceId: "ws1", grants: [{ bankId: "all-day-mix", expiresAt: null, closesAt: null }], assets });
+  assert("D1 Offline OFF (the default) → the bank is not in the manifest (streams only; the station deletes its copies)",
+    offOff.banks.length === 0 && offMissing.banks.length === 0);
+  const toggle = read("app/api/music-bank/offline/route.ts");
+  assert("D2 the switch: signed-in business owner / admin only, only for a bank open to that business right now, own business only",
+    /getCurrentUserFromCookies\(\)/.test(toggle) && /hasTenantAdminRole\(user\.id, user\.tenantId \?\? null\)/.test(toggle) && /status: 403/.test(toggle)
+    && /liveBankIdsForWorkspace\(workspaceId, "catalog"\)/.test(toggle) && /status: 404/.test(toggle)
+    && /where: \{ workspaceId_bankId: \{ workspaceId, bankId: body\.bankId \} \}, data: \{ offlineEnabled: body\.offline \}/.test(toggle));
+  const pb = read("app/api/music-bank/private-banks/route.ts");
+  const panel = read("components/royalty-free-music-workspace-panel.tsx");
+  assert("D3 the catalog shows Offline on a private bank's page with the disk it needs; the dev Stream / Local toggle is gone",
+    /offline\[b\.id\] = \{ enabled: info\[b\.id\]\?\.enabled \?\? false, bytes: info\[b\.id\]\?\.bytes \?\? 0, canToggle \}/.test(pb)
+    && /role="switch"[\s\S]{0,200}aria-checked=\{offline\.enabled\}/.test(panel) && /Needs \$\{fmtSize\(offline\.bytes\)\} on each computer/.test(panel)
+    && /fetch\("\/api\/music-bank\/offline", \{\s*method: "PUT"/.test(panel) && !/\{m === "stream" \? "Stream" : "Local"\}/.test(panel));
+  const mig = read("prisma/migrations/20261111180000_bank_offline_toggle/migration.sql").replace(/--.*$/gm, "").trim();
+  assert("D4 the migration only adds one column, default off, idempotent (safe to apply before the code deploy)",
+    mig === 'ALTER TABLE "MusicBankGrant" ADD COLUMN IF NOT EXISTS "offlineEnabled" BOOLEAN NOT NULL DEFAULT false;');
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(process.exitCode ?? 0);

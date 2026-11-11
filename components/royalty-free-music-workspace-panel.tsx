@@ -33,6 +33,12 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 
 type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
+/** stage D (owner 2026-11-11): a private bank's Offline switch — on/off, disk the bank needs, may this person change it. */
+type OfflineInfo = { enabled: boolean; bytes: number; canToggle: boolean };
+function fmtSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
 type PlaybackMode = "stream" | "local"; // Stage A: "stream" = token-free /api/media/<id> via SyncBiz; "local" = preview-cache path
 
 function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
@@ -54,7 +60,8 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const [bridgeChecked, setBridgeChecked] = useState(false);
   const [view, setView] = useState<ActiveView>("all");
   const [nowPlaying, setNowPlaying] = useState<{ genreId: string; trackId: string | null } | null>(null);
-  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("stream");
+  // the dev Stream / Local A/B toggle left the screen (owner 2026-11-11) — "stream" is the mode; Local stays in code only
+  const [playbackMode] = useState<PlaybackMode>("stream");
   // Streaming readiness: the MASTER holds the media token (via <MasterMediaSession/>). A CONTROL never
   // holds a token — it just routes the token-free source to the MASTER, which plays with ITS token.
   const [hasMasterToken, setHasMasterToken] = useState(false);
@@ -68,12 +75,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
   const genres = catalog.genres;
   // owner 2026-11-10: PRIVATE banks (e.g. All Day Mix) come from the server, only the ones this business was opened to.
   const [privatePacks, setPrivatePacks] = useState<MusicBankGenrePack[]>([]);
+  // 2026-11-11 (owner, stage D): the per-bank OFFLINE switch — on: the business's stations keep the songs encrypted on disk.
+  const [privateOffline, setPrivateOffline] = useState<Record<string, OfflineInfo>>({});
+  const [offlineBusy, setOfflineBusy] = useState<string | null>(null);
+  const [offlineError, setOfflineError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/music-bank/private-banks", { credentials: "include", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { banks?: MusicBankGenrePack[] } | null) => {
+      .then((j: { banks?: MusicBankGenrePack[]; offline?: Record<string, OfflineInfo> } | null) => {
         if (!cancelled && Array.isArray(j?.banks)) setPrivatePacks(j.banks);
+        if (!cancelled && j?.offline && typeof j.offline === "object") setPrivateOffline(j.offline);
       })
       .catch(() => {
         /* offline / signed out — the public catalog still shows */
@@ -81,6 +93,28 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
     return () => {
       cancelled = true;
     };
+  }, []);
+  const setOffline = useCallback(async (bankId: string, offline: boolean) => {
+    setOfflineBusy(bankId);
+    setOfflineError(null);
+    try {
+      const r = await fetch("/api/music-bank/offline", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bankId, offline }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { offline?: boolean; error?: string };
+      if (!r.ok) {
+        setOfflineError(j.error ?? "The change was not saved.");
+        return;
+      }
+      setPrivateOffline((m) => ({ ...m, [bankId]: { ...(m[bankId] ?? { bytes: 0, canToggle: true }), enabled: j.offline === true } }));
+    } catch {
+      setOfflineError("The change was not saved.");
+    } finally {
+      setOfflineBusy(null);
+    }
   }, []);
   const allPacks = useMemo(() => [...privatePacks, ...genres], [privatePacks, genres]);
   const selectedGenre = useMemo(() => (view === "all" ? null : allPacks.find((g) => g.id === view) ?? null), [allPacks, view]);
@@ -221,18 +255,8 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
           <p className="sb-cp-meta mt-1">{genres.length} Genre Packs · {totalSamples} samples</p>
         </div>
         <div className="flex items-center gap-1">
-          {/* Stage A A/B toggle (dev): Stream = SyncBiz HTTPS media transport; Local = preview-cache path. */}
-          {(["stream", "local"] as PlaybackMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setPlaybackMode(m)}
-              aria-pressed={playbackMode === m}
-              className={`sb-cp-act${playbackMode === m ? " is-on" : ""}`}
-            >
-              {m === "stream" ? "Stream" : "Local"}
-            </button>
-          ))}
+          {/* 2026-11-11 (owner): the dev "Stream / Local" A/B toggle is gone from the screen — music streams, and a bank kept on
+              this computer is switched per bank with OFFLINE on its own page. (The Local preview-cache mode stays in code, unused.) */}
           <button type="button" onClick={onClose} aria-label="Close" className="sb-cp-icon-btn ms-1">
             <CloseIcon className="h-4 w-4" />
           </button>
@@ -256,6 +280,10 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
           <GenreDetail
             genre={selectedGenre}
             isPrivate={selectedIsPrivate}
+            offline={selectedIsPrivate ? privateOffline[selectedGenre.id] ?? null : null}
+            offlineBusy={offlineBusy === selectedGenre.id}
+            offlineError={selectedIsPrivate ? offlineError : null}
+            onToggleOffline={(next) => void setOffline(selectedGenre.id, next)}
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
             onPlaySamples={() => playGenreSamples(selectedGenre)}
@@ -268,6 +296,17 @@ export function RoyaltyFreeMusicWorkspacePanel({ onClose }: { onClose: () => voi
         )}
       </div>
     </div>
+  );
+}
+
+/** stage D: a calm "kept on this computer" mark — a down-arrow into a tray. */
+function OfflineIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 4v11" />
+      <path d="M7.5 10.5 12 15l4.5-4.5" />
+      <path d="M5 19h14" />
+    </svg>
   );
 }
 
@@ -426,6 +465,10 @@ function CatalogHome({
 function GenreDetail({
   genre,
   isPrivate = false,
+  offline = null,
+  offlineBusy = false,
+  offlineError = null,
+  onToggleOffline,
   trackPlayable,
   nowPlaying,
   onPlaySamples,
@@ -436,6 +479,11 @@ function GenreDetail({
   genre: MusicBankGenrePack;
   /** a PRIVATE bank (owner 2026-11-10): full songs, no price / unlock */
   isPrivate?: boolean;
+  /** stage D: the bank's Offline switch (private banks only) */
+  offline?: OfflineInfo | null;
+  offlineBusy?: boolean;
+  offlineError?: string | null;
+  onToggleOffline?: (next: boolean) => void;
   trackPlayable: (id: string) => boolean;
   nowPlaying: { genreId: string; trackId: string | null } | null;
   onPlaySamples: () => void;
@@ -471,6 +519,29 @@ function GenreDetail({
               <PlayIcon className="h-3.5 w-3.5" />
               {isPrivate ? "Play the mix" : "Listen to Samples"}
             </button>
+            {/* stage D (owner 2026-11-11): OFFLINE — keep this bank on the business's computers, encrypted. Quiet: no progress
+                bar, only the disk space it needs (owner: "whoever doesn't know shouldn't need to know it downloads"). */}
+            {isPrivate && offline ? (
+              <span className="sb-cp-offline">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={offline.enabled}
+                  disabled={!offline.canToggle || offlineBusy}
+                  title={offline.canToggle ? undefined : "Only the business owner or an admin can change Offline"}
+                  onClick={() => onToggleOffline?.(!offline.enabled)}
+                  className={`sb-cp-act${offline.enabled ? " is-on" : ""}`}
+                >
+                  <OfflineIcon className="h-3.5 w-3.5" />
+                  Offline
+                </button>
+                <span className="sb-cp-faint text-[11px] font-medium">
+                  {offline.enabled
+                    ? `Kept on this business's computers${offline.bytes > 0 ? ` · ${fmtSize(offline.bytes)}` : ""}`
+                    : offline.bytes > 0 ? `Needs ${fmtSize(offline.bytes)} on each computer` : "Keep it on this business's computers"}
+                </span>
+              </span>
+            ) : null}
             {isPrivate ? null : (
               <span className="ms-auto flex items-center gap-2">
                 <span className="sb-cp-ink text-lg font-bold tabular-nums">{GENRE_PRICE_LABEL}</span>
@@ -482,6 +553,7 @@ function GenreDetail({
       </section>
 
       {notPlayableHint ? <p className="sb-cp-faint text-[11px]">{notPlayableHint}</p> : null}
+      {offlineError ? <p className="sb-cp-faint text-[11px]" role="alert">{offlineError}</p> : null}
 
       {/* Samples — a plain list: no box, a soft fill under the row you point at or the one playing */}
       <section className="space-y-2">
