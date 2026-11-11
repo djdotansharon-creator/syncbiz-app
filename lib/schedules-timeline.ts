@@ -8,6 +8,7 @@
  */
 import type { Schedule } from "@/lib/types";
 import { parseLocalTimeToMinutes, numericSchedulePriority } from "@/lib/schedule-window";
+import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 
 export const DAY_MINUTES = 1440;
 /** the week starts on Sunday (0), like `Schedule.daysOfWeek` */
@@ -18,8 +19,12 @@ export type Scene = {
   day: number;
   /** minutes from local midnight */
   start: number;
-  /** minutes from local midnight; the next scene's start, or the end of the day */
+  /** minutes from local midnight; the block's own END when one was set (and comes first), else the next scene's start, or the end of the day */
   end: number;
+  /** a person set this block's end (a "ends at 17:50"), as opposed to "until the next block" */
+  endSet: boolean;
+  /** a QUIET block (no music from its start) — drawn hatched, named "Quiet" / "Closing" */
+  quiet: boolean;
   /** a disabled block: drawn as a small dashed marker, it does not take part in the sequence */
   paused: boolean;
   /** a second block with exactly the same start time as another: it never plays (the first one wins) */
@@ -108,14 +113,18 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
   for (const s of active) {
     const start = startMinutes(s);
     const i = distinct.indexOf(start);
-    const end = i + 1 < distinct.length ? distinct[i + 1]! : DAY_MINUTES;
+    const nextStart = i + 1 < distinct.length ? distinct[i + 1]! : DAY_MINUTES;
+    // the engine's own rule (lib/schedule-actions.ts): an explicit end stops the music at that time unless the next block comes first
+    const quiet = isSilenceBlock(s);
+    const own = quiet ? null : explicitEndMinutes(s);
+    const end = own !== null && own < nextStart ? own : nextStart;
     const shadowed = seen.has(start);
     seen.add(start);
-    scenes.push({ schedule: s, day, start, end, paused: false, shadowed });
+    scenes.push({ schedule: s, day, start, end, endSet: own !== null && own <= nextStart, quiet, paused: false, shadowed });
   }
   for (const s of mine.filter((x) => !x.enabled)) {
     const start = startMinutes(s);
-    scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), paused: true, shadowed: false });
+    scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), endSet: false, quiet: isSilenceBlock(s), paused: true, shadowed: false });
   }
   return scenes.sort((a, b) => a.start - b.start);
 }
@@ -180,6 +189,7 @@ export function pastedScheduleBody(src: Schedule, dateYmd: string): Record<strin
     oneOffDateLocal: dateYmd,
     daysOfWeek: [],
     startTimeLocal: src.startTimeLocal,
+    ...(src.endTimeLocal && src.endTimeLocal.trim() ? { endTimeLocal: src.endTimeLocal } : {}),
     enabled: true,
     priority: typeof src.priority === "number" ? src.priority : 1,
   };

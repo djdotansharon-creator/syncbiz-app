@@ -17,6 +17,8 @@ export type SchedulePlaybackHandlers = {
   /** Must route to MASTER when this browser is branch CONTROL — see useSchedulePlaybackHandlers. */
   playSource: (source: UnifiedSource, trackIndex?: number) => void;
   setLastMessage: (msg: string | null) => void;
+  /** 2026-11-11 — stop the music for a scheduled END / quiet block: the Stop button's own path (`device.stopOrSend`: MAIN's STOP on a station / controller, the local stop otherwise). Omitted = `stop`. */
+  stopScheduled?: () => void;
   /** 2026-11-04 — where a schedule starts (lib/schedule-station-route.ts). Omitted = "default" (existing behavior). */
   route?: ScheduleRoute;
 };

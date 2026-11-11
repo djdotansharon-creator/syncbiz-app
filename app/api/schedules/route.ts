@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
 
   const branchId = (data.branchId ?? "default").trim() || "default";
   const targetType: ScheduleTargetType = (data.targetType as ScheduleTargetType) ?? "SOURCE";
-  const targetId = (data.targetId ?? data.sourceId ?? "").trim();
+  // a quiet block (SILENCE) has no target: it is stored with a fixed id so the rest of the pipeline keeps working
+  const targetId = targetType === "SILENCE" ? "silence" : (data.targetId ?? data.sourceId ?? "").trim();
   const recurrence: ScheduleRecurrence = data.recurrence === "one_off" ? "one_off" : "weekly";
   const oneOffDateLocal =
     typeof data.oneOffDateLocal === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.oneOffDateLocal.trim())

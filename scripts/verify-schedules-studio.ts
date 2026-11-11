@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { appliesOnDay, buildDayScenes, daysKind, formatMinutes, paletteIndex, BLUE_SHADES, PALETTE_SIZE, addDays, dateKey, pastedScheduleBody, minutesToTimeLocal, nowAndNext, parseTypedTime, snapMinutes, weekDatesFor, DAY_MINUTES } from "../lib/schedules-timeline";
 import { pickWinningScheduleForNow } from "../lib/schedule-window";
+import { playingBlockAt } from "../lib/schedule-actions";
 import type { Schedule } from "../lib/types";
 
 let pass = 0, fail = 0;
@@ -74,15 +75,37 @@ assert("S23 the repeat switch turns a block into a one-time block on the clicked
 
 assert("S26 a block shows its name first and the time UNDER it; the pointer on a block reveals a ⋯ button that opens a menu (edit, play now, copy, 15 min earlier / later, pause, delete) — also on right-click", comp.indexOf('className="ss-b-name"') < comp.indexOf('className="ss-b-time"') && /className="ss-b-more"/.test(comp) && /onContextMenu=\{/.test(comp) && /<BlockMenu/.test(comp) && /onNudge\(-15\)/.test(comp) && /onNudge\(15\)/.test(comp) && /\.ss-block:hover \.ss-b-more/.test(css) && /\.ss-menu-item:hover/.test(css));
 
-assert("S27 a block shared by several days moves ONLY on the day under the pointer: a virtual copy is drawn while dragging, and on drop that day is detached into its own weekly block (with Undo); a one-day or one-time block is simply moved", /isMultiDayWeekly\(src\)/.test(comp) && /id: `\$\{src\.id\}#drag`, daysOfWeek: \[drag\.day\]/.test(comp) && /moveOccurrence\(items\.find/.test(comp) && /\{ daysOfWeek: rest \}/.test(comp) && /await removeNow\(created\.id\)|void removeNow\(created\.id\)\.then/.test(comp));
-assert("S28 the ⋯ menu acts on the block under the pointer: 15 minutes earlier / later move that day only, 'Remove from {day}' appears for a multi-day block, and its Delete then says it deletes all days", /onNudge=\{\(delta\) =>[^}]*moveOccurrence\(sc, d,/.test(comp) && /onRemoveDay=\{/.test(comp) && /tr\("Delete all days"\)/.test(comp));
+assert("S27 a block shared by several days moves ONLY on the day under the pointer: a virtual copy is drawn while dragging, and on drop that day is detached into its own weekly block (with Undo); a one-day or one-time block is simply moved", /isMultiDayWeekly\(src\)/.test(comp) && /id: `\$\{src\.id\}#drag`, daysOfWeek: \[drag\.day\]/.test(comp) && /editOccurrence\(items\.find/.test(comp) && /\{ daysOfWeek: rest \}/.test(comp) && /await removeNow\(created\.id\)|void removeNow\(created\.id\)\.then/.test(comp));
+assert("S28 the ⋯ menu acts on the block under the pointer: 15 minutes earlier / later move that day only, 'Remove from {day}' appears for a multi-day block, and its Delete then says it deletes all days", /onNudge=\{\(delta\) =>[^}]*editOccurrence\(sc, d,/.test(comp) && /onRemoveDay=\{/.test(comp) && /tr\("Delete all days"\)/.test(comp));
 assert("S29 only the block you stand on lifts (hover) and shows the dots; selected / menu / copied markers are per day, not for every repeat of the block", /\.ss-block:hover \{ transform: translateY\(-2px\) scale\(1\.012\)/.test(css) && /editor\?\.day === sc\.day/.test(comp) && /menu\.day === sc\.day/.test(comp) && /clipDay === sc\.day/.test(comp));
+
+// ── explicit ends and quiet blocks (owner 2026-11-11) ──
+const endDay = [mk("a", "08:00:00", [2], { endTimeLocal: "10:30:00" }), mk("b", "12:00:00", [2], { endTimeLocal: "23:59" }), mk("q", "15:00:00", [2], { targetType: "SILENCE", targetId: "silence", name: "Quiet" }), mk("c", "16:00:00", [2], { endTimeLocal: "20:00:00" })];
+const ed = buildDayScenes(endDay, 2, week);
+const edBy = (id: string) => ed.find((x) => x.schedule.id === id)!;
+assert("S30 a block with an END is drawn only until that end (a gap follows when nothing else starts), a block without one runs to the next start", edBy("a").end === 10 * 60 + 30 && edBy("a").endSet === true && edBy("b").end === 15 * 60 && edBy("b").endSet === false && edBy("c").end === 20 * 60 && edBy("c").endSet === true);
+assert("S31 a QUIET block is a scene marked quiet that lasts until the next block (its own end is ignored); a block's end that is later than the next start does not stretch it", edBy("q").quiet === true && edBy("q").end === 16 * 60 && edBy("q").endSet === false && buildDayScenes([mk("x", "08:00:00", [2], { endTimeLocal: "18:00:00" }), mk("y", "09:00:00", [2])], 2, week)[0]!.end === 9 * 60);
+let sameAsEngine = true;
+for (let m = 0; m < DAY_MINUTES; m += 5) {
+  const d = new Date(2026, 10, 10, Math.floor(m / 60), m % 60);
+  const engine = playingBlockAt(endDay, d)?.id ?? null;
+  const shownNow = nowAndNext(ed, m).now;
+  const drawn = shownNow && !shownNow.quiet ? shownNow.schedule.id : null;
+  if (engine !== drawn) { sameAsEngine = false; console.log("  mismatch at", formatMinutes(m), engine, drawn); break; }
+}
+assert("S32 across a whole simulated day, what the timeline draws as playing is exactly what the engine decides is playing (ends, quiet blocks, gaps)", sameAsEngine);
+assert("S33 a pasted copy keeps the block's end", pastedScheduleBody(endDay[0]!, "2026-11-12").endTimeLocal === "10:30:00" && !("endTimeLocal" in pastedScheduleBody(mk("z", "09:00:00", [2], { endTimeLocal: "" }), "2026-11-12")));
 
 // ── wiring (static) — filled in as the screen is built ──
 const page = rd("app/(app)/(workspace)/schedules/page.tsx");
 assert("S14 the Schedules page renders the studio and keeps its data loading", /<SchedulesStudio/.test(page) && /authFetch\("\/api\/schedules"\)/.test(page));
 const pc = rd("components/player-auto-compact.tsx");
 assert("S15 on /schedules the player stays folded into the slim bar (attribute logic only; the playback chain is untouched)", /LOCKED_COMPACT = \/\^\\\/schedules/.test(pc) && /if \(locked\)/.test(pc));
+
+assert("S34 a block's END can be set three ways: a card field (Until the next block / At a time, −15 / +15), dragging its far edge (snapped to 5 min, the very end of the day = until the next block), and it keeps its length when the block moves", /tr\("Ends at"\)/.test(comp) && /className="ss-b-resize"/.test(comp) && /onEndPointerDown/.test(comp) && /snapMinutes\(from \+ d \/ perMin, 5\)/.test(comp) && /m >= END_MAX \? null/.test(comp) && /oldEnd \+ \(newStart - oldStart\)/.test(comp) && /endMin \+ \(m - startMin\)/.test(comp));
+assert("S35 quiet blocks: 'Quiet — no music' is the first row of the music list and of the picker, a quiet block is created in the branch row / filter it was added in, its card has no colour / device / end and says 'Stop now', its ⋯ menu says 'Stop now' too", /kind: "quiet"/.test(comp) && /\[quietItem, \.\.\./.test(comp) && /quiet=\{quietItem\}/.test(comp) && /branchId \?\? quietBranch/.test(comp) && /quiet \? null : \(\s*<div className="ss-field">\s*<span className="ss-label">\{tr\("Ends at"\)/.test(comp) && /\(stopScheduled \?\? stop\)\(\)/.test(comp) && /quiet \? tr\("Stop now"\)/.test(comp));
+assert("S36 Day hours: a per-day closing time kept as weekly quiet blocks named Closing (one per distinct time), created BEFORE the old ones are removed, with the opening shown (the first block of the day) and a warning when a block starts after closing", /function DayHoursDialog/.test(comp) && /const saveClosing = useCallback/.test(comp) && /name: CLOSING_NAME, branchId, targetType: "SILENCE"/.test(comp) && comp.indexOf("for (const g of toCreate)") < comp.indexOf("if (!(await removeNow(e.id))) return false;") && /A block starts after closing/.test(comp) && /onClick=\{\(\) => setHoursOpen\(true\)\}/.test(comp));
+assert("S37 the new look exists in CSS: hatched quiet blocks, the end handle (vertical + horizontal), the Day hours dialog; the dialog shares the studio's colour variables", /\.ss-block\.is-quiet \{/.test(css) && /\.ss-block--v > \.ss-b-resize/.test(css) && /\.ss-block--h > \.ss-b-resize/.test(css) && /\.ss-modal \{/.test(css) && /\.ss, \.ss-pop, \.ss-menu, \.ss-modal-back \{/.test(css));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

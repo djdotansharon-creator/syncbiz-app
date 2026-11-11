@@ -131,8 +131,9 @@ export type Source = {
   isLive: boolean;
 };
 
-/** Schedule target types. ANNOUNCEMENT, AI_ANNOUNCEMENT reserved for future. */
-export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO";
+/** Schedule target types. ANNOUNCEMENT, AI_ANNOUNCEMENT reserved for future.
+ *  SILENCE (2026-11-11, owner: "a quiet block / closing of the day"): not music — at its start the engine STOPS the music and nothing plays until the next block. */
+export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO" | "SILENCE";
 
 /** Weekly = repeat on selected weekdays; one_off = single calendar day (e.g. 31/12). */
 export type ScheduleRecurrence = "weekly" | "one_off";
