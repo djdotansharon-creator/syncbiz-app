@@ -501,3 +501,22 @@ export function scaleBar(pxPerMin: number, maxPx = 92): { minutes: number; px: n
   for (const s of SCALE_STEPS) if (s * pxPerMin <= maxPx) minutes = s;
   return { minutes, px: Math.round(minutes * pxPerMin) };
 }
+
+// ───────────────────────── swapping two blocks (owner 2026-11-12: "swap songs like icons on a phone — without moving the others") ─────────────────────────
+
+/**
+ * Where two blocks start after they swap places. The earlier block moves back by exactly the later block's length (the gap between them is kept), the later one
+ * takes the earlier one's start — so the stretch of day the two cover together (and everything outside it) stays exactly as it was. Lengths are the blocks' own
+ * (what is drawn: the stored end, or until the next block).
+ */
+export function swapStarts(a: { start: number; end: number }, b: { start: number; end: number }): { a: number; b: number } {
+  if (a.start === b.start) return { a: a.start, b: b.start };
+  const aFirst = a.start < b.start;
+  const first = aFirst ? a : b;
+  const second = aFirst ? b : a;
+  const gap = Math.max(0, second.start - first.end);
+  const secondLen = second.end - second.start;
+  const firstNew = Math.min(DAY_MINUTES - 5, first.start + secondLen + gap);
+  const secondNew = first.start;
+  return aFirst ? { a: firstNew, b: secondNew } : { a: secondNew, b: firstNew };
+}

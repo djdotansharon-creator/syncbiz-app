@@ -22,6 +22,7 @@ import { useLocale, useTranslations } from "@/lib/locale-context";
 import { useScheduleEngine } from "@/lib/schedule-engine-context";
 import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
+import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
@@ -58,6 +59,7 @@ import {
   scaleBar,
   snapMinutes,
   startMinutes,
+  swapStarts,
   tickStep,
   weekDatesFor,
   windowTicks,
@@ -101,7 +103,7 @@ type LibItem = {
   targetId: string;
   name: string;
   cover: string | null;
-  kind: "playlist" | "song" | "radio" | "quiet";
+  kind: "playlist" | "song" | "radio" | "bank" | "quiet";
   sub: string;
   branchId: string;
   /** the Apple colour of this music: taken from its own cover (or a stable fallback) */
@@ -454,10 +456,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   // ── the music the owner can schedule ──
   const [blockColors, setBlockColors] = useState<Record<string, number>>({});
+  // the royalty-free music banks (the public Genre Packs + this business's private banks) — a category of their own (owner 2026-11-12)
+  const [bankPacks, setBankPacks] = useState<BankPackSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void listBankPacks().then((l) => { if (!cancelled) setBankPacks(l); }).catch(() => { /* the other music still shows */ });
+    return () => { cancelled = true; };
+  }, []);
   const lib = useMemo<LibItem[]>(() => {
     const out: LibItem[] = [];
     const colour = (targetType: string, targetId: string) => paletteIndex(`${targetType}:${targetId}`);
-    const bid = (targetType: Exclude<ScheduleTargetType, "SILENCE">, targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
+    const bid = (targetType: "SOURCE" | "PLAYLIST" | "RADIO", targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
     for (const p of playlists) {
       out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: "playlist", sub: p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) });
     }
@@ -467,8 +476,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     for (const r of radioStations) {
       out.push({ key: scheduleTargetKey("RADIO", r.id), targetType: "RADIO", targetId: r.id, name: r.name, cover: null, kind: "radio", sub: tr("Radio"), branchId: bid("RADIO", r.id), ci: colour("RADIO", r.id), dur: null });
     }
+    // a bank is not branch content: it takes the branch of the row / filter it is dropped in (like a quiet block); its length is not its own — it plays for as long as the block lasts
+    for (const b of bankPacks) {
+      out.push({ key: scheduleTargetKey("BANK", b.id), targetType: "BANK", targetId: b.id, name: b.name, cover: null, kind: "bank", sub: b.isPrivate ? tr("Private music bank") : tr("Royalty-free"), branchId: "", ci: colour("BANK", b.id), dur: null });
+    }
     return out;
-  }, [playlists, sources, radioStations, tr]);
+  }, [playlists, sources, radioStations, bankPacks, tr]);
   const libMap = useMemo(() => new Map(lib.map((l) => [l.key, l])), [lib]);
   const libFor = useCallback((s: Schedule) => libMap.get(scheduleTargetKey(s.targetType, (s.targetId || s.sourceId || "").trim())) ?? null, [libMap]);
   // "Quiet — no music": a block that stops the music at its start (the engine's SILENCE target). It lives in the music list as the first row.
@@ -632,7 +645,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       createFromBody({
         name: item.targetType === "SILENCE" ? "Quiet" : item.name,
         // a quiet block belongs to the branch whose row / filter it was added in
-        branchId: item.targetType === "SILENCE" ? branchId ?? quietBranch : item.branchId,
+        branchId: item.targetType === "SILENCE" || item.targetType === "BANK" ? branchId ?? quietBranch : item.branchId,
         targetType: item.targetType,
         targetId: item.targetId,
         sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
@@ -731,7 +744,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // A block that repeats on several days is one schedule in the data. Editing one day's block detaches that day: the others keep their time, the edited
   // day becomes its own weekly block (Undo puts it back). A block of one day, or a one-time block, is simply edited. A block that has an END keeps its length when it moves.
   const editOccurrence = useCallback(
-    async (src: Schedule, day: number, edit: { start?: number; end?: number | null }) => {
+    async (src: Schedule, day: number, edit: { start?: number; end?: number | null }, opts?: { quiet?: boolean }): Promise<string | null> => {
       const oldStart = startMinutes(src);
       const oldEnd = explicitEndMinutes(src);
       let newStart = edit.start ?? oldStart;
@@ -739,15 +752,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (edit.end === undefined && oldEnd !== null) newStart = Math.min(newStart, Math.max(oldStart, END_MAX - (oldEnd - oldStart)));
       let newEnd: number | null = edit.end !== undefined ? edit.end : oldEnd !== null ? Math.min(END_MAX, oldEnd + (newStart - oldStart)) : null;
       if (newEnd !== null && newEnd <= newStart) newEnd = null;
-      if (newStart === oldStart && newEnd === oldEnd) return;
+      if (newStart === oldStart && newEnd === oldEnd) return src.id;
       const patch: Partial<Schedule> = {};
       if (newStart !== oldStart) patch.startTimeLocal = minutesToTimeLocal(newStart);
       if (newEnd !== oldEnd) patch.endTimeLocal = newEnd === null ? "23:59:00" : minutesToTimeLocal(newEnd);
       const endNote = newEnd !== oldEnd ? (newEnd === null ? tr("Runs until the next block") : tr("Ends {time}", { time: formatMinutes(newEnd) })) : "";
       if (!isMultiDayWeekly(src)) {
         await update(src.id, patch);
-        if (endNote) showToast(endNote, () => void update(src.id, { endTimeLocal: src.endTimeLocal || "23:59:00" }));
-        return;
+        if (endNote && !opts?.quiet) showToast(endNote, () => void update(src.id, { endTimeLocal: src.endTimeLocal || "23:59:00" }));
+        return src.id;
       }
       const rest = src.daysOfWeek.filter((d) => d !== day);
       const before = items;
@@ -777,12 +790,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         }
         setItems((prev) => prev.map((x) => (x.id === tmp.id ? created : x)));
         if (blockColors[src.id] !== undefined) setBlockColor(created.id, blockColors[src.id]!);
-        showToast(`${endNote || `${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)}`} — ${tr("this day only")}`, () => {
-          void removeNow(created.id).then(() => update(src.id, { daysOfWeek: src.daysOfWeek }));
-        });
+        if (!opts?.quiet) {
+          showToast(`${endNote || `${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)}`} — ${tr("this day only")}`, () => {
+            void removeNow(created.id).then(() => update(src.id, { daysOfWeek: src.daysOfWeek }));
+          });
+        }
+        return created.id;
       } catch (e) {
         setItems(before);
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+        return null;
       }
     },
     [items, update, removeNow, blockColors, setBlockColor, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
@@ -795,6 +812,35 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       showToast(tr("Removed from {day}", { day: dayName(day, "long") }), () => void update(src.id, { daysOfWeek: src.daysOfWeek }));
     },
     [update, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  // ── SWAP (owner 2026-11-12: "swap songs like icons on a phone — without moving the others"): drop a block ON another block of the same row and the two trade places ──
+  // The pair covers the same stretch of day as before (lib/schedules-timeline.ts swapStarts), so no other block moves. Each edit is a normal per-day edit (a block shared
+  // by several days is detached for this day only); one toast with one Undo covers both.
+  const itemsRef = useRef(items);
+  const editRef = useRef(editOccurrence); // always the LATEST edit (an Undo seconds later must see the blocks as they are then, not as they were at the swap)
+  useEffect(() => {
+    itemsRef.current = items;
+    editRef.current = editOccurrence;
+  });
+  const [swapWith, setSwapWith] = useState<{ bid: string; day: number } | null>(null);
+  const swapBlocks = useCallback(
+    async (a: Scene, b: Scene) => {
+      const to = swapStarts(a, b);
+      if (to.a === a.start && to.b === b.start) return;
+      const cur = (sc: Scene) => itemsRef.current.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule;
+      const idA = await editRef.current(cur(a), a.day, { start: to.a }, { quiet: true });
+      const idB = idA ? await editRef.current(cur(b), b.day, { start: to.b }, { quiet: true }) : null;
+      if (!idA || !idB) return; // a failed edit already said so (and rolled itself back)
+      showToast(tr("Swapped {a} and {b}", { a: nameOf(a.schedule), b: nameOf(b.schedule) }), () => {
+        const now = (id: string) => itemsRef.current.find((x) => x.id === id);
+        const ra = now(idA);
+        const rb = now(idB);
+        if (ra) void editRef.current(ra, a.day, { start: a.start }, { quiet: true });
+        if (rb) void editRef.current(rb, b.day, { start: b.start }, { quiet: true });
+      });
+    },
+    [showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // ── Day hours: a closing time per day = one weekly quiet block named "Closing" for each distinct time (days that share a time share a block) ──
@@ -902,6 +948,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const perMin = orient === "v" ? HOUR_H / 60 : (track.getBoundingClientRect().width / SPAN) * (isRtl() ? -1 : 1);
     const startMin = startMinutes(sc.schedule);
     const wasOpen = editor?.kind === "edit" && editor.id === sc.schedule.id && editor.day === sc.day;
+    // dropping this block ON another music block of the same row swaps the two (see swapBlocks)
+    const canSwap = !sc.quiet && !sc.paused && !sc.shadowed;
+    const everyScene = [...weekScenes.flat(), ...dayRows.flatMap((r) => r.scenes)];
+    let swapTarget: Scene | null = null;
     let moved = false;
     let releaseCursor: (() => void) | null = null;
     let last = startMin;
@@ -920,6 +970,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const keep = own !== null ? own - startMin : 5;
       last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, own !== null ? END_MAX : DAY_MINUTES) - keep));
       setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}) });
+      if (canSwap) {
+        const over = document
+          .elementsFromPoint(ev.clientX, ev.clientY)
+          .find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains("ss-block") && n.parentElement === track && n.dataset.bid !== baseId(sc.schedule.id) && !/\bis-(quiet|paused|shadowed)\b/.test(n.className));
+        swapTarget = over ? everyScene.find((x) => baseId(x.schedule.id) === over.dataset.bid && x.day === sc.day) ?? null : null;
+        const key = swapTarget ? { bid: baseId(swapTarget.schedule.id), day: swapTarget.day } : null;
+        setSwapWith((prev) => (prev?.bid === key?.bid && prev?.day === key?.day ? prev : key));
+      }
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -937,7 +995,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       }
       releaseCursor?.();
       setDrag(null);
+      setSwapWith(null);
       markPopupClose(); // (same: the click that ends a drag opens nothing)
+      if (swapTarget) {
+        void swapBlocks(sc, swapTarget); // dropped ON another block: the two trade places
+        return;
+      }
       if (last !== startMin) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last });
     };
     window.addEventListener("pointermove", move);
@@ -985,7 +1048,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const perMin = orient === "v" ? HOUR_H / 60 : (track.getBoundingClientRect().width / SPAN) * (isRtl() ? -1 : 1);
     const begin = startMinutes(sc.schedule);
     const maxLen = maxLenOf(sc.schedule);
-    const live = sc.schedule.targetType === "RADIO"; // a live station (24/7) has no length of its own: its strips stretch to any length the person wants
+    const live = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK"; // a live station (24/7) or a music bank has no length of its own: its strips stretch to any length the person wants
     const base = items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule;
     const ownEnd = explicitEndMinutes(base);
     const naturalEnd = Math.min(sc.end, DAY_MINUTES - 1);
@@ -1072,7 +1135,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     return (
       <div
         key={`${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
-        className={cls}
+        className={`${cls}${swapWith && swapWith.bid === baseId(sc.schedule.id) && swapWith.day === sc.day ? " is-swap-target" : ""}${swapWith && drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-swapping" : ""}`}
+        data-bid={baseId(sc.schedule.id)}
         data-c={colourOf(sc.schedule)}
         style={blockStyle}
         aria-label={`${nameOf(sc.schedule)} ${formatMinutes(sc.start)}`}
@@ -1416,7 +1480,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           editor={editor}
           schedule={editing}
           maxLen={editing ? maxLenOf(editing) : Infinity}
-          lib={[quietItem, ...(editor.kind === "new" && editor.branchId ? lib.filter((l) => l.branchId === editor.branchId) : lib)]}
+          lib={[quietItem, ...(editor.kind === "new" && editor.branchId ? lib.filter((l) => l.kind === "bank" || l.branchId === editor.branchId) : lib)]}
           libFor={libFor}
           devices={devices}
           colour={editing ? colourOf(editing) : 0}
@@ -1436,7 +1500,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 targetType: item.targetType,
                 targetId: item.targetId,
                 sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
-                ...(item.targetType === "SILENCE" ? {} : { branchId: item.branchId }),
+                ...(item.targetType === "SILENCE" || item.targetType === "BANK" ? {} : { branchId: item.branchId }),
               });
             }
           }}
@@ -1496,7 +1560,7 @@ function Cover({ item }: { item: LibItem }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img className="ss-cover" src={item.cover} alt="" draggable={false} loading="lazy" />
   ) : (
-    <span className="ss-cover ss-cover--ph" data-c={item.ci} aria-hidden>{item.kind === "radio" ? "◉" : "♪"}</span>
+    <span className="ss-cover ss-cover--ph" data-c={item.ci} aria-hidden>{item.kind === "radio" ? "◉" : item.kind === "bank" ? "♫" : "♪"}</span>
   );
 }
 
@@ -1508,9 +1572,9 @@ function FilterBar({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: st
         <input value={f.q} onChange={(e) => f.setQ(e.target.value)} placeholder={tr("Search playlists, songs, radio…")} aria-label={tr("Search playlists, songs, radio…")} />
       </label>
       <div className="ss-chips" role="tablist">
-        {(["all", "playlist", "song", "radio"] as const).map((k) => (
+        {(["all", "playlist", "song", "radio", "bank"] as const).map((k) => (
           <button key={k} type="button" role="tab" aria-selected={f.kind === k} className={`ss-chip${f.kind === k ? " is-on" : ""}`} onClick={() => f.setKind(k)}>
-            {k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "song" ? tr("Songs") : tr("Radio")}
+            {k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "song" ? tr("Songs") : k === "radio" ? tr("Radio") : tr("Royalty-free")}
           </button>
         ))}
       </div>

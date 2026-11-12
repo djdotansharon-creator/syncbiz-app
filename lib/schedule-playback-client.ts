@@ -10,6 +10,7 @@ import { sourceToUnified } from "@/lib/playback-provider";
 import { supportsEmbedded } from "@/lib/player-utils";
 import type { Schedule, Source } from "@/lib/types";
 import { stationMayStart, type ScheduleRoute } from "@/lib/schedule-station-route";
+import { bankPackToUnified, findBankPack } from "@/lib/music-bank/bank-play-source";
 
 export type SchedulePlaybackHandlers = {
   stop: () => void;
@@ -21,6 +22,8 @@ export type SchedulePlaybackHandlers = {
   stopScheduled?: () => void;
   /** 2026-11-04 — where a schedule starts (lib/schedule-station-route.ts). Omitted = "default" (existing behavior). */
   route?: ScheduleRoute;
+  /** 2026-11-12 — a music BANK streams through the media token the MASTER holds (a CONTROL just routes the token-free source to it). False = not ready yet: the block waits and the next poll retries. Omitted = ready. */
+  bankStreamReady?: boolean;
 };
 
 type AppRouterLike = { push: (href: string) => void };
@@ -129,6 +132,23 @@ export async function runSchedulePlayback(
       return false;
     }
     const unified = radioToUnified(station);
+    return start(unified, 0);
+  }
+
+  if (schedule.targetType === "BANK" && tid) {
+    // a royalty-free music bank: played exactly like the Royalty-Free screen's "Listen" (a token-free /api/media/<id> playlist) — see lib/music-bank/bank-play-source.ts
+    if (handlers.bankStreamReady === false) return false;
+    setLastMessage(null);
+    const pack = await findBankPack(tid);
+    if (!pack) {
+      setLastMessage("Failed: Music bank not found.");
+      return false;
+    }
+    const unified = bankPackToUnified(pack, typeof window !== "undefined" ? window.location.origin : "");
+    if (!unified) {
+      setLastMessage("Failed: This music bank has no songs.");
+      return false;
+    }
     return start(unified, 0);
   }
 

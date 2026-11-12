@@ -14,6 +14,8 @@ import { getRadioStation } from "@/lib/radio-store";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
 import type { ScheduleTargetType } from "@/lib/types";
 import { contentBranchesEquivalent } from "@/lib/branch-resolver";
+import { accessiblePrivateBanks } from "@/lib/music-bank/bank-access";
+import { POC_MUSIC_BANK_CATALOG } from "@/lib/music-bank/poc-catalog";
 
 export type TargetValidationResult =
   | { ok: true }
@@ -81,6 +83,13 @@ export async function validateScheduleTarget(
         return { ok: false, error: "Radio station belongs to a different branch" };
       }
       return { ok: true };
+    }
+
+    case "BANK": {
+      // a royalty-free music bank is not branch content: a public Genre Pack, or a private bank this business was opened to (the media token enforces it again at play time)
+      if (POC_MUSIC_BANK_CATALOG.genres.some((g) => g.id === tid)) return { ok: true };
+      const mine = await accessiblePrivateBanks({ workspaceId: workspaceId ?? null });
+      return mine.some((b) => b.id === tid) ? { ok: true } : { ok: false, error: "Music bank not found, or not opened for this business" };
     }
 
     default:
