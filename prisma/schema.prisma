@@ -2758,6 +2758,8 @@ model MusicBankGrant {
   closeReason     String?
   /// 2026-11-11 (owner, stage D): the business switched OFFLINE on for this bank in the catalog → its stations keep the
   /// songs encrypted on disk (offline manifest lists only these). Off = streams only; switching off deletes the copies.
+  /// SUPERSEDED 2026-11-12 by StationOfflineBank (Offline is chosen per COMPUTER, not per business). Kept, unused —
+  /// its true rows were copied once to every station of the business so nothing already downloaded was deleted.
   offlineEnabled  Boolean   @default(false)
   grantedByUserId String?
   createdAt       DateTime  @default(now())
@@ -2767,4 +2769,21 @@ model MusicBankGrant {
 
   @@unique([workspaceId, bankId])
   @@index([bankId])
+}
+
+/// Music Bank OFFLINE per computer (owner 2026-11-12): "only the bank I click downloads, and each computer on its own".
+/// One row = this station (durableDeviceId) keeps this bank encrypted on its disk; no row = it streams. Chosen by a
+/// business owner / admin in the catalog of the VONO app ON that computer. The bank must also be entitled: a private
+/// bank with a live grant, or a Royalty-Free demo pack (open to every business until billing). bankId is a code-registry
+/// id (lib/music-bank/private-banks.ts or the POC catalog), not a FK; durableDeviceId matches StationDevice.
+model StationOfflineBank {
+  id              String   @id @default(uuid())
+  workspaceId     String
+  durableDeviceId String
+  bankId          String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@unique([durableDeviceId, bankId])
+  @@index([workspaceId])
 }

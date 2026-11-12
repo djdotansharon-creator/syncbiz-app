@@ -33,8 +33,22 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 
 type PreviewPathMap = Map<string, string>;
 type ActiveView = "all" | string; // "all" or a genre id
-/** stage D (owner 2026-11-11): a private bank's Offline switch — on/off, disk the bank needs, may this person change it. */
+/** Offline switch of ONE bank on THIS computer (owner 2026-11-12: per computer, per bank) — on/off, disk it needs, may
+ * this person change it here (a business owner / admin, in the VONO app on a registered computer of the business). */
 type OfflineInfo = { enabled: boolean; bytes: number; canToggle: boolean };
+type OfflineState = { canToggle: boolean; deviceKnown: boolean; banks: Record<string, { enabled: boolean; bytes: number }> };
+
+/** This computer's durable station id from the desktop bridge (MAIN's reconciled runtime config) — null in a browser. */
+async function thisComputerId(): Promise<string | null> {
+  try {
+    const bridge = typeof window !== "undefined" ? window.syncbizDesktop : undefined;
+    if (typeof bridge?.getConfig !== "function") return null;
+    const cfg = (await bridge.getConfig()) as { deviceId?: unknown } | null;
+    return typeof cfg?.deviceId === "string" && cfg.deviceId.trim() ? cfg.deviceId.trim() : null;
+  } catch {
+    return null;
+  }
+}
 type PlaybackMode = "stream" | "local"; // Stage A: "stream" = token-free /api/media/<id> via SyncBiz; "local" = preview-cache path
 
 function totalDuration(tracks: MusicBankSampleTrack[]): number | null {
@@ -71,17 +85,18 @@ export function RoyaltyFreeMusicWorkspacePanel() {
   const genres = catalog.genres;
   // owner 2026-11-10: PRIVATE banks (e.g. All Day Mix) come from the server, only the ones this business was opened to.
   const [privatePacks, setPrivatePacks] = useState<MusicBankGenrePack[]>([]);
-  // 2026-11-11 (owner, stage D): the per-bank OFFLINE switch — on: the business's stations keep the songs encrypted on disk.
-  const [privateOffline, setPrivateOffline] = useState<Record<string, OfflineInfo>>({});
+  // OFFLINE switch per bank, for THIS computer (owner 2026-11-11 stage D; per computer since 2026-11-12) — on: this
+  // computer keeps the bank's songs encrypted on its disk. Every Royalty-Free demo pack has it too (owner 2026-11-12).
+  const [computerId, setComputerId] = useState<string | null>(null);
+  const [offlineState, setOfflineState] = useState<OfflineState | null>(null);
   const [offlineBusy, setOfflineBusy] = useState<string | null>(null);
   const [offlineError, setOfflineError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/music-bank/private-banks", { credentials: "include", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { banks?: MusicBankGenrePack[]; offline?: Record<string, OfflineInfo> } | null) => {
+      .then((j: { banks?: MusicBankGenrePack[] } | null) => {
         if (!cancelled && Array.isArray(j?.banks)) setPrivatePacks(j.banks);
-        if (!cancelled && j?.offline && typeof j.offline === "object") setPrivateOffline(j.offline);
       })
       .catch(() => {
         /* offline / signed out — the public catalog still shows */
@@ -90,7 +105,31 @@ export function RoyaltyFreeMusicWorkspacePanel() {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const id = await thisComputerId();
+      if (cancelled) return;
+      setComputerId(id);
+      const q = id ? `?deviceId=${encodeURIComponent(id)}` : "";
+      const j = (await fetch(`/api/music-bank/offline${q}`, { credentials: "include", cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)) as OfflineState | null;
+      if (!cancelled && j && typeof j.banks === "object") setOfflineState(j);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const offlineFor = useCallback(
+    (bankId: string): OfflineInfo | null => {
+      const b = offlineState?.banks[bankId];
+      return b ? { enabled: b.enabled, bytes: b.bytes, canToggle: offlineState!.canToggle } : null;
+    },
+    [offlineState],
+  );
   const setOffline = useCallback(async (bankId: string, offline: boolean) => {
+    if (!computerId) return;
     setOfflineBusy(bankId);
     setOfflineError(null);
     try {
@@ -98,20 +137,20 @@ export function RoyaltyFreeMusicWorkspacePanel() {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bankId, offline }),
+        body: JSON.stringify({ bankId, offline, deviceId: computerId }),
       });
       const j = (await r.json().catch(() => ({}))) as { offline?: boolean; error?: string };
       if (!r.ok) {
         setOfflineError(j.error ?? "The change was not saved.");
         return;
       }
-      setPrivateOffline((m) => ({ ...m, [bankId]: { ...(m[bankId] ?? { bytes: 0, canToggle: true }), enabled: j.offline === true } }));
+      setOfflineState((st) => (st ? { ...st, banks: { ...st.banks, [bankId]: { bytes: st.banks[bankId]?.bytes ?? 0, enabled: j.offline === true } } } : st));
     } catch {
       setOfflineError("The change was not saved.");
     } finally {
       setOfflineBusy(null);
     }
-  }, []);
+  }, [computerId]);
   const allPacks = useMemo(() => [...privatePacks, ...genres], [privatePacks, genres]);
   const selectedGenre = useMemo(() => (view === "all" ? null : allPacks.find((g) => g.id === view) ?? null), [allPacks, view]);
   const selectedIsPrivate = selectedGenre != null && privatePacks.some((p) => p.id === selectedGenre.id);
@@ -272,9 +311,10 @@ export function RoyaltyFreeMusicWorkspacePanel() {
           <GenreDetail
             genre={selectedGenre}
             isPrivate={selectedIsPrivate}
-            offline={selectedIsPrivate ? privateOffline[selectedGenre.id] ?? null : null}
+            offline={offlineFor(selectedGenre.id)}
+            offlineHere={offlineState?.deviceKnown === true}
             offlineBusy={offlineBusy === selectedGenre.id}
-            offlineError={selectedIsPrivate ? offlineError : null}
+            offlineError={offlineError}
             onToggleOffline={(next) => void setOffline(selectedGenre.id, next)}
             trackPlayable={trackPlayable}
             nowPlaying={nowPlaying}
@@ -439,6 +479,7 @@ function GenreDetail({
   genre,
   isPrivate = false,
   offline = null,
+  offlineHere = false,
   offlineBusy = false,
   offlineError = null,
   onToggleOffline,
@@ -452,8 +493,10 @@ function GenreDetail({
   genre: MusicBankGenrePack;
   /** a PRIVATE bank (owner 2026-11-10): full songs, no price / unlock */
   isPrivate?: boolean;
-  /** stage D: the bank's Offline switch (private banks only) */
+  /** the bank's Offline switch on THIS computer (every private bank + every demo pack, owner 2026-11-12) */
   offline?: OfflineInfo | null;
+  /** true in the VONO app on a registered computer of this business — Offline is set per computer, so a browser can't */
+  offlineHere?: boolean;
   offlineBusy?: boolean;
   offlineError?: string | null;
   onToggleOffline?: (next: boolean) => void;
@@ -495,8 +538,10 @@ function GenreDetail({
             {/* stage D (owner 2026-11-11): OFFLINE — keep this bank on the business's computers, encrypted. Owner: a switch with
                 the word "Offline" that fills with VONO blue when pressed (like Spotify's download fill); no long text on screen
                 (and no hover tip — components/no-native-tooltips.tsx strips every `title`, owner 2026-10-26). A person who may not
-                change it (not the business owner / an admin) sees it dimmed. */}
-            {isPrivate && offline ? (
+                change it (not the business owner / an admin) sees it dimmed.
+                2026-11-12 (owner): on EVERY pack (private banks and the Royalty-Free demo packs), PER COMPUTER — it acts on the
+                computer this VONO app runs on; only the bank clicked downloads. In a browser it is dimmed: "Desktop app only". */}
+            {offline ? (
               <button
                 type="button"
                 role="switch"
@@ -509,6 +554,7 @@ function GenreDetail({
                 <span className="sb-cp-switch" aria-hidden="true"><span className="sb-cp-switch-knob" /></span>
               </button>
             ) : null}
+            {offline && !offlineHere ? <span className="sb-cp-faint text-[11px] font-medium">Desktop app only</span> : null}
             {isPrivate ? null : (
               <span className="ms-auto flex items-center gap-2">
                 <span className="sb-cp-ink text-lg font-bold tabular-nums">{GENRE_PRICE_LABEL}</span>
