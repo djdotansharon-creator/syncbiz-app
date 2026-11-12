@@ -55,22 +55,25 @@ html[data-sb-display="white"] .ss, html[data-sb-display="white"] .ss-pop, html[d
   --ss-pop-bg: #ffffff;
 }
 
+/* the studio sits straight on the page's own background (owner 2026-11-12: no square panel behind it, as much room as possible) */
+html[data-sb-studio] .library-theme.library-page-shell { background: none; }
+html[data-sb-studio] main.library-main-below-deck { padding: 4px 14px 10px; }
+html[data-sb-studio] .library-list-shell--frameless { padding: 0; }
 /* the studio takes the whole screen: the library / playlist rails of the workspace step aside while it is open */
 @media (min-width: 1024px) {
   html[data-sb-studio] .workspace-rail-grid { --rail-left: 0px !important; --rail-right: 0px !important; }
   html[data-sb-studio] .workspace-rail-grid > aside { display: none; }
 }
 
-.ss { display: flex; gap: 14px; height: 100%; min-height: 560px; padding: 2px 4px 6px; box-sizing: border-box; font-family: inherit; }
+.ss { display: flex; gap: 14px; height: 100%; min-height: 560px; padding: 0 2px 4px; box-sizing: border-box; font-family: inherit; }
 .ss-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 /* ── top: title + status, auto-play switch, add ── */
-.ss-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 6px 8px 2px; }
+.ss-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 4px; }
 .ss-dot { display: inline-block; width: 8px; height: 8px; margin-inline-end: 8px; border-radius: 2.5px; background: var(--ss-now); box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.5); animation: ss-pulse 2.2s ease-out infinite; vertical-align: 1px; }
 @keyframes ss-pulse { 0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.5); } 70% { box-shadow: 0 0 0 7px rgba(251, 191, 36, 0); } 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); } }
 .ss-titles { min-width: 0; }
-.ss-title { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; color: var(--ss-fg); }
-.ss-status { margin: 6px 0 0; font-size: 13.5px; color: var(--ss-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+.ss-title { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; color: var(--ss-fg); }
 .ss-top-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 
 .ss-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 17px; border: 0; border-radius: 999px; background: #f5f5f7; color: #111; font-size: 13px; font-weight: 600; cursor: pointer; transition: transform 140ms ease, background-color 140ms ease, opacity 140ms ease; }
@@ -99,9 +102,9 @@ html[dir="rtl"] .ss[data-panel="closed"] .ss-chev { transform: translateX(-2px) 
 
 /* switch (Apple-style) */
 .ss-switch { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--ss-fg); font-size: 12.5px; font-weight: 500; cursor: pointer; padding: 0; }
-.ss-switch-track { position: relative; width: 38px; height: 22px; border-radius: 8px; background: rgba(120, 120, 128, 0.5); transition: background-color 220ms ease; }
+.ss-switch-track { position: relative; width: 38px; height: 22px; border-radius: 999px; background: rgba(120, 120, 128, 0.5); transition: background-color 220ms ease; }
 .ss-switch[data-on="true"] .ss-switch-track { background: var(--ss-accent); }
-.ss-switch-knob { position: absolute; top: 2px; inset-inline-start: 2px; width: 18px; height: 18px; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform 240ms var(--ss-ease); }
+.ss-switch-knob { position: absolute; top: 2px; inset-inline-start: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform 240ms var(--ss-ease); }
 .ss-switch[data-on="true"] .ss-switch-knob { transform: translateX(16px); }
 html[dir="rtl"] .ss-switch[data-on="true"] .ss-switch-knob { transform: translateX(-16px); }
 .ss-switch--sm .ss-switch-track { width: 34px; height: 20px; }
@@ -127,8 +130,8 @@ html[dir="rtl"] .ss-switch--sm[data-on="true"] .ss-switch-knob { transform: tran
 .ss-gutter { position: relative; }
 .ss-hour { position: absolute; inset-inline-end: 8px; transform: translateY(-50%); font-size: 10.5px; color: var(--ss-faint); font-variant-numeric: tabular-nums; }
 .ss-hour:first-child { transform: translateY(2px); }
-.ss-col { --hh: 46px; position: relative; border-inline-start: 1px solid var(--ss-line); cursor: copy;
-  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--hh) - 1px), var(--ss-line) calc(var(--hh) - 1px), var(--ss-line) var(--hh)); }
+/* (owner 2026-11-12: "remove the lines, they are not relevant" — no hour lines inside the days; the hours are named in the margin, a day is separated by its hairline) */
+.ss-col { --hh: 46px; position: relative; border-inline-start: 1px solid var(--ss-line); cursor: copy; }
 .ss-col.is-today { background-color: rgba(255, 255, 255, 0.025); }
 html[data-sb-display="white"] .ss-col.is-today { background-color: rgba(217, 119, 6, 0.06); }
 
@@ -200,7 +203,7 @@ html[data-sb-display="white"] .ss-chip.is-on { background: #1c1c1e; color: #fff;
 .ss-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px; }
 .ss-list::-webkit-scrollbar { display: none; }
 .ss-list--pop { max-height: 280px; }
-.ss-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 12px; background: transparent; color: inherit; text-align: start; cursor: grab; transition: background-color 140ms ease; }
+.ss-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 12px; background: transparent; color: inherit; text-align: start; cursor: grab; transition: background-color 140ms ease; }
 .ss-row--btn { cursor: pointer; }
 .ss-row:hover { background: var(--ss-surface-2); }
 .ss-row:active { cursor: grabbing; }
@@ -209,7 +212,7 @@ html[data-sb-display="white"] .ss-chip.is-on { background: #1c1c1e; color: #fff;
 .ss-row-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .ss-row-name { font-size: 13px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ss-row-sub { font-size: 11px; color: var(--ss-dim); }
-.ss-row-add { flex: none; width: 24px; height: 24px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font-size: 18px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 140ms ease, background-color 140ms ease; }
+.ss-row-add { position: absolute; inset-inline-end: 8px; top: 50%; margin-top: -12px; width: 24px; height: 24px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font-size: 18px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 140ms ease, background-color 140ms ease; }
 .ss-row:hover .ss-row-add, .ss-row-add:focus-visible { opacity: 1; }
 .ss-row-add:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
 .ss-none { padding: 18px 8px; text-align: center; font-size: 12.5px; color: var(--ss-faint); }
@@ -280,13 +283,6 @@ html[data-sb-display="white"] .ss-pill--on { background: #1c1c1e; color: #fff; }
 
 /* ── the DAY: the hours run across (against the reading direction in Hebrew), one row per branch ── */
 .ss-cal--day { padding: 0; }
-.ss-daychips { flex: none; display: flex; gap: 10px; flex-wrap: wrap; padding: 18px 20px 6px; }
-.ss-daychip { height: 36px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--ss-surface-2); color: var(--ss-dim); font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 160ms ease, color 160ms ease, transform 140ms ease; }
-.ss-daychip:hover { color: var(--ss-fg); }
-.ss-daychip:active { transform: scale(0.96); }
-.ss-daychip.is-today { box-shadow: inset 0 0 0 1.5px var(--ss-now); color: var(--ss-fg); }
-.ss-daychip.is-on { background: var(--ss-fg); color: var(--ss-pop-bg); }
-html[data-sb-display="white"] .ss-daychip.is-on { background: #1c1c1e; color: #fff; }
 .ss-dayview { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 20px 20px; }
 .ss-hrows { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .ss-hrow { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 12px; flex: 1 1 0; min-height: 96px; max-height: 210px; }
@@ -301,9 +297,7 @@ html[data-sb-display="white"] .ss-daychip.is-on { background: #1c1c1e; color: #f
 @container (max-width: 800px) { .ss-htick-min { display: none; } }
 .ss-htick { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--ss-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[dir="rtl"] .ss-htick { transform: translateX(50%); }
-.ss-htrack { position: relative; border-radius: 20px; background-color: var(--ss-surface-2); cursor: copy; overflow: hidden;
-  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 19 - 1px), var(--ss-line) calc(100% / 19 - 1px), var(--ss-line) calc(100% / 19)); }
-html[dir="rtl"] .ss-htrack { background-image: repeating-linear-gradient(to left, transparent 0, transparent calc(100% / 19 - 1px), var(--ss-line) calc(100% / 19 - 1px), var(--ss-line) calc(100% / 19)); }
+.ss-htrack { position: relative; border-radius: 20px; background-color: var(--ss-surface-2); cursor: copy; overflow: hidden; }
 .ss-hhover { position: absolute; inset-block: 0; width: 0; border-inline-start: 1.5px dashed var(--ss-faint); pointer-events: none; z-index: 2; }
 .ss-hhover span { position: absolute; top: 6px; inset-inline-start: 5px; padding: 1px 6px; border-radius: 999px; background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 html[data-sb-display="white"] .ss-hhover span { background: #1c1c1e; color: #fff; }
@@ -325,31 +319,10 @@ html[dir="rtl"] .ss-hnow span { transform: translateX(50%); }
 .ss-ag.is-paused { opacity: 0.6; }
 
 
-/* the "⋯" on a block: three dots appear when the pointer is on it (always on a touch screen) — they open the menu */
-.ss-b-more { position: absolute; inset-inline-end: 7px; top: 7px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 30px; height: 22px; padding: 0; border: 0; border-radius: 8px; background: rgba(0, 0, 0, 0.3); cursor: pointer; opacity: 0; transform: scale(0.88); transition: opacity 150ms ease, transform 180ms var(--ss-ease), background-color 150ms ease; text-shadow: none; }
-.ss-b-more i { display: block; width: 3.5px; height: 3.5px; border-radius: 1px; background: #fff; }
-.ss-block:hover .ss-b-more, .ss-block.is-menu .ss-b-more, .ss-block.is-selected .ss-b-more, .ss-b-more:focus-visible { opacity: 1; transform: none; }
-.ss-b-more:hover { background: rgba(0, 0, 0, 0.5); }
-.ss-b-more:active { transform: scale(0.94); }
-.ss-block[data-c="8"] .ss-b-more, .ss-block[data-c="9"] .ss-b-more { background: rgba(255, 255, 255, 0.5); }
-.ss-block[data-c="8"] .ss-b-more i, .ss-block[data-c="9"] .ss-b-more i { background: #1c1c1e; }
-.ss-block--v:hover .ss-b-cover, .ss-block--v.is-menu .ss-b-cover { opacity: 0; }
 .ss-block--v .ss-b-cover { transition: opacity 150ms ease; }
-.ss-block--h .ss-b-more { top: 50%; margin-top: -11px; inset-inline-end: 12px; }
-.ss-block.is-shadowed .ss-b-more { display: none; }
 .ss-block--h.is-paused { min-width: 58px; }
 /* (a container query measures the CONTENT box: the block minus its 12px side padding) */
-@container (max-width: 28px) { .ss-block--h .ss-b-more { display: none; } }
-/* the same three dots on a row of the day's list */
 .ss-ag-li { position: relative; }
-.ss-ag-more { position: absolute; inset-inline-end: 8px; top: 50%; margin-top: -11px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 30px; height: 22px; padding: 0; border: 0; border-radius: 8px; background: var(--ss-surface-2); cursor: pointer; opacity: 0; transition: opacity 150ms ease, background-color 150ms ease; }
-.ss-ag-more i { display: block; width: 3.5px; height: 3.5px; border-radius: 1px; background: var(--ss-fg); }
-.ss-ag-li:hover .ss-ag-more, .ss-ag-more:focus-visible { opacity: 1; }
-.ss-ag-more:hover { background: rgba(255, 255, 255, 0.18); }
-html[data-sb-display="white"] .ss-ag-more:hover { background: rgba(0, 0, 0, 0.14); }
-.ss-ag-li:hover .ss-ag-live { opacity: 0; }
-@media (hover: none) { .ss-ag-more { opacity: 1; } }
-@media (hover: none) { .ss-b-more { opacity: 1; transform: none; } .ss-block--v .ss-b-cover { opacity: 0; } }
 
 /* the menu (Apple's context-menu look: text and shortcuts, a blue highlight) */
 .ss-menu { position: fixed; z-index: 2147482450; box-sizing: border-box; padding: 6px; border-radius: 14px; background: var(--ss-pop-bg); color: var(--ss-fg); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 0 0 1px var(--ss-line); animation: ss-pop-in 160ms var(--ss-ease) both; font-family: inherit; }
@@ -399,14 +372,18 @@ html[data-sb-display="white"] .ss-menu-item.is-danger { color: #d70015; }
 
 /* ── a block's END (owner 2026-11-11): drag the far edge; a block with an end stops the music there ── */
 .ss-b-resize { position: absolute; z-index: 2; touch-action: none; }
-.ss-block--v > .ss-b-resize { inset-inline: 0; bottom: 0; height: 11px; cursor: ns-resize; }
-.ss-block--h > .ss-b-resize { inset-block: 0; inset-inline-end: 0; width: 11px; cursor: ew-resize; }
+/* a strip is 11px but never more than a quarter of the block, so a short block keeps a middle to grab and move it by */
+.ss-block--v > .ss-b-resize { inset-inline: 0; bottom: 0; height: min(11px, 26%); cursor: ns-resize; }
+.ss-block--h > .ss-b-resize { inset-block: 0; inset-inline-end: 0; width: min(11px, 26%); cursor: ew-resize; }
 .ss-b-resize::after { content: ""; position: absolute; border-radius: 2px; background: #fff; opacity: 0; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25); transition: opacity 140ms ease; }
 .ss-block--v > .ss-b-resize::after { left: 50%; bottom: 3px; width: 26px; height: 3px; transform: translateX(-50%); }
 .ss-block--h > .ss-b-resize::after { top: 50%; inset-inline-end: 3px; width: 3px; height: 26px; transform: translateY(-50%); }
-.ss-block:hover > .ss-b-resize::after, .ss-block.is-selected > .ss-b-resize::after, .ss-block.is-dragging > .ss-b-resize::after { opacity: 0.85; }
-.ss-block.has-end > .ss-b-resize::after { opacity: 0.45; }
-.ss-block.has-end:hover > .ss-b-resize::after { opacity: 0.95; }
+/* the strips show ONLY while the pointer is on the block (or it is being dragged) — never at rest, whether the block has an end or its card is open */
+.ss-block:hover > .ss-b-resize::after, .ss-block.is-dragging > .ss-b-resize::after { opacity: 0.85; }
+/* while a block is dragged the cursor stays the same wherever the pointer goes (not the "+" of the empty track) */
+html.sb-ss-cursor-ew-resize, html.sb-ss-cursor-ew-resize * { cursor: ew-resize !important; }
+html.sb-ss-cursor-ns-resize, html.sb-ss-cursor-ns-resize * { cursor: ns-resize !important; }
+html.sb-ss-cursor-grabbing, html.sb-ss-cursor-grabbing * { cursor: grabbing !important; }
 @media (hover: none) { .ss-b-resize::after { opacity: 0.6; } }
 .ss-block[data-c="15"] > .ss-b-resize::after, .ss-block[data-c="16"] > .ss-b-resize::after { background: #1c1c1e; }
 .ss-endmode { display: inline-flex; align-self: flex-start; padding: 2px; border-radius: 10px; background: var(--ss-surface-2); }
@@ -420,8 +397,6 @@ html[data-sb-display="white"] .ss-endmode button.is-on { background: #1c1c1e; co
 .ss-block.is-quiet:hover { box-shadow: inset 0 0 0 1.5px var(--ss-dim), 0 8px 20px rgba(0, 0, 0, 0.18); filter: none; }
 .ss-block.is-quiet.is-selected { box-shadow: inset 0 0 0 2.5px var(--ss-fg), 0 8px 20px rgba(0, 0, 0, 0.18); }
 .ss-block.is-quiet .ss-b-time { opacity: 0.7; }
-.ss-block.is-quiet .ss-b-more { background: var(--ss-surface-2); }
-.ss-block.is-quiet .ss-b-more i { background: var(--ss-fg); }
 .ss-block.is-quiet.is-copied { outline-color: var(--ss-fg); }
 .ss-cover--quiet { display: block; background-color: var(--ss-surface-2); background-image: repeating-linear-gradient(135deg, transparent 0, transparent 4px, var(--ss-faint) 4px, var(--ss-faint) 5.2px); box-shadow: inset 0 0 0 1.5px var(--ss-faint); }
 .ss-ag.is-quiet .ss-ag-name { color: var(--ss-dim); }
@@ -436,21 +411,288 @@ html[data-sb-display="white"] .ss-modal { box-shadow: 0 22px 60px rgba(0, 0, 0, 
 .ss-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .ss-modal-title { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .ss-modal-sub { margin: 4px 0 0; font-size: 12.5px; color: var(--ss-dim); line-height: 1.4; }
-.ss-hours { display: flex; flex-direction: column; }
-.ss-hours-row { display: grid; grid-template-columns: minmax(84px, 1fr) 84px minmax(150px, 1.3fr); align-items: center; column-gap: 12px; row-gap: 2px; padding: 7px 4px; border-top: 1px solid var(--ss-line); }
-.ss-hours-row--head { border-top: 0; padding-block: 2px 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ss-dim); }
-.ss-hours-day { font-size: 14px; font-weight: 600; }
-.ss-hours-open { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ss-dim); text-align: start; }
-.ss-hours-close { display: flex; align-items: center; gap: 6px; min-height: 32px; }
-.ss-hours-close input { width: 84px; height: 32px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--ss-surface-2); color: var(--ss-fg); font: inherit; font-size: 15px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; outline: none; }
-.ss-hours-close input:focus { box-shadow: 0 0 0 2px var(--ss-accent); }
-html[data-sb-display="white"] .ss-hours-close input { color-scheme: light; }
-.ss-hours-x { width: 26px; height: 26px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font-size: 18px; line-height: 1; cursor: pointer; }
-.ss-hours-x:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
-.ss-hours-warn { grid-column: 1 / -1; font-size: 11.5px; color: var(--ss-now); padding-inline-start: 2px; }
 .ss-modal-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ss-line); }
 .ss-modal-foot .ss-btn--primary { margin-inline-start: 0; }
 .ss-modal-foot .ss-btn:disabled { opacity: 0.45; cursor: default; }
 .ss-modal-foot .ss-linkbtn:disabled { opacity: 0.35; cursor: default; text-decoration: none; }
 .ss-modal-spacer { flex: 1; }
-@media (max-width: 520px) { .ss-hours-row { grid-template-columns: 1fr 64px auto; column-gap: 8px; } .ss-hours-close input { width: 72px; } }
+
+/* ── jingles on the schedule (owner 2026-11-12): a small bell at the jingle's time, on the edge of the day — never a block, never over the music's text ── */
+.ss-jpin { position: absolute; z-index: 7; display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 6px; background: var(--ss-pop-bg); color: var(--ss-fg); cursor: pointer;
+  box-shadow: 0 0 0 1.5px var(--ss-faint), 0 2px 6px rgba(0, 0, 0, 0.35); transition: transform 150ms var(--ss-ease), box-shadow 150ms ease, background-color 150ms ease, color 150ms ease; }
+.ss-jpin svg { width: 10px; height: 10px; }
+/* the bell straddles the grid line at the start of its day: most of it in its own day, clear of the block's text (which starts 14px in) */
+.ss-jpin--v { inset-inline-start: -6px; margin-top: -8px; }
+.ss-jpin--h { top: 1px; margin-inline-start: -8px; }
+.ss-jpin:hover, .ss-jpin.is-open, .ss-jpin:focus-visible { transform: scale(1.2); z-index: 8; box-shadow: 0 0 0 2px var(--ss-now), 0 3px 8px rgba(0, 0, 0, 0.4); outline: none; }
+.ss-jpin.is-open { background: var(--ss-now); color: var(--ss-now-ink); }
+.ss-jtoggle { color: var(--ss-faint); }
+.ss-jtoggle.is-on { color: var(--ss-fg); box-shadow: inset 0 0 0 1.5px var(--ss-fg); }
+.ss-jtoggle svg { width: 15px; height: 15px; }
+.ss-jmenu { padding: 6px; }
+.ss-jmenu-head { display: flex; align-items: center; gap: 10px; padding: 7px 9px 9px; }
+.ss-jmenu-ico { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--ss-surface-2); color: var(--ss-fg); }
+.ss-jmenu-ico svg { width: 16px; height: 16px; }
+.ss-jmenu-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ss-jmenu-name { font-size: 14px; font-weight: 650; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-jmenu-sub { font-size: 12px; color: var(--ss-dim); font-variant-numeric: tabular-nums; }
+
+/* ══ LIGHT, OPAQUE blocks (owner 2026-11-12: "lighter colours, a bit less delicate — and no hour lines showing through the squares") ══
+   A block is its colour mixed with the screen's own base (so it is solid — the grid never shows through): brighter than the old gradients, lighter at the bottom
+   instead of darker, no outline; in the white theme a clear pastel with dark text. To go back to the first solid gradients, delete this whole section. */
+.ss { --ss-base: #17171a; }
+html[data-sb-display="white"] .ss { --ss-base: #ffffff; }
+.ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) {
+  color: var(--ink, #ffffff);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c1) 94%, var(--ss-base)), color-mix(in srgb, var(--c1) 52%, var(--ss-base)));
+  box-shadow: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+html[data-sb-display="white"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) {
+  color: color-mix(in srgb, var(--c2) 80%, #000000);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c1) 52%, var(--ss-base)), color-mix(in srgb, var(--c1) 38%, var(--ss-base)));
+  box-shadow: none;
+  text-shadow: none;
+}
+.ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet):hover {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c1) 100%, var(--ss-base)), color-mix(in srgb, var(--c1) 64%, var(--ss-base)));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--c2) 38%, transparent);
+  filter: none;
+}
+html[data-sb-display="white"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet):hover {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c1) 54%, var(--ss-base)), color-mix(in srgb, var(--c1) 38%, var(--ss-base)));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--c2) 24%, transparent);
+}
+.ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).is-selected { box-shadow: inset 0 0 0 2.5px #ffffff, 0 8px 20px rgba(0, 0, 0, 0.3); }
+html[data-sb-display="white"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).is-selected { box-shadow: inset 0 0 0 2.5px var(--c2), 0 8px 20px color-mix(in srgb, var(--c2) 24%, transparent); }
+.ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).is-dragging { box-shadow: inset 0 0 0 1.5px #ffffff, 0 14px 30px rgba(0, 0, 0, 0.4); }
+.ss-block.is-copied:not(.is-quiet) { outline-color: currentColor; }
+.ss-block:focus-visible:not(.is-quiet) { outline-color: currentColor; }
+.ss-block:not(.is-quiet) > .ss-b-resize::after { background: currentColor; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.2); }
+.ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) .ss-b-cover { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+
+/* ══ display settings (owner 2026-11-12): where the picture + text sit in a block, and what shows ══
+   `.ss[data-pos]` = top (the default) / middle / bottom; `.ss[data-content]` = both / text / image. */
+.ss[data-style="solid"][data-pos="middle"] .ss-block--v { justify-content: center; }
+.ss[data-style="solid"][data-pos="bottom"] .ss-block--v { justify-content: flex-end; }
+.ss[data-style="solid"][data-pos="middle"] .ss-block--v > .ss-b-cover { top: 50%; margin-top: -11px; }
+.ss[data-style="solid"][data-pos="bottom"] .ss-block--v > .ss-b-cover { top: auto; bottom: 8px; }
+/* the cover only steps aside for the ⋯ button when it sits at the top, where the button is */
+.ss[data-style="solid"][data-pos="middle"] .ss-block--v:hover > .ss-b-cover, .ss[data-style="solid"][data-pos="bottom"] .ss-block--v:hover > .ss-b-cover,
+.ss[data-style="solid"][data-pos="middle"] .ss-block--v.is-menu > .ss-b-cover, .ss[data-style="solid"][data-pos="bottom"] .ss-block--v.is-menu > .ss-b-cover { opacity: 0.92; }
+.ss[data-style="solid"][data-pos="top"] .ss-block--h { align-items: flex-start; padding-top: 10px; }
+.ss[data-style="solid"][data-pos="bottom"] .ss-block--h { align-items: flex-end; padding-bottom: 10px; }
+.ss-b-cover--ph { display: grid; place-items: center; font-size: 15px; color: inherit; background: color-mix(in srgb, var(--c1) 38%, var(--ss-base)); box-shadow: none; }
+/* picture only: the name is gone, the picture gets bigger and sits in the middle of the block's width */
+.ss[data-content="image"] .ss-block:not(.is-quiet):not(.is-paused):not(.is-shadowed) .ss-b-text { display: none; }
+.ss[data-content="image"] .ss-block--v > .ss-b-cover { width: 40px; height: 40px; border-radius: 10px; inset-inline-end: auto; inset-inline-start: 50%; margin-inline-start: -20px; top: 8px; opacity: 1; }
+.ss[data-content="image"][data-pos="middle"] .ss-block--v > .ss-b-cover { top: 50%; margin-top: -20px; }
+.ss[data-content="image"][data-pos="bottom"] .ss-block--v > .ss-b-cover { top: auto; bottom: 8px; margin-top: 0; }
+.ss[data-content="image"] .ss-block--v:hover > .ss-b-cover, .ss[data-content="image"] .ss-block--v.is-menu > .ss-b-cover { opacity: 1; }
+.ss[data-style="solid"][data-content="image"] .ss-block--h:not(.is-quiet):not(.is-paused) { justify-content: center; }
+.ss[data-content="image"] .ss-block--h > .ss-b-cover { width: 58px; height: 58px; border-radius: 14px; }
+@container (max-width: 150px) { .ss[data-content="image"] .ss-block--h > .ss-b-cover { display: grid; } }
+
+/* the settings card */
+.ss-dtoggle { color: var(--ss-dim); }
+.ss-dtoggle:hover, .ss-dtoggle.is-open { color: var(--ss-fg); }
+.ss-dmenu { padding: 14px; }
+.ss-dmenu-in { display: flex; flex-direction: column; gap: 13px; }
+.ss-dmenu-fam { gap: 8px; margin-top: -4px; }
+.ss-dmenu .ss-field .ss-switch--row { padding: 3px 0; }
+.ss-dmenu-reset { align-self: flex-start; }
+
+/* ══ the day picker (Day view): the day itself is the control; the week's days and a calendar open from it. Soft light-up on rest, no outlines — like the regions of the map. ══ */
+.ss-daypick { display: inline-flex; align-items: center; gap: 9px; padding: 4px 11px; border: 0; border-radius: 12px; background: transparent; color: var(--ss-fg); font-family: inherit; cursor: pointer; transition: background-color 220ms ease; }
+.ss-daypick:hover, .ss-daypick.is-open, .ss-daypick:focus-visible { background: rgba(255, 255, 255, 0.1); outline: none; }
+html[data-sb-display="white"] .ss-daypick:hover, html[data-sb-display="white"] .ss-daypick.is-open, html[data-sb-display="white"] .ss-daypick:focus-visible { background: rgba(0, 0, 0, 0.06); }
+.ss-daypick-chev { width: 7px; height: 7px; margin-top: -3px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: 0.45; transition: opacity 220ms ease, transform 260ms var(--ss-ease); }
+.ss-daypick:hover .ss-daypick-chev, .ss-daypick.is-open .ss-daypick-chev { opacity: 0.9; transform: rotate(45deg) translate(2px, 2px); }
+.ss-dp { padding: 14px 12px 8px; border-radius: 20px; }
+.ss-dp-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; }
+.ss-dp-day { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--ss-faint); font: inherit; cursor: pointer; }
+.ss-dp-dn { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.ss-dp-dd, .ss-dp-cell { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--ss-fg); font-size: 15.5px; font-weight: 500; font-variant-numeric: tabular-nums; transition: background-color 220ms ease, color 220ms ease; }
+.ss-dp-day:hover .ss-dp-dd, .ss-dp-day:focus-visible .ss-dp-dd, .ss-dp-cell:hover, .ss-dp-cell:focus-visible { background: rgba(255, 255, 255, 0.13); outline: none; }
+.ss-dp-day.is-on .ss-dp-dd, .ss-dp-cell.is-on { background: var(--ss-fg); color: var(--ss-pop-bg); font-weight: 650; }
+.ss-dp-day.is-today:not(.is-on) .ss-dp-dd, .ss-dp-cell.is-today:not(.is-on) { color: var(--ss-now); font-weight: 650; }
+.ss-dp-more { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 12px; padding: 11px 8px 8px; border: 0; border-top: 1px solid var(--ss-line); border-radius: 0 0 12px 12px; background: transparent; color: var(--ss-fg); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; transition: background-color 220ms ease; }
+.ss-dp-more:hover { background: rgba(255, 255, 255, 0.07); }
+.ss-dp-more-chev { width: 7px; height: 7px; border-top: 2px solid var(--ss-faint); border-right: 2px solid var(--ss-faint); transform: rotate(45deg); }
+html[dir="rtl"] .ss-dp-more-chev { transform: rotate(-135deg); }
+.ss-dp-month { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ss-line); }
+.ss-dp-mhead { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 8px; }
+.ss-dp-mtitle { font-size: 15px; font-weight: 650; }
+.ss-dp-navs { display: flex; gap: 2px; }
+.ss-dp-nav { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-fg); cursor: pointer; transition: background-color 220ms ease; }
+.ss-dp-nav:hover { background: rgba(255, 255, 255, 0.13); }
+.ss-dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; justify-items: center; }
+.ss-dp-wd { padding: 4px 0 6px; font-size: 11px; font-weight: 600; color: var(--ss-faint); }
+.ss-dp-cell { padding: 0; border: 0; background: transparent; cursor: pointer; font-family: inherit; }
+.ss-dp-cell.is-out { color: var(--ss-faint); font-weight: 400; }
+html[data-sb-display="white"] .ss-dp-day:hover .ss-dp-dd, html[data-sb-display="white"] .ss-dp-day:focus-visible .ss-dp-dd, html[data-sb-display="white"] .ss-dp-cell:hover, html[data-sb-display="white"] .ss-dp-cell:focus-visible, html[data-sb-display="white"] .ss-dp-nav:hover { background: rgba(0, 0, 0, 0.07); }
+html[data-sb-display="white"] .ss-dp-more:hover { background: rgba(0, 0, 0, 0.05); }
+html[data-sb-display="white"] .ss-dp-day.is-on .ss-dp-dd, html[data-sb-display="white"] .ss-dp-cell.is-on { background: #1c1c1e; color: #fff; }
+
+/* ══ FOG blocks (owner 2026-11-12): the song's picture fills the block and melts — slowly, mostly toward the bottom — into solid black (dark) / white (light); the details live in that solid part.
+   It grows and shrinks with the block (the picture area stretches, the fade scales with the height, the text shrinks in small blocks) and never loses a part: the picture is a backdrop, the text always sits whole at the bottom.
+   Music without a usable picture (or "text only") shows fine black / white stripes instead. No outlines. `data-style="solid"` brings back the colour blocks. ══ */
+.ss { --fog: #0b0b0d; --fog-ink: #f5f5f7; --fog-a: 90%; } /* the fog stops a little short of solid, so the picture is still faintly there under the details */
+html[data-sb-display="white"] .ss { --fog: #ffffff; --fog-ink: #1c1c1e; }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) { container-type: size; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 0; padding: 0; border-radius: 16px; color: var(--fog-ink); background: var(--fog); text-shadow: none; box-shadow: none; }
+html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) { box-shadow: 0 3px 14px rgba(0, 0, 0, 0.1); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet):hover { background: var(--fog); filter: none; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45); }
+html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet):hover { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).is-selected { box-shadow: inset 0 0 0 2px var(--fog-ink), 0 8px 20px rgba(0, 0, 0, 0.3); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).is-dragging { box-shadow: inset 0 0 0 1.5px var(--fog-ink), 0 14px 30px rgba(0, 0, 0, 0.4); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-art { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; box-shadow: none; opacity: 1; transition: transform 600ms var(--ss-ease); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-art--tone { background: repeating-linear-gradient(135deg, #121215 0, #121215 9px, #1c1c21 9px, #1c1c21 10.5px); }
+html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-art--tone { background: repeating-linear-gradient(135deg, #f6f7f9 0, #f6f7f9 9px, #eceef2 9px, #eceef2 10.5px); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet):hover > .ss-b-art { transform: scale(1.05); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-text { --fade: clamp(14px, 11cqh, 32px); position: relative; z-index: 1; box-sizing: border-box; width: 100%; gap: 1px; padding: var(--fade) 11px 10px;
+  background: linear-gradient(to bottom, transparent 0, color-mix(in srgb, var(--fog) var(--fog-a), transparent) var(--fade)); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) .ss-b-name { margin-inline-end: 0; font-size: clamp(11px, 7cqh, 13.5px); }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) .ss-b-time { font-size: clamp(10px, 5.4cqh, 11.5px); opacity: 0.72; }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h { flex-direction: column; align-items: stretch; padding: 0; }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h .ss-b-name { font-size: clamp(11px, 7cqh, 15px); }
+@container (min-width: 250px) { .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h > .ss-b-text { padding-inline-end: 11px; } }
+@container (max-height: 62px) { .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-text { --fade: 5px; } .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) .ss-b-time { display: none; } .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) .ss-b-name { -webkit-line-clamp: 1; } }
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-resize { z-index: 3; }
+
+/* ── fog on the LIGHT theme (owner 2026-11-12: "not smooth" → "Apple does not go fully white either" → "start it lower" → "a bit too white"): an EASED fade (no hard edge where it starts or ends)
+   that begins late — the picture stays crisp until close to the details — and stops well short of white (82%), so the picture is still clearly there under the details. The dark theme is left as it is. ── */
+html[data-sb-display="white"] .ss { --fog-a: 82%; }
+html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-text { --fade: clamp(18px, 10cqh, 34px);
+  background: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0) 0,
+    rgba(255, 255, 255, 0) calc(var(--fade) * 0.2),
+    rgba(255, 255, 255, 0.05) calc(var(--fade) * 0.34),
+    rgba(255, 255, 255, 0.14) calc(var(--fade) * 0.46),
+    rgba(255, 255, 255, 0.28) calc(var(--fade) * 0.58),
+    rgba(255, 255, 255, 0.46) calc(var(--fade) * 0.7),
+    rgba(255, 255, 255, 0.64) calc(var(--fade) * 0.82),
+    rgba(255, 255, 255, 0.76) calc(var(--fade) * 0.93),
+    rgba(255, 255, 255, 0.82) var(--fade)); }
+@container (max-height: 62px) { html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-text { --fade: 14px; } }
+
+/* the "+" of a music row floats over the row's end on hover (no reserved column → the gaps left and right of a row are the same) */
+.ss-row:hover .ss-row-add { background: var(--ss-pop-bg); box-shadow: 0 0 0 1px var(--ss-line); }
+
+/* ══ trimming strips (owner 2026-11-12): hover a block → a strip on each edge (cut from the start / from the end); the middle moves the block (no icon, owner) ══ */
+.ss-block--v > .ss-b-resize--start { top: 0; bottom: auto; }
+.ss-block--v > .ss-b-resize--start::after { bottom: auto; top: 3px; }
+.ss-block--h > .ss-b-resize--start { inset-inline-start: 0; inset-inline-end: auto; }
+.ss-block--h > .ss-b-resize--start::after { inset-inline-start: 3px; inset-inline-end: auto; }
+.ss-block.is-dragging { cursor: grabbing; }
+
+/* ══ the week as ROWS: the days down, the hours across (the Day view's own track, seven times) ══ */
+.ss-cal--rows .ss-dayview { gap: 6px; padding: 10px 18px 14px; }
+.ss-cal--rows .ss-hrow.has-label { grid-template-columns: 78px 1fr; }
+.ss-hrows--week { overflow-y: auto; scrollbar-width: none; gap: 8px; }
+.ss-hrows--week::-webkit-scrollbar { display: none; }
+.ss-hrows--week .ss-hrow { flex: 1 0 0; min-height: 104px; max-height: 150px; }
+.ss-wlabel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; min-width: 0; padding: 0 8px; border: 0; border-radius: 14px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: background-color 220ms ease; }
+.ss-wlabel:hover { background: rgba(255, 255, 255, 0.08); }
+html[data-sb-display="white"] .ss-wlabel:hover { background: rgba(0, 0, 0, 0.05); }
+.ss-wlabel.can-paste { cursor: copy; }
+.ss-wlabel.is-today .ss-dayname { color: var(--ss-now); }
+.ss-wlabel.is-today .ss-daydate { background: var(--ss-now); color: var(--ss-now-ink); font-weight: 700; }
+
+/* in a wide block (the week rows, the Day view) the name and the hours share ONE line, so the details take less of the picture */
+@container (min-width: 200px) {
+  .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h > .ss-b-text { flex-direction: row; align-items: baseline; gap: 9px; padding-top: var(--fade); }
+  .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h .ss-b-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h .ss-b-time { flex: none; white-space: nowrap; }
+}
+.ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h > .ss-b-text { --fade: clamp(20px, 14cqh, 44px); }
+html[data-sb-display="white"] .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet).ss-block--h > .ss-b-text { --fade: clamp(16px, 11cqh, 30px); }
+
+/* ══ business hours: a clock (owner 2026-11-12) ══ */
+.ss-bh { width: min(520px, 100%); }
+.ss-bh-body { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.ss-bh-sw { padding: 12px 2px; border-top: 1px solid var(--ss-line); font-size: 14.5px; font-weight: 550; }
+.ss-bh-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 8px 0 4px; }
+.ss-bh-day { display: grid; place-items: center; justify-self: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-fg); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 220ms ease, color 220ms ease; }
+.ss-bh-day:hover { background: rgba(255, 255, 255, 0.12); }
+html[data-sb-display="white"] .ss-bh-day:hover { background: rgba(0, 0, 0, 0.07); }
+.ss-bh-day.is-on { background: var(--ss-fg); color: var(--ss-pop-bg); }
+html[data-sb-display="white"] .ss-bh-day.is-on { background: #1c1c1e; color: #fff; }
+.ss-bh-day.is-closed:not(.is-on) { color: var(--ss-faint); text-decoration: line-through; }
+.ss-bh-clock { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 14px 0 12px; }
+.ss-bh-dash { width: 18px; height: 2px; margin-top: 28px; border-radius: 1px; background: var(--ss-faint); }
+.ss-bh-closed { margin: 0; padding: 38px 0; text-align: center; font-size: 15px; color: var(--ss-dim); }
+.ss-clock { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ss-clock-face { display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-radius: 20px; background: var(--ss-surface-2); }
+.ss-clock-colon { margin-top: -4px; font-size: 38px; font-weight: 300; color: var(--ss-dim); }
+.ss-wheel { display: flex; flex-direction: column; align-items: center; width: 62px; outline: none; border-radius: 14px; cursor: ns-resize; }
+.ss-wheel:focus-visible { box-shadow: 0 0 0 2px var(--ss-accent); }
+.ss-wheel-num { font-size: 40px; font-weight: 300; line-height: 1.1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.ss-wheel-btn { display: grid; place-items: center; width: 34px; height: 26px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--ss-faint); cursor: pointer; transition: background-color 200ms ease, color 200ms ease; }
+.ss-wheel-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--ss-fg); }
+html[data-sb-display="white"] .ss-wheel-btn:hover { background: rgba(0, 0, 0, 0.07); }
+.ss-wheel-chev { width: 8px; height: 8px; border-top: 2px solid currentColor; border-left: 2px solid currentColor; }
+.ss-wheel-chev--up { transform: rotate(45deg) translate(1px, 1px); }
+.ss-wheel-chev--down { transform: rotate(225deg) translate(1px, 1px); }
+
+/* a narrow quiet block (the closing at the end of the hours) keeps its name whole */
+.ss-block--h.is-quiet { padding: 0 8px; }
+@container (max-width: 90px) { .ss-block.is-quiet .ss-b-name { font-size: 11.5px; letter-spacing: -0.02em; } }
+
+/* ── the business-hours clock, stripped back (owner 2026-11-12: "too many frames, not clean or minimal enough"): no ring round the card, no rules between rows, no box round the clock, no pills — just the numbers,
+   a switch per choice and two plain buttons. The wheel's chevrons appear only when you rest on it. ── */
+.ss-bh { box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5); }
+html[data-sb-display="white"] .ss-bh { box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18); }
+.ss-bh .ss-modal-title { font-size: 19px; }
+.ss-bh .ss-modal-sub { font-size: 12.5px; }
+.ss-bh .ss-select { background: transparent; box-shadow: none; color: var(--ss-dim); }
+.ss-bh-body { gap: 2px; padding-top: 10px; }
+.ss-bh-sw { padding: 11px 2px; border-top: 0; font-size: 14.5px; font-weight: 500; }
+.ss-bh-days { padding: 10px 0 2px; }
+.ss-bh-day { width: 40px; height: 40px; font-size: 13px; font-weight: 500; color: var(--ss-dim); }
+.ss-bh-day:hover { background: transparent; color: var(--ss-fg); }
+.ss-bh-day.is-on { font-weight: 650; }
+.ss-bh-clock { gap: 36px; padding: 22px 0 18px; }
+.ss-bh-dash { width: 10px; height: 1.5px; margin-top: 30px; }
+.ss-clock { gap: 2px; }
+.ss-clock .ss-label { font-size: 10.5px; letter-spacing: 0.1em; color: var(--ss-faint); }
+.ss-clock-face { gap: 0; padding: 0; border-radius: 0; background: none; }
+.ss-clock-colon { margin-top: -6px; font-size: 40px; font-weight: 200; color: var(--ss-faint); }
+.ss-wheel { width: 58px; border-radius: 0; }
+.ss-wheel:focus-visible { box-shadow: none; }
+.ss-wheel-num { font-size: 46px; font-weight: 200; }
+.ss-wheel-btn { height: 22px; opacity: 0; color: var(--ss-dim); transition: opacity 220ms ease; }
+.ss-wheel:hover .ss-wheel-btn, .ss-wheel:focus-within .ss-wheel-btn { opacity: 1; }
+.ss-wheel-btn:hover, html[data-sb-display="white"] .ss-wheel-btn:hover { background: transparent; color: var(--ss-fg); }
+.ss-bh .ss-modal-foot { margin-top: 6px; padding-top: 4px; border-top: 0; }
+.ss-bh .ss-btn--ghost { background: transparent; color: var(--ss-dim); }
+.ss-bh .ss-btn--ghost:hover { background: transparent; color: var(--ss-fg); }
+html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white"] .ss-bh .ss-btn--ghost:hover { background: transparent; }
+
+
+/* ══ zooming + sliding the hours (owner 2026-11-12: "like After Effects / the scale of Apple Maps") ══
+   Wheel / pinch on the timeline zooms around the pointer, − / + zoom around the middle, the ruler is dragged to slide, a double click on it (or the scale) goes back to the full view.
+   The hour labels follow the zoom (whole hours … 5 / 2 / 1 minute); a label that arrives blurs in, one that leaves blurs out, and while the view moves they are a touch soft. */
+.ss-zoom { display: inline-flex; align-items: center; gap: 2px; }
+.ss-zoom-btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-dim); cursor: pointer; transition: background-color 140ms ease, color 140ms ease, transform 140ms ease; }
+.ss-zoom-btn:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
+.ss-zoom-btn:active { transform: scale(0.9); }
+.ss-zoom-scale { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 62px; padding: 3px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font: inherit; font-size: 10.5px; line-height: 1; cursor: default; transition: background-color 140ms ease, color 140ms ease; }
+.ss-zoom-scale:disabled { opacity: 1; }
+.ss-zoom-scale.is-zoomed { color: var(--ss-fg); cursor: pointer; }
+.ss-zoom-scale.is-zoomed:hover { background: var(--ss-surface-2); }
+.ss-zoom-txt { font-variant-numeric: tabular-nums; font-weight: 600; animation: ss-roll-in 260ms var(--ss-ease) backwards; }
+/* the scale bar of a map: a line with a short tick at each end */
+.ss-zoom-bar { display: block; height: 5px; border: 1.5px solid currentColor; border-top: 0; border-radius: 0 0 2px 2px; opacity: 0.8; transition: width 240ms var(--ss-ease); }
+@keyframes ss-roll-in { from { opacity: 0; translate: 0 8px; filter: blur(4px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+@keyframes ss-tick-in { from { opacity: 0; translate: 0 8px; filter: blur(5px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+@keyframes ss-tick-out { from { opacity: 1; translate: 0 0; filter: blur(0); } to { opacity: 0; translate: 0 -8px; filter: blur(5px); } }
+.ss-haxis.is-zoomed { cursor: grab; }
+.ss-htick { transition: opacity 180ms ease, filter 180ms ease; }
+.ss-htick.is-fresh { animation: ss-tick-in 300ms var(--ss-ease) backwards; }
+.ss-htick.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
+.ss-haxis.is-smooth .ss-htick:not(.is-leaving), .ss-haxis.is-drag .ss-htick:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
+.ss-haxis.is-fine .ss-htick-min { display: inline; }
+/* while the view zooms (wheel / buttons) the blocks, labels and markers glide instead of jumping */
+.ss-dayview.is-zoom-smooth .ss-block--h, .ss-dayview.is-zoom-smooth .ss-jpin--h, .ss-dayview.is-zoom-smooth .ss-hnow { transition: inset-inline-start 220ms var(--ss-ease), width 220ms var(--ss-ease); }
+.ss-dayview.is-zoom-smooth .ss-htick { transition: inset-inline-start 220ms var(--ss-ease), opacity 180ms ease, filter 180ms ease; }
+@media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving, .ss-zoom-txt { animation: none; } .ss-htick.is-leaving { display: none; } }
