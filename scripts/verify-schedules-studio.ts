@@ -5,9 +5,10 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { DEFAULT_BIZ_HOURS, bizDay, closingPlan, parseBizHours, viewRange, DEFAULT_DISPLAY, familyShade, formatLength, parseDisplay, toneFromPixels, jingleMinutesOn, jinglesOnDay, appliesOnDay, buildDayScenes, daysKind, formatMinutes, paletteIndex, BLUE_SHADES, PALETTE_SIZE, addDays, dateKey, pastedScheduleBody, minutesToTimeLocal, nowAndNext, parseTypedTime, snapMinutes, weekDatesFor, DAY_MINUTES, zoomWindow, panWindow, tickStep, windowTicks, scaleBar, MIN_WINDOW_MINUTES } from "../lib/schedules-timeline";
+import { DEFAULT_BIZ_HOURS, bizDay, closingPlan, parseBizHours, viewRange, DEFAULT_DISPLAY, familyShade, formatLength, parseDisplay, toneFromPixels, jingleMinutesOn, jinglesOnDay, appliesOnDay, buildDayScenes, daysKind, formatMinutes, paletteIndex, BLUE_SHADES, PALETTE_SIZE, addDays, dateKey, pastedScheduleBody, minutesToTimeLocal, nowAndNext, parseTypedTime, snapMinutes, weekDatesFor, DAY_MINUTES, zoomWindow, panWindow, tickStep, windowTicks, scaleBar, MIN_WINDOW_MINUTES, swapStarts } from "../lib/schedules-timeline";
 import { pickWinningScheduleForNow } from "../lib/schedule-window";
 import { playingBlockAt } from "../lib/schedule-actions";
+import { bankPackToUnified } from "../lib/music-bank/bank-play-source";
 import type { Schedule } from "../lib/types";
 
 let pass = 0, fail = 0;
@@ -154,7 +155,7 @@ assert("S59 the two trim strips show only while the pointer is on the block or i
 
 assert("S60 moving a block never slides it off the hours shown and a block that has an end keeps its length at the edge (the drag and the saved move both stop where the end would hit the end of the day; the 15-minute nudges and the card's start time too) — only the strips change the length", /const keep = own !== null \? own - startMin : 5;/.test(comp) && /Math\.min\(LAST_H \* 60, own !== null \? END_MAX : DAY_MINUTES\) - keep/.test(comp) && /if \(edit\.end === undefined && oldEnd !== null\) newStart = Math\.min\(newStart, Math\.max\(oldStart, END_MAX - \(oldEnd - oldStart\)\)\);/.test(comp) && /const m = endMin !== null \? Math\.min\(want, Math\.max\(startMin, END_MAX - \(endMin - startMin\)\)\) : want;/.test(comp));
 
-assert("S61 a live radio station has no length of its own: both strips stretch it to any length (up to the end of the day) — the cut-only rule is for songs of unknown length; a strip is never wider than a quarter of a short block, so the middle can still be grabbed to move it", /const live = sc\.schedule\.targetType === "RADIO";/.test(comp) && /else if \(live\) last = m >= END_MAX \? null : Math\.max\(begin \+ 5, m\);/.test(comp) && /: live \? FIRST_H \* 60 : begin;/.test(comp) && /height: min\(11px, 26%\)/.test(css) && /width: min\(11px, 26%\)/.test(css));
+assert("S61 a live radio station has no length of its own: both strips stretch it to any length (up to the end of the day) — the cut-only rule is for songs of unknown length; a strip is never wider than a quarter of a short block, so the middle can still be grabbed to move it", /const live = sc\.schedule\.targetType === "RADIO" \|\| sc\.schedule\.targetType === "BANK";/.test(comp) && /else if \(live\) last = m >= END_MAX \? null : Math\.max\(begin \+ 5, m\);/.test(comp) && /: live \? FIRST_H \* 60 : begin;/.test(comp) && /height: min\(11px, 26%\)/.test(css) && /width: min\(11px, 26%\)/.test(css));
 
 {
   const w0 = { a: 420, b: 1320 }; // 07:00 – 22:00
@@ -181,6 +182,36 @@ assert("S64 the hours can be zoomed and slid (wheel / pinch around the pointer, 
   && /const topOf = \(min: number\) => \(\(Math\.max\(min, FIRST_H \* 60\) - FIRST_H \* 60\) \* HOUR_H\) \/ 60;/.test(comp));
 
 assert("S65 snapping follows the zoom: blocks move and trim in whole 5 minutes normally and in single minutes once a minute is wide enough to aim at; a new block lands on 15 → 5 → 1 minutes", /const dragStep = pxPerMinNow >= 14 \? 1 : 5;/.test(comp) && /const placeStep = pxPerMinNow >= 14 \? 1 : pxPerMinNow >= 4 \? 5 : 15;/.test(comp) && /snapMinutes\(startMin \+ d \/ perMin, dragStep\)/.test(comp) && /snapMinutes\(from \+ d \/ perMin, dragStep\)/.test(comp) && /snapMinutes\(winA \+ ratio \* SPAN, placeStep\)/.test(comp));
+
+{
+  const pack = { id: "soul-rnb", name: "Soul & R&B", driveFolder: "", folderId: "", description: "", gradient: ["#111", "#222"] as [string, string], priceLabel: null, entitlement: null, tracks: [{ id: "a_1", title: "One", durationSeconds: 100, ext: "mp3" }, { id: "a_2", title: "Two", durationSeconds: null, ext: "mp3" }] };
+  const u = bankPackToUnified(pack, "https://app.example");
+  const none = bankPackToUnified({ ...pack, tracks: [] }, "https://app.example");
+  const tracks = u?.playlist?.tracks ?? [];
+  assert("S66 a music bank plays exactly like the Royalty-Free screen's Listen: an ephemeral playlist of token-free /api/media/<id> stream URLs (no token in it), in order; a bank without songs plays nothing",
+    !!u && u.type === "stream-url" && u.origin === "playlist" && (u.playlist?.id ?? "").startsWith("ephemeral-local-folder:musicbank-soul-rnb") && tracks.length === 2
+    && tracks[0]!.url === "https://app.example/api/media/a_1" && tracks[1]!.type === "stream-url" && !/[?&]mt=/.test(tracks[0]!.url) && none === null);
+}
+assert("S67 a music bank can be SCHEDULED: BANK is a schedule target (validated against the public Genre Packs and this business's private banks), the engine starts it through the same start() as a playlist / radio and waits (retries next poll) until its media token is there, and the studio lists the banks as their own category (not branch music) whose strips stretch freely",
+  /"BANK"\s*;/.test(rd("lib/types.ts")) && /case "BANK": \{/.test(rd("lib/schedule-target-validator.ts")) && /accessiblePrivateBanks\(\{ workspaceId: workspaceId \?\? null \}\)/.test(rd("lib/schedule-target-validator.ts"))
+  && /schedule\.targetType === "BANK" && tid/.test(rd("lib/schedule-playback-client.ts")) && /handlers\.bankStreamReady === false\) return false;/.test(rd("lib/schedule-playback-client.ts")) && /return start\(unified, 0\);\n  \}\n\n  let src = source;/.test(rd("lib/schedule-playback-client.ts"))
+  && /useSyncExternalStore\(subscribeMediaSession, hasMediaSessionToken/.test(rd("lib/use-schedule-playback-handlers.ts")) && /bankStreamReady/.test(rd("lib/use-schedule-playback-handlers.ts"))
+  && /kind: "bank"/.test(comp) && /\(\["all", "playlist", "song", "radio", "bank"\] as const\)/.test(comp) && /item\.targetType === "SILENCE" \|\| item\.targetType === "BANK" \? branchId \?\? quietBranch : item\.branchId/.test(comp)
+  && /sc\.schedule\.targetType === "RADIO" \|\| sc\.schedule\.targetType === "BANK"/.test(comp));
+
+{
+  const h = (hh: number, mm = 0) => hh * 60 + mm;
+  const contiguous = swapStarts({ start: h(8), end: h(12) }, { start: h(12), end: h(17) });
+  const gap = swapStarts({ start: h(10), end: h(10, 3) }, { start: h(10, 30), end: h(10, 34) });
+  const reversed = swapStarts({ start: h(12), end: h(17) }, { start: h(8), end: h(12) });
+  const same = swapStarts({ start: h(9), end: h(10) }, { start: h(9), end: h(11) });
+  assert("S68 swapping two blocks keeps the stretch of day they cover together: the later one takes the earlier one's start, the earlier one moves back by the later one's length (the gap between them is kept); the order of the arguments does not matter; blocks that start together are left alone",
+    contiguous.a === h(13) && contiguous.b === h(8) && gap.b === h(10) && gap.a === h(10, 31) && reversed.a === h(8) && reversed.b === h(13) && same.a === h(9) && same.b === h(9),
+    JSON.stringify({ contiguous, gap, reversed, same }));
+}
+assert("S69 dropping a block ON another music block of its row swaps the two (the target shows a ring while hovering; quiet / paused / hidden blocks are not targets), with ONE toast and ONE Undo for both edits; each edit is a normal per-day edit (a block shared by several days is detached for that day only)",
+  /swapStarts\(a, b\)/.test(comp) && /const swapBlocks = useCallback\(/.test(comp) && /void swapBlocks\(sc, swapTarget\)/.test(comp) && /document\s*\.elementsFromPoint\(ev\.clientX, ev\.clientY\)/.test(comp) && /\\bis-\(quiet\|paused\|shadowed\)\\b/.test(comp)
+  && /\{ quiet: true \}/.test(comp) && /editRef\.current = editOccurrence;/.test(comp) && /void editRef\.current\(ra, a\.day, \{ start: a\.start \}, \{ quiet: true \}\)/.test(comp) && /opts\?: \{ quiet\?: boolean \}/.test(comp) && /is-swap-target/.test(css) && /is-swapping/.test(comp) && /\.ss-block\.is-dragging\.is-swapping/.test(css) && /data-bid=\{baseId\(sc\.schedule\.id\)\}/.test(comp));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

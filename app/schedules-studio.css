@@ -696,3 +696,9 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-dayview.is-zoom-smooth .ss-block--h, .ss-dayview.is-zoom-smooth .ss-jpin--h, .ss-dayview.is-zoom-smooth .ss-hnow { transition: inset-inline-start 220ms var(--ss-ease), width 220ms var(--ss-ease); }
 .ss-dayview.is-zoom-smooth .ss-htick { transition: inset-inline-start 220ms var(--ss-ease), opacity 180ms ease, filter 180ms ease; }
 @media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving, .ss-zoom-txt { animation: none; } .ss-htick.is-leaving { display: none; } }
+
+
+/* ══ swap (owner 2026-11-12): a block dragged ONTO another block of its row — that block shows a ring: let go and the two trade places ══ */
+.ss-block.is-swap-target { z-index: 5; box-shadow: 0 0 0 2.5px var(--ss-fg), 0 12px 30px rgba(0, 0, 0, 0.45); }
+html[data-sb-display="white"] .ss-block.is-swap-target { box-shadow: 0 0 0 2.5px #1c1c1e, 0 12px 30px rgba(0, 0, 0, 0.22); }
+.ss-block.is-dragging.is-swapping { opacity: 0.72; } /* the block being carried turns see-through over its target, so the ring around the target shows */

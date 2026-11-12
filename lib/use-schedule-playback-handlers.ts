@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { SchedulePlaybackHandlers } from "@/lib/schedule-playback-client";
 import { usePlayback } from "@/lib/playback-provider";
 import { useRoutedPlaySource } from "@/lib/use-routed-play-source";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { decideScheduleRoute } from "@/lib/schedule-station-route";
+import { hasMediaSessionToken, subscribeMediaSession } from "@/lib/media/media-session";
 
 /** Inside the desktop shell with MAIN's status bridge (the same bridge device-player-context resolves the designation from). */
 function hasDesktopStatusBridge(): boolean {
@@ -32,12 +33,15 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
   const hasMaster = !!device?.masterDeviceId;
   const stationPlay = device?.playSourceOrSend;
   const stopOrSend = device?.stopOrSend;
+  // a music bank streams through the media token the MASTER holds; a CONTROL only routes the token-free source to it (same rule as the Royalty-Free screen)
+  const hasToken = useSyncExternalStore(subscribeMediaSession, hasMediaSessionToken, () => false);
+  const bankStreamReady = device?.deviceMode === "CONTROL" ? true : hasToken;
 
   return useMemo(() => {
     const route = decideScheduleRoute({ isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster });
     const playSource = route.kind === "station" && stationPlay ? stationPlay : routedPlaySource;
     // a scheduled END / quiet block stops the music exactly like the Stop button does (on a station or a controller that is MAIN's STOP command)
     const stopScheduled = stopOrSend ?? stop;
-    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled };
-  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster]);
+    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled, bankStreamReady };
+  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster, bankStreamReady]);
 }

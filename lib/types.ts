@@ -133,7 +133,10 @@ export type Source = {
 
 /** Schedule target types. ANNOUNCEMENT, AI_ANNOUNCEMENT reserved for future.
  *  SILENCE (2026-11-11, owner: "a quiet block / closing of the day"): not music — at its start the engine STOPS the music and nothing plays until the next block. */
-export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO" | "SILENCE";
+/**
+ *  BANK (2026-11-12, owner: "the royalty-free bank playlists must be in the Schedules categories"): a royalty-free music bank — a Genre Pack of the public catalog
+ *  or a private bank this business was opened to; `targetId` is the pack's id. It plays exactly like the Royalty-Free screen's "Listen" (lib/music-bank/bank-play-source.ts). */
+export type ScheduleTargetType = "SOURCE" | "PLAYLIST" | "RADIO" | "SILENCE" | "BANK";
 
 /** Weekly = repeat on selected weekdays; one_off = single calendar day (e.g. 31/12). */
 export type ScheduleRecurrence = "weekly" | "one_off";
