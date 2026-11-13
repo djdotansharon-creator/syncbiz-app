@@ -5,7 +5,7 @@
 import type {
   BranchLibraryItem,
   BranchLibrarySummary,
-  DesktopRuntimeConfig,
+  RendererRuntimeConfig,
   MvpConfigPatch,
   MvpStatusSnapshot,
 } from "../shared/mvp-types";
@@ -182,13 +182,16 @@ function formatExpiryIso(iso: string): string {
   return new Date(d).toLocaleString();
 }
 
-function fillForm(c: DesktopRuntimeConfig): void {
+function fillForm(c: RendererRuntimeConfig): void {
   el<HTMLInputElement>("workspaceLabel").value = c.workspaceLabel ?? "";
   el<HTMLInputElement>("branchId").value = c.branchId ?? "default";
   el<HTMLInputElement>("deviceId").value = c.deviceId ?? "";
   el<HTMLInputElement>("apiBaseUrl").value = c.apiBaseUrl ?? "";
   el<HTMLInputElement>("wsUrl").value = c.wsUrl ?? "";
-  el<HTMLTextAreaElement>("wsToken").value = c.wsToken ?? "";
+  // SECURITY (C5/C6b): the signed token is no longer returned to the renderer. Show nothing and never round-trip
+  // it — an empty field is dropped by sanitizeConfigPatch on save, so a blank field can never wipe a stored token.
+  el<HTMLTextAreaElement>("wsToken").value = "";
+  el<HTMLTextAreaElement>("wsToken").placeholder = c.hasWsToken ? "(token set — hidden)" : "(no token)";
   el<HTMLInputElement>("authEmail").value = c.lastAuthEmail ?? "";
   el<HTMLInputElement>("authPassword").value = "";
   el<HTMLSpanElement>("stTokenExp").textContent = c.desktopTokenExpiresAtIso?.trim()

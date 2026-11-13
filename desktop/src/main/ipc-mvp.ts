@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
@@ -11,6 +12,7 @@ import type {
   BranchLibraryItem,
   BranchLibrarySummary,
   DesktopRuntimeConfig,
+  RendererRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
   MusicFolderSnapshot,
@@ -65,6 +67,7 @@ import { musicFolderDisplayLabel } from "../shared/playlistpro-paths";
 import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } from "./runtime-config-service";
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
 import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
+import { toRendererConfig, sanitizeConfigPatch } from "../shared/renderer-config-redact";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
 import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
@@ -273,6 +276,20 @@ export function getProtectionService(): ProtectionService {
   return protectionService;
 }
 
+/**
+ * SECURITY (C5/C6b): true when an IPC was sent by a REMOTELY-HOSTED (http/https) renderer — the untrusted,
+ * XSS-able attack surface. The legacy LOCAL settings page is served from file:// and is trusted. Any parse
+ * failure / unknown origin → treated as remote (fail-closed): redaction only ever removes a secret, so being
+ * conservative here can never break a trusted local flow's data, only hide the token from it.
+ */
+function isRemoteSender(e: IpcMainInvokeEvent): boolean {
+  try {
+    return new URL(e.senderFrame?.url ?? "").protocol !== "file:";
+  } catch {
+    return true;
+  }
+}
+
 /** Snapshot the registration-relevant config for change detection (SAVE_CONFIG trigger). */
 function registrationRelevantOf(c: DesktopRuntimeConfig | null): RegistrationRelevant | null {
   if (!c) return null;
@@ -357,7 +374,8 @@ async function desktopSignInWithPassword(
   // Phase 0.2A trigger (B) — SIGN-IN: register under the freshly persisted+reconciled token scope. Fire-and-forget.
   getStationRegistrar().trigger("signin");
   broadcast(getWindow(), manager ? manager.snapshot() : fallbackSnapshotFromConfig(next));
-  return { ok: true, config: next };
+  // SECURITY (C5/C6b): never return the signed station token to the renderer.
+  return { ok: true, config: toRendererConfig(next) };
 }
 
 function broadcast(win: BrowserWindow | null, payload: MvpStatusSnapshot): void {
@@ -409,10 +427,11 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
   // enables it on this machine. Background only; any failure leaves every song streaming exactly as before.
   initOfflineService({ getConfig: () => getEffectiveRuntimeConfig(), withToken: withStationMediaToken, log: (level, msg, data) => fileLog(level, msg, data) });
 
-  ipcMain.handle(MVP_IPC.GET_CONFIG, (): DesktopRuntimeConfig => {
+  ipcMain.handle(MVP_IPC.GET_CONFIG, (): RendererRuntimeConfig => {
     cachedConfig = loadEffectiveRuntimeConfig();
     if (manager) manager.setConfig(cachedConfig);
-    return cachedConfig;
+    // SECURITY (C5/C6b): never hand the signed station token to the renderer — strip wsToken on the way out.
+    return toRendererConfig(cachedConfig);
   });
 
   ipcMain.handle(MVP_IPC.GET_STATUS, (): MvpStatusSnapshot => {
@@ -455,12 +474,15 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     whatsapp.setSoloMode(on !== false);
   });
 
-  ipcMain.handle(MVP_IPC.SAVE_CONFIG, (_e, patch: MvpConfigPatch): DesktopRuntimeConfig => {
+  ipcMain.handle(MVP_IPC.SAVE_CONFIG, (e, patch: MvpConfigPatch): RendererRuntimeConfig => {
     // Phase 0.1: deviceId is NOT settable at runtime — ProgramData is the immutable authority. Drop any
     // patch.deviceId, apply the rest, then reconcile back to the durable MAIN id so a manual/renderer patch
     // can never drift config.deviceId (and thus DeviceWsManager REGISTER / heartbeat) away from ProgramData.
     const beforeRelevant = registrationRelevantOf(cachedConfig); // effective config prior to this save
-    const safePatch = stripDeviceIdFromPatch(patch);
+    // SECURITY (C5/C6b): a remote/XSS'd renderer must not repoint the station (apiBaseUrl/wsUrl) or inject/erase
+    // the signed token via a saved patch; a blank wsToken is dropped for ANY sender (no accidental token wipe).
+    // The trusted local (file://) settings page keeps full control.
+    const safePatch = sanitizeConfigPatch(stripDeviceIdFromPatch(patch), isRemoteSender(e));
     const cur = loadRuntimeConfig(getUserData());
     const patched = patchRuntimeConfig(getUserData(), cur, safePatch);
     const next = reconcileDeviceIdentity(getUserData(), patched);
@@ -473,7 +495,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       getStationRegistrar().trigger("config-change");
     }
     broadcast(getWindow(), manager!.snapshot());
-    return next;
+    // SECURITY (C5/C6b): strip wsToken on the way back to the renderer.
+    return toRendererConfig(next);
   });
 
   ipcMain.handle(MVP_IPC.WS_CONNECT, (): MvpStatusSnapshot => {
