@@ -4,6 +4,7 @@ import { app, BrowserWindow, net, protocol, screen, session, shell } from "elect
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
 import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService, shutdownStationWs } from "./ipc-mvp";
+import { setTrustedAppOrigin } from "../shared/remote-media-url-policy";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -653,6 +654,9 @@ app.whenReady().then(async () => {
   // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
   // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.
   const effectiveConfig = getEffectiveRuntimeConfig();
+  // C1 (A2 same-origin exception): trust the station's OWN app origin from LOCAL config, so a dev/localhost origin
+  // does not make the engine reject its own jingle/media URLs. Local-only; never set from a WS/remote payload.
+  setTrustedAppOrigin(effectiveConfig.apiBaseUrl);
   startHeartbeat({
     appVersion: app.getVersion(),
     pid: process.pid,

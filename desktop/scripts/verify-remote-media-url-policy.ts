@@ -18,7 +18,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket as WsSocket } from "ws";
-import { resolveRemoteMediaTarget, isAllowedRemoteMediaUrl } from "../src/shared/remote-media-url-policy";
+import { resolveRemoteMediaTarget, isAllowedRemoteMediaUrl, setTrustedAppOrigin } from "../src/shared/remote-media-url-policy";
 import { DeviceWsManager } from "../src/device-websocket-client/device-ws-manager";
 import { setPlaybackSourcePathForTests } from "../src/main/playback-source-store";
 import type { DesktopRuntimeConfig } from "../src/shared/mvp-types";
@@ -66,6 +66,23 @@ assert("ALLOW  server-relative /api/media on app origin → absolute",
 assert("ALLOW  server-relative /api/jingles on app origin → absolute",
   resolveRemoteMediaTarget("/api/jingles/audio/x", APP) === `${APP}/api/jingles/audio/x`);
 assert("isAllowedRemoteMediaUrl matches resolve", isAllowedRemoteMediaUrl("https://cdn.example.com/a.mp3") && !isAllowedRemoteMediaUrl("http://10.0.0.1/a"));
+
+// ── Same-origin trusted-app-origin exception (localhost-jingle fix; LOCAL config only, no remote bypass) ──────
+assert("TRUST explicit base: localhost app-origin jingle allowed (dev)",
+  resolveRemoteMediaTarget("http://localhost:3000/api/jingles/audio/x", "http://localhost:3000") === "http://localhost:3000/api/jingles/audio/x");
+assert("TRUST explicit base: localhost app-origin media allowed (dev)",
+  resolveRemoteMediaTarget("http://localhost:3000/api/media/x", "http://localhost:3000") === "http://localhost:3000/api/media/x");
+assert("TRUST no base → localhost still rejected (strict)", resolveRemoteMediaTarget("http://localhost:3000/api/media/x") === null);
+assert("TRUST a DIFFERENT internal host is NOT exempt even with a base", resolveRemoteMediaTarget("http://10.0.0.1/x", "http://localhost:3000") === null);
+assert("TRUST port must match for the exception", resolveRemoteMediaTarget("http://localhost:3001/x", "http://localhost:3000") === null);
+// module-global (set once from LOCAL config at main startup; A2 relies on it since mpv-manager passes no base)
+setTrustedAppOrigin("http://localhost:3000");
+assert("TRUST global: A2 (no base) allows the configured app origin", resolveRemoteMediaTarget("http://localhost:3000/api/media/x") === "http://localhost:3000/api/media/x");
+assert("TRUST global: a non-trusted internal host stays rejected", resolveRemoteMediaTarget("http://10.0.0.1/x") === null && resolveRemoteMediaTarget("http://127.0.0.1/x") === null);
+setTrustedAppOrigin("https://syncbiz-app-test-production.up.railway.app");
+assert("TRUST global prod origin does NOT newly allow any internal host", resolveRemoteMediaTarget("http://10.0.0.1/x") === null && resolveRemoteMediaTarget("http://localhost:3000/x") === null);
+setTrustedAppOrigin(null);
+assert("TRUST global cleared → strict again", resolveRemoteMediaTarget("http://localhost:3000/api/media/x") === null);
 
 // ── REJECT — internal IPv4 literals (every private / special block) ─────────────────────────────────────────
 no("10.0.0.0/8 private", "http://10.0.0.5/a");

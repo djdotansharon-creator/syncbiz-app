@@ -28,6 +28,17 @@
 
 const MAX_URL_LEN = 2048;
 
+/** The station's OWN app origin, set ONCE from LOCAL runtime config in the main process (never from a WS/remote
+ *  payload). It makes A2 (mpv-manager.loadInternal, which calls this policy without an explicit base) treat the
+ *  station's own media/jingle URLs as trusted even when the configured origin is a loopback dev host — closing the
+ *  dev-only localhost-jingle gap without opening a remote bypass (a WS command cannot set this). */
+let trustedAppOrigin: string | null = null;
+
+/** Set the trusted app origin from LOCAL config (main-process startup). Pass null/invalid to clear (→ strict). */
+export function setTrustedAppOrigin(appBaseUrl: string | null | undefined): void {
+  trustedAppOrigin = parseHttpOrigin(appBaseUrl)?.origin ?? null;
+}
+
 /**
  * Returns a safe, loadable target string when `raw` is an approved REMOTE media URL, else null.
  * The returned string is the original (trimmed) input for an absolute URL — byte-for-byte, so MPV / yt-dlp
@@ -69,6 +80,11 @@ export function resolveRemoteMediaTarget(raw: unknown, appBaseUrl?: string | nul
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return null; // ytdl: / data: / javascript: / blob: / ...
   if (u.username || u.password) return null; // credentials in URL
+  // Same-origin exception: the station's OWN configured app origin (LOCAL config / explicit base, never a remote
+  // payload) is trusted, so its media/jingle URLs are allowed even when that origin is a loopback dev host. This
+  // never widens remote reach — an attacker cannot make `u` match the real app origin without using it.
+  const trusted = parseHttpOrigin(appBaseUrl)?.origin ?? trustedAppOrigin;
+  if (trusted && u.origin === trusted) return s;
   if (isForbiddenUrl(u)) return null;
   return s; // original, unchanged
 }
