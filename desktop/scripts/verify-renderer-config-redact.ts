@@ -40,13 +40,20 @@ assert("toRendererConfig hasWsToken=false when token blank/whitespace", toRender
 assert("toRendererConfig does not mutate the input", "wsToken" in FULL && FULL.wsToken === "SECRET.signed.token");
 
 // ── sanitizeConfigPatch — REMOTE (untrusted hosted renderer) ──
-const remotePatch: MvpConfigPatch = { musicFolderPath: "X:/m", workspaceLabel: "new", apiBaseUrl: "https://evil.example", wsUrl: "wss://evil.example", wsToken: "ATTACKER.token" };
+const remotePatch: MvpConfigPatch = { workspaceLabel: "new", branchId: "b2", apiBaseUrl: "https://evil.example", wsUrl: "wss://evil.example", wsToken: "ATTACKER.token", musicFolderPath: "C:/", additionalMusicFolders: ["C:/"], localMetadataBankPath: "C:/" };
 const rs = sanitizeConfigPatch(remotePatch, true);
 assert("REMOTE drops apiBaseUrl", !("apiBaseUrl" in rs));
 assert("REMOTE drops wsUrl", !("wsUrl" in rs));
 assert("REMOTE drops wsToken (no injection)", !("wsToken" in rs));
-assert("REMOTE keeps benign settings (musicFolderPath/workspaceLabel)", rs.musicFolderPath === "X:/m" && rs.workspaceLabel === "new");
-assert("REMOTE does not mutate the input", remotePatch.apiBaseUrl === "https://evil.example" && remotePatch.wsToken === "ATTACKER.token");
+assert("REMOTE drops musicFolderPath (no file-root injection)", !("musicFolderPath" in rs));
+assert("REMOTE drops additionalMusicFolders (no file-root injection)", !("additionalMusicFolders" in rs));
+assert("REMOTE drops localMetadataBankPath (no file-root injection)", !("localMetadataBankPath" in rs));
+assert("REMOTE keeps benign settings (workspaceLabel/branchId)", rs.workspaceLabel === "new" && rs.branchId === "b2");
+assert("REMOTE does not mutate the input", remotePatch.apiBaseUrl === "https://evil.example" && remotePatch.musicFolderPath === "C:/");
+
+// LOCAL (trusted file:// page) keeps folder roots (dialog handlers persist directly, so this is moot, but documents intent)
+const lf = sanitizeConfigPatch({ musicFolderPath: "D:/Music", additionalMusicFolders: ["E:/x"] }, false);
+assert("LOCAL keeps musicFolderPath/additionalMusicFolders", lf.musicFolderPath === "D:/Music" && JSON.stringify(lf.additionalMusicFolders) === JSON.stringify(["E:/x"]));
 
 // ── sanitizeConfigPatch — LOCAL (trusted file:// settings page) ──
 const localPatch: MvpConfigPatch = { apiBaseUrl: "http://localhost:3000", wsUrl: "ws://localhost:3001", wsToken: "DEV.token" };

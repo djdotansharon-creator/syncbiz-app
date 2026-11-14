@@ -24,10 +24,14 @@ export function toRendererConfig(cfg: DesktopRuntimeConfig): RendererRuntimeConf
  * Sanitize an inbound SAVE_CONFIG patch.
  *  - A blank/whitespace `wsToken` is ALWAYS dropped (treated as "no change"), so a stale/empty form field can
  *    never erase the stored station token — for any sender.
- *  - When `remote` (the patch came from the hosted http(s) renderer), the endpoints (`apiBaseUrl`/`wsUrl`) and
- *    the token are dropped entirely: the untrusted renderer may change only benign settings (music folder,
- *    workspace label, playback prefs…). The station's endpoints come from activation/config, and its token
- *    from the sanctioned `applyDesktopAuth` handoff — never from a renderer-driven saveConfig.
+ *  - When `remote` (the patch came from the hosted http(s) renderer), these fields are dropped entirely:
+ *      • `apiBaseUrl` / `wsUrl` / `wsToken` — the untrusted renderer must not repoint the station or inject a token;
+ *      • `musicFolderPath` / `additionalMusicFolders` / `localMetadataBankPath` — the approved LOCAL file-access
+ *        roots (C5 step 3). These are set ONLY by the trusted OS-dialog handlers (pickMusicFolder /
+ *        addAdditionalMusicFolder / pickLocalMetadataBankFolder), which persist them directly. A remote renderer
+ *        must not widen file access by patching a root path here (that would defeat authorizeLocalRead).
+ *    The renderer may still change benign settings (workspace label, playback prefs, branchId for activation…).
+ *    The station's endpoints come from activation/config, and its token from the sanctioned `applyDesktopAuth`.
  */
 export function sanitizeConfigPatch(patch: MvpConfigPatch, remote: boolean): MvpConfigPatch {
   const out: MvpConfigPatch = { ...patch };
@@ -36,6 +40,9 @@ export function sanitizeConfigPatch(patch: MvpConfigPatch, remote: boolean): Mvp
     delete out.apiBaseUrl;
     delete out.wsUrl;
     delete out.wsToken;
+    delete out.musicFolderPath;
+    delete out.additionalMusicFolders;
+    delete out.localMetadataBankPath;
   }
   return out;
 }

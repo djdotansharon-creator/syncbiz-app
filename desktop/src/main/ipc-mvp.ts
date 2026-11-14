@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, app, dialog } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
-import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, renameSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import type {
@@ -68,6 +68,7 @@ import { loadRuntimeConfig, patchRuntimeConfig, normalizeEndpointsForPackaged } 
 import { SYNCBIZ_HOSTED_WEB_APP_URL, SYNCBIZ_PROD_WS_URL } from "./hosted-url";
 import { sanitizeApplyDesktopAuth } from "../shared/desktop-auth-payload";
 import { toRendererConfig, sanitizeConfigPatch } from "../shared/renderer-config-redact";
+import { authorizeLocalRead } from "./file-access-grants";
 import { reconcileDeviceIdentity, stripDeviceIdFromPatch } from "./device-identity-reconcile";
 import { readDesignationRecord, isDesignatedStationOffline } from "./designation-cache";
 import { fileLog } from "./file-logger";
@@ -274,6 +275,19 @@ export function getProtectionService(): ProtectionService {
     });
   }
   return protectionService;
+}
+
+// SECURITY (C5 step 3): XLSX metadata files the operator picked via the TRUSTED OS dialog this run. The import
+// handler accepts only these (or files already inside an approved music root) — a remote renderer can never feed
+// an arbitrary path it did not pick. In-memory only; never persisted or exposed to the renderer.
+const grantedXlsxPaths = new Set<string>();
+function grantPickedXlsx(paths: string[]): void {
+  for (const p of paths) {
+    try { grantedXlsxPaths.add(realpathSync.native(p)); } catch { /* unreadable pick → skip */ }
+  }
+}
+function isGrantedXlsx(p: string): boolean {
+  try { return grantedXlsxPaths.has(realpathSync.native(p)); } catch { return false; }
 }
 
 /**
@@ -680,7 +694,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     if (typeof dir !== "string" || !dir.trim()) {
       return { status: "error", message: "Empty path" };
     }
-    const result = await scanLocalAudioFolder(dir);
+    // SECURITY (C5 step 3): only scan folders inside the operator's chosen music roots (dialog-granted). No free
+    // whole-computer access; defeats symlink/junction/traversal/UNC escapes via authorizeLocalRead (realpath).
+    const realDir = authorizeLocalRead(dir, loadEffectiveRuntimeConfig());
+    if (!realDir) {
+      return { status: "error", message: "Folder is not inside an approved music folder." };
+    }
+    const result = await scanLocalAudioFolder(realDir);
     if (result.status === "ok" && result.files.length > 0) {
       const cfg = loadEffectiveRuntimeConfig(); // device-scoped snapshot is keyed by cfg.deviceId → durable id
       void recordScanAudioFilesInSnapshot(getUserData(), cfg, result.files);
@@ -784,6 +804,8 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (result.canceled || result.filePaths.length === 0) {
         return { status: "canceled" };
       }
+      // SECURITY (C5 step 3): these came from the trusted dialog → grant them for the import handler below.
+      grantPickedXlsx(result.filePaths);
       return { status: "ok", filePaths: result.filePaths };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -802,9 +824,15 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (paths.length === 0) {
         return { status: "error", message: "No XLSX file paths provided." };
       }
+      // SECURITY (C5 step 3): accept only files the operator picked via the trusted dialog this run, or files
+      // already inside an approved music/metadata root — never an arbitrary path from a (remote) renderer.
+      const cfg = loadEffectiveRuntimeConfig();
+      const authorized = paths.filter((p) => isGrantedXlsx(p) || authorizeLocalRead(p, cfg) !== null);
+      if (authorized.length === 0) {
+        return { status: "error", message: "No approved XLSX files — choose them with the file picker first." };
+      }
       try {
-        const cfg = loadRuntimeConfig(getUserData());
-        return await importTagRenameXlsxFiles(getUserData(), cfg, paths);
+        return await importTagRenameXlsxFiles(getUserData(), cfg, authorized);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { status: "error", message: msg };
@@ -994,7 +1022,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
     async (_e, subPath: string): Promise<ListMusicLibraryDirResult> => {
       const c = loadEffectiveRuntimeConfig();
       const root = c.musicFolderPath?.trim() ? c.musicFolderPath : null;
-      const listed = await listMusicLibraryDir(root, typeof subPath === "string" ? subPath : "");
+      const sub = typeof subPath === "string" ? subPath : "";
+      // SECURITY (C5 step 3): realpath-confine the browsed sub-path to the approved music root — reject a
+      // junction/symlink/`..` in subPath that would list outside it (listing exposes names only; keep it inside).
+      if (root && !authorizeLocalRead(join(root, sub || "."), c)) {
+        return { status: "error", message: "Folder is not inside an approved music folder." };
+      }
+      const listed = await listMusicLibraryDir(root, sub);
       const result =
         listed.status === "ok"
           ? await enrichListMusicLibraryDirWithSnapshot(getUserData(), c, listed)
@@ -1012,8 +1046,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (typeof filePath !== "string" || !filePath.trim()) {
         return { status: "error", message: "Empty path" };
       }
+      // SECURITY (C5 step 3): read cover art only from inside an approved music root (realpath-checked).
+      const real = authorizeLocalRead(filePath, loadEffectiveRuntimeConfig());
+      if (!real) {
+        return { status: "error", message: "File is not inside an approved music folder." };
+      }
       try {
-        const dataUrl = await extractEmbeddedCoverDataUrlFromAudioFile(filePath.trim());
+        const dataUrl = await extractEmbeddedCoverDataUrlFromAudioFile(real);
         return { status: "ok", dataUrl };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1088,11 +1127,15 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (typeof filePath !== "string" || !filePath.trim()) {
         return { status: "error", message: "Empty path" };
       }
+      // SECURITY (C5 step 3): read tags only from inside an approved music root (realpath-checked).
+      const cfg = loadEffectiveRuntimeConfig(); // device-scoped snapshot keyed by cfg.deviceId → durable id
+      const real = authorizeLocalRead(filePath, cfg);
+      if (!real) {
+        return { status: "error", message: "File is not inside an approved music folder." };
+      }
       try {
-        const trimmed = filePath.trim();
-        const tags = await extractLocalAudioTagFields(trimmed);
-        const cfg = loadEffectiveRuntimeConfig(); // device-scoped snapshot keyed by cfg.deviceId → durable id
-        void recordLocalAudioTagsInSnapshot(getUserData(), cfg, trimmed, tags);
+        const tags = await extractLocalAudioTagFields(real);
+        void recordLocalAudioTagsInSnapshot(getUserData(), cfg, real, tags);
         return { status: "ok", tags };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1107,8 +1150,13 @@ export function registerMvpIpc(getWindow: () => BrowserWindow | null, orchestrat
       if (typeof filePath !== "string" || !filePath.trim()) {
         return { status: "error", message: "Empty path" };
       }
+      // SECURITY (C5 step 3): inspector reads only from inside an approved music root (realpath-checked).
+      const real = authorizeLocalRead(filePath, loadEffectiveRuntimeConfig());
+      if (!real) {
+        return { status: "error", message: "File is not inside an approved music folder." };
+      }
       try {
-        const payload = await inspectLocalAudioTagsRaw(filePath.trim());
+        const payload = await inspectLocalAudioTagsRaw(real);
         return { status: "ok", payload };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

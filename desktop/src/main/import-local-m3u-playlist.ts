@@ -2,7 +2,7 @@
  * Stage 5B — Parse local M3U/M3U8/PLS as static path lists; resolve under Music Folder only.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,10 +31,20 @@ function normalizeMusicRoot(root: string | null | undefined): string | null {
 }
 
 function isUnderMusicRoot(abs: string, rootNorm: string): boolean {
-  const rel = path.relative(rootNorm, path.resolve(abs));
+  const resolved = path.resolve(abs);
+  const rel = path.relative(rootNorm, resolved);
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return false;
-  return true;
+  // SECURITY (C5 step 3): defeat a symlink/junction INSIDE the root that points outside it. When the file exists,
+  // its REAL location (and the real root) must still be contained; an escape → treated as NOT in-root, so the
+  // entry flows to the existing missing-song fallback (local bank → YouTube) and is never read or deleted.
+  try {
+    const relReal = path.relative(realpathSync.native(rootNorm), realpathSync.native(resolved));
+    return !(!relReal || relReal.startsWith("..") || path.isAbsolute(relReal));
+  } catch {
+    return true; // non-existent / unreadable → keep the lexical verdict; no real file is read from here
+  }
 }
+
 
 function pathKey(abs: string): string {
   const r = path.resolve(abs);
