@@ -3,6 +3,7 @@
  * Deterministic, no network. Does NOT run fetch-mpv (that would download). Run: npx tsx desktop/scripts/verify-mpv-pin.ts
  */
 import { sha256Buf, hexEq, loadPin } from "./mpv-integrity.cjs";
+import { MPV_WIN_PIN } from "../src/main/runtime-binaries/mpv-pin";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -30,6 +31,11 @@ assert("hexEq: short/empty/non-string → false", !hexEq("abc", win.exeSha256) &
 
 // ── sha256Buf sanity (known vector) ──
 assert("sha256Buf('abc') is the known SHA-256", sha256Buf("abc") === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+// ── parity: the runtime TS mirror (mpv-pin.ts) ≡ the build JSON (mpv-pin.json), so build + runtime never drift ──
+assert("parity: mpv-pin.ts releaseTag === mpv-pin.json", MPV_WIN_PIN.releaseTag === win.releaseTag);
+assert("parity: mpv-pin.ts exeSha256 === mpv-pin.json", MPV_WIN_PIN.exeSha256 === win.exeSha256);
+assert("parity: mpv-pin.ts assetPattern === mpv-pin.json", MPV_WIN_PIN.assetPattern === win.assetPattern);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 console.log(`pin: mpv ${win && win.releaseTag} / ${win && win.exeSha256}`);

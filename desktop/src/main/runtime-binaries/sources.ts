@@ -11,6 +11,7 @@
  */
 
 import type { BinarySource, BinaryName, PlatformKey } from "./types";
+import { MPV_WIN_PIN } from "./mpv-pin";
 
 export function currentPlatformKey(): PlatformKey | null {
   const p = process.platform;
@@ -124,6 +125,8 @@ export const RUNTIME_BINARY_SOURCES: Record<BinaryName, Partial<Record<PlatformK
       assetPattern: "^mpv-x86_64-v3-\\d+-git-[a-f0-9]+\\.7z$",
       archive: { kind: "7z", pickFile: "mpv.exe" },
       outputFileName: "mpv.exe",
+      // C4: no upstream sidecar for mpv → pin a vetted build and verify it (fetch by tag, reject on mismatch).
+      pin: { releaseTag: MPV_WIN_PIN.releaseTag, exeSha256: MPV_WIN_PIN.exeSha256 },
     },
     "darwin-x64": {
       kind: "system",

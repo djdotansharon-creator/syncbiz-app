@@ -78,6 +78,13 @@ export async function fetchLatestRelease(owner: string, repo: string): Promise<G
   return JSON.parse(buf.toString("utf-8")) as GithubRelease;
 }
 
+/** C4: fetch a SPECIFIC release by its tag (used for integrity-pinned binaries like mpv). */
+export async function fetchReleaseByTag(owner: string, repo: string, tag: string): Promise<GithubRelease> {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases/tags/${encodeURIComponent(tag)}`;
+  const buf = await fetchToBuffer(url, "application/vnd.github+json");
+  return JSON.parse(buf.toString("utf-8")) as GithubRelease;
+}
+
 /**
  * Stream a URL to disk with progress events. Writes to `<dest>.partial` first
  * and atomic-renames on success so that a killed download never leaves
