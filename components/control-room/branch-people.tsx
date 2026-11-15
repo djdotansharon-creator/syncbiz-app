@@ -110,7 +110,7 @@ function useAgo(): (iso: string | null) => string {
 
 const STRIP_MAX = 4;
 
-/** the section of the branch screen: four people, then "See more" */
+/** the branch's people, small and tight, one under another at the END edge of the branch screen's header (right in English, left in Hebrew): four, then "See more" */
 export function BranchPeople({ branchId, onSeeMore }: { branchId: string; onSeeMore: () => void }): ReactElement | null {
   const tr = useTr();
   const role = useRoleLabel();
@@ -119,19 +119,11 @@ export function BranchPeople({ branchId, onSeeMore }: { branchId: string; onSeeM
   const shown = d.assigned.slice(0, STRIP_MAX);
   const hidden = d.assigned.length - shown.length;
   return (
-    <section className="cr-bp-sec cr-bpp" aria-label={tr("People")}>
-      <div className="cr-bpp-head">
-        <h3 className="cr-bp-title">{tr("People")}</h3>
-        <button type="button" className="cr-bpp-more" onClick={onSeeMore}>
-          {tr("See more")}
-          {hidden > 0 ? <span className="cr-bpp-count"> +{hidden}</span> : null}
-          <svg className="rtl:rotate-180" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 6 6 6-6 6" /></svg>
-        </button>
-      </div>
+    <section className="cr-bpp cr-bpp--side" aria-label={tr("People")}>
       {shown.length === 0 ? (
         <p className="cr-bpp-empty">{tr("No one is assigned to this branch yet.")}</p>
       ) : (
-        <ul className="cr-bpp-row">
+        <ul className="cr-bpp-list">
           {shown.map((p) => (
             <li key={p.userId} className="cr-bpp-one">
               <Disc p={p} />
@@ -141,6 +133,11 @@ export function BranchPeople({ branchId, onSeeMore }: { branchId: string; onSeeM
           ))}
         </ul>
       )}
+      <button type="button" className="cr-bpp-more" onClick={onSeeMore}>
+        {tr("See more")}
+        {hidden > 0 ? <span className="cr-bpp-count"> +{hidden}</span> : null}
+        <svg className="rtl:rotate-180" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 6 6 6-6 6" /></svg>
+      </button>
     </section>
   );
 }

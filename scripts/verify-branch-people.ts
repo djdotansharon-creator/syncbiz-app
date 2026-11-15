@@ -39,7 +39,7 @@ ok(splitBranchPeople(people, [], "A").assigned.length === 0, "no account rows at
 
 console.log("BP4 — wiring: the strip and its full screen on the branch screen");
 const view = read("components/control-room/all-branches-view.tsx");
-ok(/<BranchPeople\s+key=\{`ppl-\$\{open\.id\}`\}\s+branchId=\{open\.id\}\s+onSeeMore=\{\(\) => setPeopleFor\(open\.id\)\}/.test(view), "the strip is on the branch screen, next to the devices, and 'See more' sets peopleFor");
+ok(/headerEnd=\{<BranchPeople\s+key=\{`ppl-\$\{open\.id\}`\}\s+branchId=\{open\.id\}\s+onSeeMore=\{\(\) => setPeopleFor\(open\.id\)\}/.test(view) && /\{headerEnd\}\s+<BranchMenu/.test(read("components/control-room/branch-panel.tsx")), "the strip sits in the branch screen header (its end edge), and 'See more' sets peopleFor");
 ok(/if \(open && peopleFor === open\.id\)[\s\S]{0,200}<BranchPeopleScreen branchId=\{open\.id\}/.test(view), "the full screen takes the branch screen's place");
 ok(/const openBranch = \(id: string\) => \{[^}]*setPeopleFor\(null\)/.test(view), "opening any branch closes a people screen left open");
 ok(/onBack=\{\(\) => \{ setOpenId\(null\); setPeopleFor\(null\)/.test(view), "going back to the list clears it");

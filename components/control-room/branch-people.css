@@ -1,16 +1,22 @@
 /* CONTROL ROOM — the people of a branch (owner 2026-11-15). The Control Room's language: frameless, soft, glass; round discs; the same text colours as the rest of the branch screen. */
 
-.cr-bpp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.cr-bpp-head .cr-bp-title { margin-bottom: 0; }
 .cr-bpp-more { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--sb-text-secondary); font-size: 13.5px; font-weight: 550; text-decoration: none; cursor: pointer; transition: background-color 240ms ease, color 240ms ease; }
 .cr-bpp-more:hover { background: rgba(255, 255, 255, 0.08); color: var(--sb-text); }
 .cr-bpp-more:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 2px; }
 .cr-bpp-count { font-size: 12.5px; font-weight: 550; color: var(--sb-text-tertiary); font-variant-numeric: tabular-nums; }
 
-/* the strip: up to four people side by side */
-.cr-bpp-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.cr-bpp-one { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 5px; padding: 12px 4px 10px; border-radius: 20px; text-align: center; transition: background-color 240ms ease; }
+/* the branch's people on the branch screen: small and tight, one under another at the END edge of the header (right in English, left in Hebrew) */
+.cr-bp-head--end { flex-wrap: wrap; row-gap: 14px; }
+.cr-bpp--side { display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 150px; max-width: 220px; }
+@container (max-width: 640px) { .cr-bpp--side { flex-basis: 100%; max-width: none; order: 9; } }
+.cr-bpp-list { display: flex; width: 100%; flex-direction: column; gap: 1px; }
+.cr-bpp-one { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 10px; transition: background-color 240ms ease; }
 .cr-bpp-one:hover { background: rgba(255, 255, 255, 0.05); }
+.cr-bpp--side .cr-bpp-disc { width: 22px; height: 22px; font-size: 11px; }
+.cr-bpp--side .cr-bpp-name { flex: 0 1 auto; font-size: 12.5px; }
+.cr-bpp--side .cr-bpp-role { flex: 1 1 0; font-size: 11px; color: var(--sb-text-tertiary); }
+.cr-bpp--side .cr-bpp-more { margin-inline-start: -4px; padding: 3px 8px; font-size: 12px; }
+.cr-bpp--side .cr-bpp-empty { padding: 0 4px; font-size: 12px; }
 
 .cr-bpp-disc { display: grid; flex: none; place-items: center; width: 50px; height: 50px; border-radius: 50%; font-size: 20px; font-weight: 650; line-height: 1; color: #fff; }
 .cr-bpp-disc.is-big { width: 58px; height: 58px; font-size: 23px; }

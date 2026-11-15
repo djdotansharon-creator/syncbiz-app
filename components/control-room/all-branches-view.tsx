@@ -492,11 +492,10 @@ export function AllBranchesView() {
                     onDelete={() => setDeleting({ id: open.id, name: open.name, dbName: open.dbName })}
                     onStationRemoved={() => setReloadKey((k) => k + 1)}
                     sendCommandTo={sendCommandTo}
+                    headerEnd={<BranchPeople key={`ppl-${open.id}`} branchId={open.id} onSeeMore={() => setPeopleFor(open.id)} />}
                   >
                   {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
                   <BranchDevices key={`dev-${open.id}`} branchId={open.id} />
-                  {/* the branch's people: four of them, and "See more" opens the whole screen (owner 2026-11-15) — nothing while the viewer may not see people */}
-                  <BranchPeople key={`ppl-${open.id}`} branchId={open.id} onSeeMore={() => setPeopleFor(open.id)} />
                   {/* the branch's jingles: "Branch jingles" + "Available to this branch" (same library, server-filtered) */}
                   <BranchJingles
                     key={open.id}
