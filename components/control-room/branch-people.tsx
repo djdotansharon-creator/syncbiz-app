@@ -81,9 +81,9 @@ function toneFor(s: string): string {
   return TONES[h % TONES.length];
 }
 
-function Disc({ p, big }: { p: BranchPerson; big?: boolean }): ReactElement {
+function Disc({ p }: { p: BranchPerson }): ReactElement {
   return (
-    <span className={`cr-bpp-disc${big ? " is-big" : ""}${p.status === "active" ? "" : " is-off"}`} style={{ background: toneFor(p.email || p.name) }} aria-hidden>
+    <span className={`cr-bpp-disc${p.status === "active" ? "" : " is-off"}`} style={{ background: toneFor(p.email || p.name) }} aria-hidden>
       {initialOf(p.name) || "?"}
     </span>
   );
@@ -149,11 +149,14 @@ export function BranchPeopleScreen({ branchId, branchName, onBack }: { branchId:
   const ago = useAgo();
   const d = useBranchPeople(branchId);
   const tile = (p: BranchPerson) => (
-    <li key={p.userId} className="cr-bpp-tile">
-      <Disc p={p} big />
-      <b className="cr-bpp-name" dir="auto">{p.name}{p.isYou ? ` (${tr("You")})` : ""}</b>
-      <span className="cr-bpp-role" dir="auto">{role(p)}</span>
-      <span className={`cr-bpp-sub${p.status === "active" ? "" : " is-warn"}`}>{p.status === "active" ? ago(p.lastSignInAt) : tr(p.status === "paused" ? "Paused" : "Disabled")}</span>
+    <li key={p.userId} className="cr-bpp-tile" tabIndex={0}>
+      <Disc p={p} />
+      <span className="cr-bpp-txt">
+        <b className="cr-bpp-name" dir="auto">{p.name}{p.isYou ? ` (${tr("You")})` : ""}</b>
+        <span className="cr-bpp-role" dir="auto">
+          {role(p)} · <span className={p.status === "active" ? "" : "cr-bpp-warn"}>{p.status === "active" ? ago(p.lastSignInAt) : tr(p.status === "paused" ? "Paused" : "Disabled")}</span>
+        </span>
+      </span>
     </li>
   );
   return (
