@@ -100,9 +100,12 @@ export function BranchPanel({
   onDelete,
   onStationRemoved,
   sendCommandTo,
+  headerEnd,
   children,
 }: {
   children?: React.ReactNode;
+  /** something small at the END edge of the header (the branch's people — owner 2026-11-15): right in English, left in Hebrew */
+  headerEnd?: React.ReactNode;
   branch: PanelBranch;
   onBack: () => void;
   /** owner: edit the branch (name, number, address) */
@@ -152,7 +155,7 @@ export function BranchPanel({
   const initial = ((branch.brandName || branch.name).trim().split(/\s+/).pop() ?? "").charAt(0).toUpperCase();
   return (
     <div className="cr-bp">
-      <header className="cr-bp-head">
+      <header className={`cr-bp-head${headerEnd ? " cr-bp-head--end" : ""}`}>
         <button type="button" onClick={onBack} className="cr-bp-icon cr-bp-back" aria-label={L.t("common.backToBranches")} title={L.t("common.backToBranches")}>
           <svg className="h-[18px] w-[18px] rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
         </button>
@@ -164,6 +167,7 @@ export function BranchPanel({
           <span className="cr-bp-status"><StatusLed status={branch.status} />{L.t(STATUS_KEY[branch.status])}</span>
         </div>
         <span className="flex-1" />
+        {headerEnd}
         <BranchMenu branch={branch} onEdit={onEdit} onDelete={onDelete} L={L} />
       </header>
 

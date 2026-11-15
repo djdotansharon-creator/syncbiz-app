@@ -8,6 +8,7 @@ import { StatusLed, STATUS_KEY, type MapDotStatus } from "@/components/control-r
 import { NetworkMap } from "@/components/control-room/network-map";
 import { BranchDevices, EnrollmentRequestsPanel, NewBranchTile } from "@/components/control-room/device-enrollment-panel";
 import { BranchPanel } from "@/components/control-room/branch-panel";
+import { BranchPeople, BranchPeopleScreen } from "@/components/control-room/branch-people";
 import { BroadcastPanel } from "@/components/control-room/broadcast-panel";
 import { BranchForm } from "@/components/control-room/branch-form";
 import { BranchCreateFlow } from "@/components/control-room/branch-create-flow";
@@ -134,10 +135,12 @@ export function AllBranchesView() {
   const [backToRequests, setBackToRequests] = useState(false);
   /** part 2: the branch whose control panel is open (row / arrow / map dot) */
   const [openId, setOpenId] = useState<string | null>(null);
+  /** the branch whose PEOPLE screen ("See more" under People) is open — it takes the branch screen's place; cleared whenever a branch is opened */
+  const [peopleFor, setPeopleFor] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string; dbName: string } | null>(null);
   /** the server refused the deletion because a player is registered to the branch — the dialog then offers 'remove the player and delete the branch' (owner 2026-11-04) */
   const [playerBlocksDelete, setPlayerBlocksDelete] = useState(false);
-  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setRequestsOpen(false); setBackToRequests(false); };
+  const openBranch = (id: string) => { setSelectedId(id); setOpenId(id); setPeopleFor(null); setBroadcastOpen(false); setForm(null); setBrandsOpen(false); setJinglesOpen(false); setRequestsOpen(false); setBackToRequests(false); };
   const openRequests = () => { setOpenId(null); setBroadcastOpen(false); setForm(null); setJinglesOpen(false); setBrandsOpen(false); setBrandsNew(false); setBackToRequests(false); setRequestsOpen(true); };
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   /** Organization → Brand → Branch (owner): brands + which brand each branch belongs to */
@@ -472,16 +475,24 @@ export function AllBranchesView() {
               );
             }
             const open = openId ? rows.find((r) => r.id === openId) : undefined;
+            if (open && peopleFor === open.id) {
+              return (
+                <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                  <BranchPeopleScreen branchId={open.id} branchName={open.name} onBack={() => setPeopleFor(null)} />
+                </div>
+              );
+            }
             if (open) {
               return (
                 <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
                   <BranchPanel
                     branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation, logoUrl: open.logoUrl || (open.brandId ? brandById.get(open.brandId)?.logoUrl : null) || null, brandName: open.brandId ? brandById.get(open.brandId)?.name ?? null : null, brandColor: open.brandId ? brandById.get(open.brandId)?.color ?? DEFAULT_BRAND_COLOR : null }}
-                    onBack={() => { setOpenId(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
+                    onBack={() => { setOpenId(null); setPeopleFor(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
                     onEdit={() => setForm({ mode: "edit", id: open.id })}
                     onDelete={() => setDeleting({ id: open.id, name: open.name, dbName: open.dbName })}
                     onStationRemoved={() => setReloadKey((k) => k + 1)}
                     sendCommandTo={sendCommandTo}
+                    headerEnd={<BranchPeople key={`ppl-${open.id}`} branchId={open.id} onSeeMore={() => setPeopleFor(open.id)} />}
                   >
                   {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
                   <BranchDevices key={`dev-${open.id}`} branchId={open.id} />
