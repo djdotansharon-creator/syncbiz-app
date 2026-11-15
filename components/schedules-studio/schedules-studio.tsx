@@ -56,6 +56,8 @@ import {
   pastedScheduleBody,
   panWindow,
   scaleBar,
+  spanToSlider,
+  sliderToSpan,
   snapMinutes,
   startMinutes,
   swapStarts,
@@ -1318,6 +1320,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             {horizontalView ? (
               <ZoomControl
                 pxPerMin={pxPerMinNow}
+                span={SPAN}
+                onSpan={(span) => applyZoom((w) => zoomWindow(w, span / (w.b - w.a), 0.5), "drag")}
                 zoomed={!!zoomWin}
                 onIn={() => applyZoom((w) => zoomWindow(w, 1 / 1.6, 0.5))}
                 onOut={() => applyZoom((w) => zoomWindow(w, 1.6, 0.5))}
@@ -2500,15 +2504,16 @@ function HoursRuler({
 }
 
 /** − / + and a map-style scale bar ("30 min"): the bar is the length of time it names, at this zoom; the number rolls over when it changes; click it to go back to the full view */
-function ZoomControl({ pxPerMin, zoomed, onIn, onOut, onReset }: { pxPerMin: number; zoomed: boolean; onIn: () => void; onOut: () => void; onReset: () => void }) {
+function ZoomControl({ pxPerMin, span, onSpan, zoomed, onIn, onOut, onReset }: { pxPerMin: number; span: number; onSpan: (span: number) => void; zoomed: boolean; onIn: () => void; onOut: () => void; onReset: () => void }) {
   const tr = useTr();
   const bar = scaleBar(pxPerMin);
   const label = bar.minutes % 60 === 0 ? tr("{n} h", { n: bar.minutes / 60 }) : tr("{n} min", { n: bar.minutes });
   return (
-    <div className="ss-zoom" role="group" aria-label={tr("Zoom")} title={tr("Zoom: Ctrl + scroll, or scroll on the hours")}>
+    <div className="ss-zoom" role="group" aria-label={tr("Zoom")} title={tr("Zoom: drag, Ctrl + scroll, or scroll on the hours")}>
       <button type="button" className="ss-zoom-btn" onClick={onOut} aria-label={tr("Zoom out")}>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
       </button>
+      <input type="range" className="ss-zoom-range" dir="ltr" min={0} max={1000} step={1} value={spanToSlider(span)} onChange={(e) => onSpan(sliderToSpan(Number(e.target.value)))} aria-label={tr("Zoom")} title={tr("Zoom: drag, Ctrl + scroll, or scroll on the hours")} />
       <button type="button" className={`ss-zoom-scale${zoomed ? " is-zoomed" : ""}`} onClick={onReset} disabled={!zoomed} title={zoomed ? tr("Back to the full view") : undefined} aria-label={zoomed ? tr("Back to the full view") : label}>
         <span className="ss-zoom-txt" key={label}>{label}</span>
         <span className="ss-zoom-bar" style={{ width: Math.max(8, bar.px) }} aria-hidden />

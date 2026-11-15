@@ -676,6 +676,14 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-zoom-btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-dim); cursor: pointer; transition: background-color 140ms ease, color 140ms ease, transform 140ms ease; }
 .ss-zoom-btn:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
 .ss-zoom-btn:active { transform: scale(0.9); }
+/* the zoom slider: left = the whole day, right = closer (owner 2026-11-15: "stretch or squeeze the time axis") */
+.ss-zoom-range { -webkit-appearance: none; appearance: none; width: 104px; height: 20px; margin: 0 4px; padding: 0; background: transparent; cursor: pointer; }
+.ss-zoom-range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--ss-surface-2); }
+.ss-zoom-range::-moz-range-track { height: 4px; border-radius: 999px; background: var(--ss-surface-2); }
+.ss-zoom-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: var(--ss-fg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); transition: transform 140ms ease; }
+.ss-zoom-range::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--ss-fg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
+.ss-zoom-range:hover::-webkit-slider-thumb, .ss-zoom-range:active::-webkit-slider-thumb { transform: scale(1.18); }
+.ss-zoom-range:focus-visible { outline: 2px solid var(--ss-fg); outline-offset: 3px; border-radius: 8px; }
 .ss-zoom-scale { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 62px; padding: 3px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font: inherit; font-size: 10.5px; line-height: 1; cursor: default; transition: background-color 140ms ease, color 140ms ease; }
 .ss-zoom-scale:disabled { opacity: 1; }
 .ss-zoom-scale.is-zoomed { color: var(--ss-fg); cursor: pointer; }

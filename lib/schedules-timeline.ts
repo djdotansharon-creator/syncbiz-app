@@ -473,6 +473,20 @@ export function zoomWindow(w: TimeWindow, factor: number, anchorRatio: number): 
   return { a, b: a + next };
 }
 
+/** the zoom slider (owner 2026-11-15: "let me stretch or squeeze the time axis"): 0 = the whole day, 1000 = the closest view; logarithmic, so every step of the slider feels the same */
+export function spanToSlider(span: number): number {
+  const lo = Math.log(MIN_WINDOW_MINUTES);
+  const hi = Math.log(DAY_MINUTES);
+  const t = (hi - Math.log(Math.min(DAY_MINUTES, Math.max(MIN_WINDOW_MINUTES, span)))) / (hi - lo);
+  return Math.round(t * 1000);
+}
+export function sliderToSpan(value: number): number {
+  const lo = Math.log(MIN_WINDOW_MINUTES);
+  const hi = Math.log(DAY_MINUTES);
+  const t = Math.min(1, Math.max(0, value / 1000));
+  return Math.exp(hi - t * (hi - lo));
+}
+
 /** slide a window along the day by some minutes (its width stays) */
 export function panWindow(w: TimeWindow, deltaMinutes: number): TimeWindow {
   const width = w.b - w.a;
