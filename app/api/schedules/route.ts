@@ -5,13 +5,16 @@ import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAssignedBranchIdsForUser } from "@/lib/auth-helpers";
 import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
+import { schedulesForBranch } from "@/lib/schedule-branch-scope";
+import { getCanonicalLegacyBranchId } from "@/lib/branch-resolver";
+import { prisma } from "@/lib/prisma";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
 
 function resolveAccountScope(userTenantId: string): string {
   return userTenantId === "tnt-default" ? "acct-demo-001" : userTenantId;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const user = await getCurrentUserFromCookies();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,6 +31,20 @@ export async function GET() {
     const branchId = (s.branchId ?? "default").trim() || "default";
     return allowedBranchIds.includes(branchId);
   });
+  // 2026-11-15: a PLAYER's window asks only for its own branch's schedules (`?branchId=`) — every other branch's blocks belong to another player. Without the parameter
+  // (the studio, the lists) nothing changes. See lib/schedule-branch-scope.ts (fail-open for orphan / unmapped legacy branches).
+  const wanted = (req.nextUrl.searchParams.get("branchId") ?? "").trim();
+  if (wanted) {
+    const canonicalDefaultBranchId = await getCanonicalLegacyBranchId(user.tenantId);
+    let knownBranchIds = new Set<string>();
+    try {
+      const rows = await prisma.branch.findMany({ where: { workspaceId: user.tenantId }, select: { id: true } });
+      knownBranchIds = new Set(rows.map((r) => r.id));
+    } catch {
+      /* no branch list → nothing is dropped (the old behaviour) */
+    }
+    return NextResponse.json(schedulesForBranch(filtered, wanted, { canonicalDefaultBranchId, knownBranchIds }));
+  }
   return NextResponse.json(filtered);
 }
 
