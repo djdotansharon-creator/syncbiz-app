@@ -693,9 +693,8 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-htick.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
 .ss-haxis.is-smooth .ss-htick:not(.is-leaving), .ss-haxis.is-drag .ss-htick:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
 .ss-haxis.is-fine .ss-htick-min { display: inline; }
-/* while the view zooms (wheel / buttons) the blocks, labels and markers glide instead of jumping */
-.ss-dayview.is-zoom-smooth .ss-block--h, .ss-dayview.is-zoom-smooth .ss-jpin--h, .ss-dayview.is-zoom-smooth .ss-hnow { transition: inset-inline-start 220ms var(--ss-ease), width 220ms var(--ss-ease); }
-.ss-dayview.is-zoom-smooth .ss-htick { transition: inset-inline-start 220ms var(--ss-ease), opacity 180ms ease, filter 180ms ease; }
+/* zooming is INSTANT and rigid (owner 2026-11-15: "nothing moves on its own — everything just grows or shrinks together, like a zoom"): no gliding of blocks, markers or labels */
+.ss-dayview .ss-block--h, .ss-dayview .ss-jpin--h, .ss-dayview .ss-hnow, .ss-dayview .ss-htick { transition-property: opacity, filter; }
 @media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving, .ss-zoom-txt { animation: none; } .ss-htick.is-leaving { display: none; } }
 
 
