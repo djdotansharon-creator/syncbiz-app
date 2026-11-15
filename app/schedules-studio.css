@@ -714,3 +714,14 @@ html[class*="sb-ss-cursor-"], html[class*="sb-ss-cursor-"] * { user-select: none
 html[data-sb-display="white"] .ss-col.is-drop-day { background-color: rgba(0, 0, 0, 0.05); }
 .ss-hrow.is-drop-day .ss-htrack { background-color: rgba(255, 255, 255, 0.07); border-radius: 14px; }
 html[data-sb-display="white"] .ss-hrow.is-drop-day .ss-htrack { background-color: rgba(0, 0, 0, 0.05); }
+
+/* ══ (owner 2026-11-15) the time under the pointer, on the axis — like the price label of a trading chart; over a block the axis lights the stretch it fills ══ */
+.ss-xcur { position: absolute; z-index: 8; top: 50%; padding: 1px 7px; border-radius: 6px; transform: translate(-50%, -50%); background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+html[dir="rtl"] .ss-xcur { transform: translate(50%, -50%); }
+.ss-xcur--v { top: 0; inset-inline-start: auto; inset-inline-end: 3px; transform: translateY(-50%); }
+html[dir="rtl"] .ss-xcur--v { transform: translateY(-50%); }
+.ss-xband { position: absolute; z-index: 6; top: 0; bottom: 0; background: rgba(251, 191, 36, 0.26); border-inline: 1.5px solid rgba(251, 191, 36, 0.95); pointer-events: none; }
+.ss-xband > span { position: absolute; top: 100%; inset-inline-start: 0; margin-top: 4px; padding: 1px 8px; border-radius: 6px; background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 11px; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
+.ss-xband--v { inset-inline: 0; top: 0; bottom: auto; border-inline: 0; border-block: 1.5px solid rgba(251, 191, 36, 0.95); }
+.ss-gutter .ss-xcur[hidden], .ss-gutter .ss-xband[hidden], .ss-haxis .ss-xcur[hidden], .ss-haxis .ss-xband[hidden] { display: none; }
+

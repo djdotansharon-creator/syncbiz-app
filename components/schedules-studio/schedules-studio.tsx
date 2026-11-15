@@ -48,7 +48,6 @@ import {
   parseBizHours,
   viewRange,
   familyShade,
-  formatLength,
   parseDisplay,
   toneFromPixels,
   paletteIndex,
@@ -271,6 +270,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const SPAN = winB - winA;
   const pct = (min: number) => ((Math.min(Math.max(min, winA), winB) - winA) / SPAN) * 100;
   const topOf = (min: number) => ((Math.max(min, FIRST_H * 60) - FIRST_H * 60) * HOUR_H) / 60;
+  /** "13 min", "2 h", "2 h 5 min" — how long a stretch of the day is */
+  const spanText = (minutes: number): string => {
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes - h * 60);
+    return [h > 0 ? tr("{n} h", { n: h }) : "", m > 0 || h === 0 ? tr("{n} min", { n: m }) : ""].filter(Boolean).join(" ");
+  };
+  const spanTextRef = useRef(spanText);
+  useEffect(() => {
+    spanTextRef.current = spanText;
+  });
   // the hours named in the margin of the week's columns: every hour at the usual height, fewer when squeezed, quarters / halves when stretched
   const labelStep = hourH >= 300 ? 15 : hourH >= 150 ? 30 : hourH >= 34 ? 60 : hourH >= 20 ? 120 : 240;
   const hourLabels = useMemo(() => {
@@ -354,6 +363,48 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }, [dvEl, applyZoom]);
   // Press on the hours and drag sideways, like the time ruler of a music app (owner 2026-11-15): right = closer (the bar gets longer), left = further away, around the
   // spot that was pressed. Shift + drag slides the hours instead (when they are zoomed in).
+  // ── the time under the pointer, on the axis (owner 2026-11-15: "like the price label of a trading chart — anywhere I stand in the timeline, the time at that spot, to the minute, on the axis") ──
+  // Over a block the axis also lights the stretch the block fills, with its start, end and length. Written straight into the DOM: a re-render of the whole studio per mouse move would lag.
+  useEffect(() => {
+    if (!dvEl) return;
+    const hide = () => {
+      dvEl.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xband").forEach((n) => { n.hidden = true; });
+    };
+    const onMove = (e: PointerEvent) => {
+      const ax = dvEl.querySelector<HTMLElement>(".ss-haxis");
+      const cur = ax?.querySelector<HTMLElement>(".ss-xcur");
+      const band = ax?.querySelector<HTMLElement>(".ss-xband");
+      if (!ax || !cur || !band) return;
+      const r = ax.getBoundingClientRect();
+      if (r.width < 10) return;
+      const { a, b } = zoomSrc.current;
+      let ratio = (e.clientX - r.left) / r.width;
+      if (isRtl()) ratio = 1 - ratio;
+      if (ratio < 0 || ratio > 1) return hide();
+      const m = Math.min(DAY_MINUTES - 1, Math.max(0, Math.round(a + ratio * (b - a))));
+      cur.hidden = false;
+      cur.style.insetInlineStart = `${((m - a) / (b - a)) * 100}%`;
+      cur.textContent = formatMinutes(m);
+      const blk = (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
+        const s0 = Number(blk.dataset.start);
+        const e0 = Number(blk.dataset.end);
+        const lo = Math.min(1, Math.max(0, (s0 - a) / (b - a)));
+        const hi = Math.min(1, Math.max(0, (e0 - a) / (b - a)));
+        band.hidden = false;
+        band.style.insetInlineStart = `${lo * 100}%`;
+        band.style.width = `${(hi - lo) * 100}%`;
+        const label = band.firstElementChild as HTMLElement | null;
+        if (label) label.textContent = `${formatMinutes(s0)} – ${formatMinutes(Math.min(DAY_MINUTES - 1, e0))} · ${spanTextRef.current(e0 - s0)}`;
+      } else band.hidden = true;
+    };
+    dvEl.addEventListener("pointermove", onMove);
+    dvEl.addEventListener("pointerleave", hide);
+    return () => {
+      dvEl.removeEventListener("pointermove", onMove);
+      dvEl.removeEventListener("pointerleave", hide);
+    };
+  }, [dvEl]);
   const onRulerPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -433,6 +484,41 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [columnsView, zoomHours]);
+  // the same readout for the week's columns: the time at the pointer on the hours at the side, and the stretch of the block it is on
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !columnsView) return;
+    const hide = () => {
+      el.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xband").forEach((n) => { n.hidden = true; });
+    };
+    const onMove = (e: PointerEvent) => {
+      const g = el.querySelector<HTMLElement>(".ss-gutter");
+      const cur = g?.querySelector<HTMLElement>(".ss-xcur");
+      const band = g?.querySelector<HTMLElement>(".ss-xband");
+      const body = el.querySelector<HTMLElement>(".ss-body");
+      if (!g || !cur || !band || !body) return;
+      const h = hourRef.current;
+      const m = Math.round(FIRST_H * 60 + ((e.clientY - body.getBoundingClientRect().top) * 60) / h);
+      if (m < FIRST_H * 60 || m > LAST_H * 60) return hide();
+      cur.hidden = false;
+      cur.style.top = `${((m - FIRST_H * 60) * h) / 60}px`;
+      cur.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, m));
+      const blk = (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
+        const s0 = Math.max(FIRST_H * 60, Number(blk.dataset.start));
+        const e0 = Math.min(LAST_H * 60, Number(blk.dataset.end));
+        band.hidden = false;
+        band.style.top = `${((s0 - FIRST_H * 60) * h) / 60}px`;
+        band.style.height = `${Math.max(2, ((e0 - s0) * h) / 60)}px`;
+      } else band.hidden = true;
+    };
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerleave", hide);
+    return () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", hide);
+    };
+  }, [columnsView, FIRST_H, LAST_H]);
   const onGutterPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -1377,17 +1463,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const lines: string[] = [];
     const range = !sc.paused && !sc.shadowed && (orient === "h" || tall) ? ` – ${formatMinutes(Math.min(sc.end, DAY_MINUTES - 1))}` : "";
     if (display.times || plain) lines.push(`${formatMinutes(sc.start)}${range}`);
-    if (display.length && !plain && li?.dur) lines.push(formatLength(li.dur));
+    if (display.length && !plain) lines.push(spanText(Math.min(sc.end, DAY_MINUTES) - sc.start));
     return (
       <div
         key={`${ghost ? "ghost-" : ""}${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
         className={`${cls}${swapWith && swapWith.bid === baseId(sc.schedule.id) && swapWith.day === sc.day ? " is-swap-target" : ""}${swapWith && drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-swapping" : ""}`}
         data-bid={baseId(sc.schedule.id)}
         data-day={sc.day}
+        data-start={sc.start}
+        data-end={Math.min(sc.end, DAY_MINUTES)}
         aria-hidden={ghost || undefined}
         data-c={colourOf(sc.schedule)}
         style={blockStyle}
-        aria-label={`${nameOf(sc.schedule)} ${formatMinutes(sc.start)}`}
+        aria-label={`${nameOf(sc.schedule)} ${formatMinutes(sc.start)} – ${formatMinutes(Math.min(sc.end, DAY_MINUTES - 1))} · ${spanText(Math.min(sc.end, DAY_MINUTES) - sc.start)}`}
         onPointerDown={(e) => onBlockPointerDown(e, sc, orient)}
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => {
@@ -1576,6 +1664,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                   {hourLabels.map((m, i) => (
                     <span key={m} className="ss-hour" style={{ top: ((m - FIRST_H * 60) * HOUR_H) / 60 }} data-first={i === 0 ? "1" : undefined}>{formatMinutes(m)}</span>
                   ))}
+                  <div className="ss-xband ss-xband--v" hidden aria-hidden />
+                  <div className="ss-xcur ss-xcur--v" hidden aria-hidden />
                 </div>
                 {WEEK_DAYS.map((d) => (
                   <div
@@ -2679,6 +2769,9 @@ function HoursRuler({
     >
       {mins.map((m) => <RulerTick key={`t${m}`} m={m} a={a} span={span} live={live} />)}
       {ghosts.filter((m) => !shown.has(m)).map((m) => <RulerTick key={`g${m}`} m={m} a={a} span={span} live={live} leaving />)}
+      {/* the time under the pointer, and the stretch of the block the pointer is on — written straight into the DOM by the studio (no re-render per mouse move) */}
+      <div className="ss-xband" hidden aria-hidden><span /></div>
+      <div className="ss-xcur" hidden aria-hidden />
     </div>
   );
 }
