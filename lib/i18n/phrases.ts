@@ -432,7 +432,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Zoom out": "הרחקה",
   "Back to the full view": "חזרה לתצוגה המלאה",
   "Zoom: Ctrl + scroll, or scroll on the hours": "זום: Ctrl + גלגלת, או גלגלת על השעות",
-  "Zoom: drag, Ctrl + scroll, or scroll on the hours": "זום: גרור, Ctrl + גלגלת, או גלגלת על השעות",
+  "Zoom: drag along the hours, or Ctrl + scroll": "זום: גרור לאורך השעות, או Ctrl + גלגלת",
   "{n} min": "{n} דק׳",
   "{n} h": "{n} שע׳",
   "Music plays while you are open and goes quiet at closing time.": "המוזיקה מתנגנת בזמן שאתם פתוחים ונעצרת בשעת הסגירה.",

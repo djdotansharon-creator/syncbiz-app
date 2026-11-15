@@ -56,8 +56,6 @@ import {
   pastedScheduleBody,
   panWindow,
   scaleBar,
-  spanToSlider,
-  sliderToSpan,
   snapMinutes,
   startMinutes,
   swapStarts,
@@ -84,6 +82,7 @@ const BLOCK_COLORS_KEY = "syncbiz-sched-block-colors-v1";
 const HOURS_KEY = "syncbiz-sched-hours-v1"; // the business's opening hours — per browser (the closing quiet blocks themselves are saved with the schedule)
 const DISPLAY_KEY = "syncbiz-sched-display-v1"; // how the blocks look (colour, picture / text, position, hours, length) — per browser
 const JINGLES_KEY = "syncbiz-schedule-jingles"; // "off" hides the jingle markers on this browser
+const RULER_ZOOM_PX = 170; // dragging this far along the hours changes the zoom by a factor of e (about 2.7)
 const HISTORY_GROUP_MS = 900; // changes this close together are ONE undo step
 const HISTORY_MAX = 40;
 const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
@@ -335,14 +334,24 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     dvEl.addEventListener("wheel", onWheel, { passive: false });
     return () => dvEl.removeEventListener("wheel", onWheel);
   }, [dvEl, applyZoom]);
+  // Press on the hours and drag sideways, like the time ruler of a music app (owner 2026-11-15): right = closer (the bar gets longer), left = further away, around the
+  // spot that was pressed. Shift + drag slides the hours instead (when they are zoomed in).
   const onRulerPointerDown = (e: React.PointerEvent<HTMLElement>) => {
-    if (e.button !== 0 || !zoomWin) return;
-    const start = zoomWin;
+    if (e.button !== 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width < 10) return;
+    const start = { a: zoomSrc.current.a, b: zoomSrc.current.b };
+    const panning = e.shiftKey && zoomSrc.current.zoomed;
     const sx = e.clientX;
     const rtl = isRtl();
-    const pxPerMin = e.currentTarget.getBoundingClientRect().width / (start.b - start.a);
-    const releaseCursor = holdCursor("grabbing");
-    const move = (ev: PointerEvent) => applyZoom(() => panWindow(start, ((rtl ? 1 : -1) * (ev.clientX - sx)) / pxPerMin), "drag");
+    let ratio = (sx - rect.left) / rect.width;
+    if (rtl) ratio = 1 - ratio;
+    const pxPerMin = rect.width / (start.b - start.a);
+    const releaseCursor = holdCursor(panning ? "grabbing" : "ew-resize");
+    const move = (ev: PointerEvent) => {
+      const dx = (rtl ? -1 : 1) * (ev.clientX - sx);
+      applyZoom(() => (panning ? panWindow(start, -dx / pxPerMin) : zoomWindow(start, Math.exp(-dx / RULER_ZOOM_PX), ratio)), "drag");
+    };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -1320,8 +1329,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             {horizontalView ? (
               <ZoomControl
                 pxPerMin={pxPerMinNow}
-                span={SPAN}
-                onSpan={(span) => applyZoom((w) => zoomWindow(w, span / (w.b - w.a), 0.5), "drag")}
                 zoomed={!!zoomWin}
                 onIn={() => applyZoom((w) => zoomWindow(w, 1 / 1.6, 0.5))}
                 onOut={() => applyZoom((w) => zoomWindow(w, 1.6, 0.5))}
@@ -2504,16 +2511,15 @@ function HoursRuler({
 }
 
 /** − / + and a map-style scale bar ("30 min"): the bar is the length of time it names, at this zoom; the number rolls over when it changes; click it to go back to the full view */
-function ZoomControl({ pxPerMin, span, onSpan, zoomed, onIn, onOut, onReset }: { pxPerMin: number; span: number; onSpan: (span: number) => void; zoomed: boolean; onIn: () => void; onOut: () => void; onReset: () => void }) {
+function ZoomControl({ pxPerMin, zoomed, onIn, onOut, onReset }: { pxPerMin: number; zoomed: boolean; onIn: () => void; onOut: () => void; onReset: () => void }) {
   const tr = useTr();
   const bar = scaleBar(pxPerMin);
   const label = bar.minutes % 60 === 0 ? tr("{n} h", { n: bar.minutes / 60 }) : tr("{n} min", { n: bar.minutes });
   return (
-    <div className="ss-zoom" role="group" aria-label={tr("Zoom")} title={tr("Zoom: drag, Ctrl + scroll, or scroll on the hours")}>
+    <div className="ss-zoom" role="group" aria-label={tr("Zoom")} title={tr("Zoom: drag along the hours, or Ctrl + scroll")}>
       <button type="button" className="ss-zoom-btn" onClick={onOut} aria-label={tr("Zoom out")}>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
       </button>
-      <input type="range" className="ss-zoom-range" dir="ltr" min={0} max={1000} step={1} value={spanToSlider(span)} onChange={(e) => onSpan(sliderToSpan(Number(e.target.value)))} aria-label={tr("Zoom")} title={tr("Zoom: drag, Ctrl + scroll, or scroll on the hours")} />
       <button type="button" className={`ss-zoom-scale${zoomed ? " is-zoomed" : ""}`} onClick={onReset} disabled={!zoomed} title={zoomed ? tr("Back to the full view") : undefined} aria-label={zoomed ? tr("Back to the full view") : label}>
         <span className="ss-zoom-txt" key={label}>{label}</span>
         <span className="ss-zoom-bar" style={{ width: Math.max(8, bar.px) }} aria-hidden />

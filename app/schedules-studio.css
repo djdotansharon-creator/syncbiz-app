@@ -375,7 +375,8 @@ html[data-sb-display="white"] .ss-menu-item.is-danger { color: #d70015; }
 /* a strip is 11px but never more than a quarter of the block, so a short block keeps a middle to grab and move it by */
 .ss-block--v > .ss-b-resize { inset-inline: 0; bottom: 0; height: min(11px, 26%); cursor: ns-resize; }
 .ss-block--h > .ss-b-resize { inset-block: 0; inset-inline-end: 0; width: min(11px, 26%); cursor: ew-resize; }
-.ss-b-resize::after { content: ""; position: absolute; border-radius: 2px; background: #fff; opacity: 0; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25); transition: opacity 140ms ease; }
+.ss-b-resize::after { content: ""; position: absolute; border-radius: 2px; background: #fff; opacity: 0; pointer-events: none; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25); transition: opacity 140ms ease; }
+/* the little bar is only a hint: it must never catch the pointer — on a narrow block (the end of the day) it reached over the middle and a press there trimmed the block instead of moving it (owner 2026-11-15) */
 .ss-block--v > .ss-b-resize::after { left: 50%; bottom: 3px; width: 26px; height: 3px; transform: translateX(-50%); }
 .ss-block--h > .ss-b-resize::after { top: 50%; inset-inline-end: 3px; width: 3px; height: 26px; transform: translateY(-50%); }
 /* the strips show ONLY while the pointer is on the block (or it is being dragged) — never at rest, whether the block has an end or its card is open */
@@ -676,14 +677,6 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-zoom-btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-dim); cursor: pointer; transition: background-color 140ms ease, color 140ms ease, transform 140ms ease; }
 .ss-zoom-btn:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
 .ss-zoom-btn:active { transform: scale(0.9); }
-/* the zoom slider: left = the whole day, right = closer (owner 2026-11-15: "stretch or squeeze the time axis") */
-.ss-zoom-range { -webkit-appearance: none; appearance: none; width: 104px; height: 20px; margin: 0 4px; padding: 0; background: transparent; cursor: pointer; }
-.ss-zoom-range::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: var(--ss-surface-2); }
-.ss-zoom-range::-moz-range-track { height: 4px; border-radius: 999px; background: var(--ss-surface-2); }
-.ss-zoom-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: var(--ss-fg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); transition: transform 140ms ease; }
-.ss-zoom-range::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--ss-fg); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
-.ss-zoom-range:hover::-webkit-slider-thumb, .ss-zoom-range:active::-webkit-slider-thumb { transform: scale(1.18); }
-.ss-zoom-range:focus-visible { outline: 2px solid var(--ss-fg); outline-offset: 3px; border-radius: 8px; }
 .ss-zoom-scale { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 62px; padding: 3px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font: inherit; font-size: 10.5px; line-height: 1; cursor: default; transition: background-color 140ms ease, color 140ms ease; }
 .ss-zoom-scale:disabled { opacity: 1; }
 .ss-zoom-scale.is-zoomed { color: var(--ss-fg); cursor: pointer; }
@@ -694,7 +687,7 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 @keyframes ss-roll-in { from { opacity: 0; translate: 0 8px; filter: blur(4px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
 @keyframes ss-tick-in { from { opacity: 0; translate: 0 8px; filter: blur(5px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
 @keyframes ss-tick-out { from { opacity: 1; translate: 0 0; filter: blur(0); } to { opacity: 0; translate: 0 -8px; filter: blur(5px); } }
-.ss-haxis.is-zoomed { cursor: grab; }
+.ss-haxis { cursor: ew-resize; touch-action: none; } /* press and drag along the hours to zoom (owner 2026-11-15) */
 .ss-htick { transition: opacity 180ms ease, filter 180ms ease; }
 .ss-htick.is-fresh { animation: ss-tick-in 300ms var(--ss-ease) backwards; }
 .ss-htick.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
