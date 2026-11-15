@@ -671,11 +671,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     return items.map((s) => (s.id === drag.id ? { ...s, ...edit } : s));
   }, [items, drag]);
   const shownItems = useMemo(() => (branchFilter === "all" ? viewItems : viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === branchFilter)), [viewItems, branchFilter]);
-  const weekScenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(shownItems, d, weekDates)), [shownItems, weekDates]);
+  // how long a block's own music lasts (null = not known, or live): a block with no end of its own is drawn only that long (owner 2026-11-15)
+  const musicMinutes = useCallback((s: Schedule): number | null => {
+    const m = fitMinutes(libFor(s)?.dur);
+    return Number.isFinite(m) ? m : null;
+  }, [libFor]);
+  const weekScenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(shownItems, d, weekDates, musicMinutes)), [shownItems, musicMinutes, weekDates]);
   const dayRows = useMemo(() => {
     const ids = branchFilter !== "all" ? [branchFilter] : branchIds.length > 0 ? branchIds : [branches[0]?.id ?? "default"];
-    return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates) }));
-  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates]);
+    return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes) }));
+  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes]);
   const nowMin = clock.getHours() * 60 + clock.getMinutes();
   const hoursBranches = useMemo(() => {
     const ids = Array.from(new Set([...branches.map((b) => b.id), ...branchIds]));
@@ -897,13 +902,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const pasteOn = useCallback(
     async (ymd: string) => {
       if (!clip) return;
-      const created = await createFromBody(pastedScheduleBody(clip, ymd));
+      const body = pastedScheduleBody(clip, ymd);
+      // a pasted song is as long as its music, never "until the end of the day" (owner 2026-11-15)
+      const li = libFor(clip);
+      const fit = fitMinutes(li?.dur);
+      if (!("endTimeLocal" in body) && Number.isFinite(fit) && startMinutes(clip) + fit <= END_MAX) body.endTimeLocal = minutesToTimeLocal(startMinutes(clip) + fit);
+      const created = await createFromBody(body);
       if (created) {
+        if (li) void learnLength(li, created);
         if (blockColors[clip.id] !== undefined) setBlockColor(created.id, blockColors[clip.id]!);
         showToast(`${tr("Pasted")} · ${dateLabel(ymd)} ${formatMinutes(startMinutes(created))}`, true);
       }
     },
-    [clip, createFromBody, removeNow, showToast, tr, blockColors, setBlockColor], // eslint-disable-line react-hooks/exhaustive-deps
+    [clip, createFromBody, removeNow, showToast, tr, blockColors, setBlockColor, libFor], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // ── editing ONE day's block: its start (a move) and / or its END (owner 2026-11-11: "when I stand on a specific song, it moves by itself") ──
   // A block that repeats on several days is one schedule in the data. Editing one day's block detaches that day: the others keep their time, the edited

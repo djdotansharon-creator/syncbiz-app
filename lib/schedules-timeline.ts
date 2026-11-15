@@ -96,7 +96,11 @@ export function appliesOnDay(s: Schedule, day: number, weekDates: string[]): boo
 }
 
 /** the scenes of one day, in time order */
-export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[]): Scene[] {
+/**
+ * `musicMinutes` (owner 2026-11-15: "a song cannot be stretched beyond what it is"): how long a block's own music lasts, in whole minutes (null = not known / live). A block with no
+ * end of its own is then drawn only as long as its music — what follows until the next block is not the block's: the player fills it with suggested songs (lib/schedule-driven.ts).
+ */
+export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[], musicMinutes?: (s: Schedule) => number | null): Scene[] {
   const mine = schedules.filter((s) => appliesOnDay(s, day, weekDates));
   const active = mine
     .filter((s) => s.enabled)
@@ -117,7 +121,11 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
     // the engine's own rule (lib/schedule-actions.ts): an explicit end stops the music at that time unless the next block comes first
     const quiet = isSilenceBlock(s);
     const own = explicitEndMinutes(s); // a quiet block can have its own end too (owner 2026-11-15: "I want to control the quiet time with the two bars")
-    const end = own !== null && own < nextStart ? own : nextStart;
+    let end = own !== null && own < nextStart ? own : nextStart;
+    if (own === null && !quiet && musicMinutes) {
+      const len = musicMinutes(s);
+      if (len !== null && len > 0 && start + len < end) end = start + len;
+    }
     const shadowed = seen.has(start);
     seen.add(start);
     scenes.push({ schedule: s, day, start, end, endSet: own !== null && own <= nextStart, quiet, paused: false, shadowed });
