@@ -24,7 +24,6 @@ import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handler
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
-import { DeleteConfirmModal } from "@/components/delete-confirm-modal";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
@@ -71,8 +70,7 @@ import {
   type JingleLike,
   type Scene,
   type StudioDisplay,
-  type TimeWindow,
-} from "@/lib/schedules-timeline";
+  type TimeWindow, changedFields, scheduleBody } from "@/lib/schedules-timeline";
 import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Schedule, ScheduleTargetType, Source } from "@/lib/types";
 
@@ -84,6 +82,8 @@ const BLOCK_COLORS_KEY = "syncbiz-sched-block-colors-v1";
 const HOURS_KEY = "syncbiz-sched-hours-v1"; // the business's opening hours — per browser (the closing quiet blocks themselves are saved with the schedule)
 const DISPLAY_KEY = "syncbiz-sched-display-v1"; // how the blocks look (colour, picture / text, position, hours, length) — per browser
 const JINGLES_KEY = "syncbiz-schedule-jingles"; // "off" hides the jingle markers on this browser
+const HISTORY_GROUP_MS = 900; // changes this close together are ONE undo step
+const HISTORY_MAX = 40;
 const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
 const CLOSING_NAME = "Closing"; // the quiet block the Day-hours dialog keeps for each closing time
 
@@ -360,9 +360,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [jmenu, setJmenu] = useState<{ item: JingleLike; day: number; min: number; rect: Rect } | null>(null);
   const [clipDay, setClipDay] = useState<number | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<number | null>(null);
 
@@ -402,8 +399,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }, []);
   useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current); }, []);
 
-  const showToast = useCallback((msg: string, undo?: () => void) => {
-    setToast({ msg, undo });
+  const undoRef = useRef<() => void>(() => {});
+  /** `undo` = the toast offers Undo, which is the same step as Cmd/Ctrl+Z (see "UNDO" below) */
+  const showToast = useCallback((msg: string, undo?: boolean) => {
+    setToast({ msg, undo: undo ? () => undoRef.current() : undefined });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), undo ? 7000 : 4200);
   }, []);
@@ -606,11 +605,38 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
+  // ── UNDO (owner 2026-11-15: "Ctrl/Cmd+Z takes back what I did on the schedule") ──
+  // ONE history for every change made on this screen: before a change, the blocks as they were are remembered; changes that follow within a moment (the two writes of one
+  // "move this day only", the many of "Day hours") are one step. Undo puts the blocks back: what was added is removed, what changed is changed back, what was deleted is made
+  // again. The toast's Undo button is the same step. Only the schedule's own changes are in it (not colours, not the screen's settings).
+  const itemsRef = useRef(items);
+  const colorsRef = useRef(blockColors);
+  const history = useRef<Array<{ items: Schedule[]; colors: Record<string, number> }>>([]);
+  const lastChangeAt = useRef(0);
+  const undoing = useRef(false);
+  useEffect(() => {
+    itemsRef.current = items;
+    colorsRef.current = blockColors;
+  });
+  const remember = useCallback(() => {
+    if (undoing.current) return;
+    const now = Date.now();
+    if (now - lastChangeAt.current > HISTORY_GROUP_MS) {
+      history.current.push({ items: itemsRef.current.filter((x) => !x.id.startsWith("tmp-")), colors: { ...colorsRef.current } });
+      if (history.current.length > HISTORY_MAX) history.current.shift();
+    }
+    lastChangeAt.current = now;
+  }, []);
+  const touch = useCallback(() => {
+    lastChangeAt.current = Date.now();
+  }, []);
+
   // ── saving (optimistic, rolled back on a failure) ──
   const update = useCallback(
     async (id: string, patch: Partial<Schedule>) => {
       const before = items.find((s) => s.id === id);
       if (!before) return;
+      remember();
       setItems((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
       try {
         const saved = await api<Schedule>("PATCH", `/api/schedules/${encodeURIComponent(id)}`, patch);
@@ -619,25 +645,29 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         setItems((prev) => prev.map((s) => (s.id === id ? before : s)));
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
       }
+      touch();
     },
-    [items, showToast, tr],
+    [items, showToast, tr, remember, touch],
   );
 
   const createFromBody = useCallback(
     async (body: Record<string, unknown>): Promise<Schedule | null> => {
+      remember();
       const tmp = { id: `tmp-${Date.now()}`, accountId: "", ...body } as unknown as Schedule;
       setItems((prev) => [...prev, tmp]);
       try {
         const created = await api<Schedule>("POST", "/api/schedules", body);
         setItems((prev) => prev.map((s) => (s.id === tmp.id ? created : s)));
+        touch();
         return created;
       } catch (e) {
         setItems((prev) => prev.filter((s) => s.id !== tmp.id));
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+        touch();
         return null;
       }
     },
-    [showToast, tr],
+    [showToast, tr, remember, touch],
   );
 
   const create = useCallback(
@@ -662,46 +692,69 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   const removeNow = useCallback(
     async (id: string): Promise<boolean> => {
+      remember();
       try {
         await api("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
       } catch (e) {
         if (!(e instanceof Error) || !/not found|404/i.test(e.message)) {
           showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+          touch();
           return false;
         }
       }
       clearLocalAutoPrefs(id);
       setBlockColor(id, null);
       setItems((prev) => prev.filter((s) => s.id !== id));
+      touch();
       return true;
     },
-    [showToast, tr, setBlockColor],
+    [showToast, tr, setBlockColor, remember, touch],
   );
 
-  async function confirmDelete() {
-    const id = deleteId;
-    if (!id) return;
-    setDeleteError(null);
-    setDeleting(true);
-    try {
-      try {
-        await api("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
-      } catch (e) {
-        if (!(e instanceof Error) || !/not found|404/i.test(e.message)) throw e;
+  // Deleting a block asks nothing (owner 2026-11-15: no second "are you sure"): it goes at once, and Undo — the toast button or Cmd/Ctrl+Z — brings it back.
+  const deleteBlock = useCallback(
+    async (s: Schedule) => {
+      const name = isSilenceBlock(s) ? (s.name === CLOSING_NAME ? tr("Closing") : tr("Quiet")) : libFor(s)?.name ?? s.name ?? tr("Schedule");
+      if (await removeNow(s.id)) {
+        setEditor(null);
+        showToast(tr("Deleted {name}", { name }), true);
       }
-      clearLocalAutoPrefs(id);
-      setBlockColor(id, null);
-      setItems((prev) => prev.filter((s) => s.id !== id));
-      setEditor(null);
-      setDeleteId(null);
-      router.refresh();
-    } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : "Delete failed");
-      throw e;
-    } finally {
-      setDeleting(false);
+    },
+    [removeNow, showToast, tr, libFor],
+  );
+
+  const undoLast = useCallback(async () => {
+    const snap = history.current.pop();
+    if (!snap) {
+      showToast(tr("Nothing to undo"));
+      return;
     }
-  }
+    undoing.current = true;
+    try {
+      const now = itemsRef.current.filter((x) => !x.id.startsWith("tmp-"));
+      const was = new Map(snap.items.map((x) => [x.id, x]));
+      const is = new Map(now.map((x) => [x.id, x]));
+      for (const x of now) if (!was.has(x.id)) await removeNow(x.id); // made since → removed
+      for (const [id, earlier] of was) {
+        const current = is.get(id);
+        if (!current) continue;
+        const patch = changedFields(current, earlier);
+        if (Object.keys(patch).length > 0) await update(id, patch); // changed since → changed back
+      }
+      for (const [id, earlier] of was) {
+        if (is.has(id)) continue; // deleted since → made again
+        const created = await createFromBody(scheduleBody(earlier));
+        if (created && snap.colors[id] !== undefined) setBlockColor(created.id, snap.colors[id]!);
+      }
+      showToast(tr("Undone"));
+    } finally {
+      undoing.current = false;
+      lastChangeAt.current = 0;
+    }
+  }, [removeNow, update, createFromBody, setBlockColor, showToast, tr]);
+  useEffect(() => {
+    undoRef.current = () => void undoLast();
+  });
 
   async function playNow(s: Schedule) {
     if (isSilenceBlock(s)) {
@@ -735,7 +788,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const created = await createFromBody(pastedScheduleBody(clip, ymd));
       if (created) {
         if (blockColors[clip.id] !== undefined) setBlockColor(created.id, blockColors[clip.id]!);
-        showToast(`${tr("Pasted")} · ${dateLabel(ymd)} ${formatMinutes(startMinutes(created))}`, () => void removeNow(created.id));
+        showToast(`${tr("Pasted")} · ${dateLabel(ymd)} ${formatMinutes(startMinutes(created))}`, true);
       }
     },
     [clip, createFromBody, removeNow, showToast, tr, blockColors, setBlockColor], // eslint-disable-line react-hooks/exhaustive-deps
@@ -753,13 +806,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       let newEnd: number | null = edit.end !== undefined ? edit.end : oldEnd !== null ? Math.min(END_MAX, oldEnd + (newStart - oldStart)) : null;
       if (newEnd !== null && newEnd <= newStart) newEnd = null;
       if (newStart === oldStart && newEnd === oldEnd) return src.id;
+      remember();
       const patch: Partial<Schedule> = {};
       if (newStart !== oldStart) patch.startTimeLocal = minutesToTimeLocal(newStart);
       if (newEnd !== oldEnd) patch.endTimeLocal = newEnd === null ? "23:59:00" : minutesToTimeLocal(newEnd);
       const endNote = newEnd !== oldEnd ? (newEnd === null ? tr("Runs until the next block") : tr("Ends {time}", { time: formatMinutes(newEnd) })) : "";
       if (!isMultiDayWeekly(src)) {
         await update(src.id, patch);
-        if (endNote && !opts?.quiet) showToast(endNote, () => void update(src.id, { endTimeLocal: src.endTimeLocal || "23:59:00" }));
+        if (endNote && !opts?.quiet) showToast(endNote, true);
         return src.id;
       }
       const rest = src.daysOfWeek.filter((d) => d !== day);
@@ -789,27 +843,27 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           throw e;
         }
         setItems((prev) => prev.map((x) => (x.id === tmp.id ? created : x)));
+        touch();
         if (blockColors[src.id] !== undefined) setBlockColor(created.id, blockColors[src.id]!);
         if (!opts?.quiet) {
-          showToast(`${endNote || `${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)}`} — ${tr("this day only")}`, () => {
-            void removeNow(created.id).then(() => update(src.id, { daysOfWeek: src.daysOfWeek }));
-          });
+          showToast(`${endNote || `${tr("Moved")} · ${dayName(day)} ${formatMinutes(newStart)}`} — ${tr("this day only")}`, true);
         }
         return created.id;
       } catch (e) {
         setItems(before);
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+        touch();
         return null;
       }
     },
-    [items, update, removeNow, blockColors, setBlockColor, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
+    [items, update, removeNow, blockColors, setBlockColor, showToast, tr, remember, touch], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const removeFromDay = useCallback(
     (src: Schedule, day: number) => {
       const rest = src.daysOfWeek.filter((d) => d !== day);
       if (rest.length === 0) return;
       void update(src.id, { daysOfWeek: rest });
-      showToast(tr("Removed from {day}", { day: dayName(day, "long") }), () => void update(src.id, { daysOfWeek: src.daysOfWeek }));
+      showToast(tr("Removed from {day}", { day: dayName(day, "long") }), true);
     },
     [update, showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -817,10 +871,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // ── SWAP (owner 2026-11-12: "swap songs like icons on a phone — without moving the others"): drop a block ON another block of the same row and the two trade places ──
   // The pair covers the same stretch of day as before (lib/schedules-timeline.ts swapStarts), so no other block moves. Each edit is a normal per-day edit (a block shared
   // by several days is detached for this day only); one toast with one Undo covers both.
-  const itemsRef = useRef(items);
   const editRef = useRef(editOccurrence); // always the LATEST edit (an Undo seconds later must see the blocks as they are then, not as they were at the swap)
   useEffect(() => {
-    itemsRef.current = items;
     editRef.current = editOccurrence;
   });
   const [swapWith, setSwapWith] = useState<{ bid: string; day: number } | null>(null);
@@ -832,13 +884,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const idA = await editRef.current(cur(a), a.day, { start: to.a }, { quiet: true });
       const idB = idA ? await editRef.current(cur(b), b.day, { start: to.b }, { quiet: true }) : null;
       if (!idA || !idB) return; // a failed edit already said so (and rolled itself back)
-      showToast(tr("Swapped {a} and {b}", { a: nameOf(a.schedule), b: nameOf(b.schedule) }), () => {
-        const now = (id: string) => itemsRef.current.find((x) => x.id === id);
-        const ra = now(idA);
-        const rb = now(idB);
-        if (ra) void editRef.current(ra, a.day, { start: a.start }, { quiet: true });
-        if (rb) void editRef.current(rb, b.day, { start: b.start }, { quiet: true });
-      });
+      showToast(tr("Swapped {a} and {b}", { a: nameOf(a.schedule), b: nameOf(b.schedule) }), true);
     },
     [showToast, tr], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -876,9 +922,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   const pasteHint = tr("Point at a day (or open the Day view), then paste.");
   const editorDay = editor?.day;
-  const latest = useRef({ editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint });
+  // Delete / Backspace on the block that is open, else the one under the pointer (or the focused one): a block of several days loses only THAT day, a single block is deleted — both undoable
+  const removeAt = useCallback(
+    (id: string, day: number | undefined) => {
+      const sc = itemsRef.current.find((x) => x.id === id);
+      if (!sc) return;
+      if (day !== undefined && isMultiDayWeekly(sc)) removeFromDay(sc, day);
+      else void deleteBlock(sc);
+    },
+    [removeFromDay, deleteBlock],
+  );
+  const latest = useRef({ editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint, removeAt, undo: undoLast });
   useEffect(() => {
-    latest.current = { editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint };
+    latest.current = { editing, editorDay, clip, hoverDate, view, focusKey, pasteOn, copyBlock, say: showToast, hint: pasteHint, removeAt, undo: undoLast };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -896,6 +952,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           return;
         }
         void L.pasteOn(ymd);
+      } else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        void L.undo();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && !mod && !e.shiftKey) {
+        let target: { id: string; day: number | undefined } | null = L.editing ? { id: L.editing.id, day: L.editorDay } : null;
+        if (!target && !document.querySelector("[role='dialog'], .ss-menu")) {
+          const el = document.querySelector<HTMLElement>(".ss-block:hover") ?? (document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>(".ss-block") : null);
+          if (el?.dataset.bid) target = { id: el.dataset.bid, day: el.dataset.day !== undefined ? Number(el.dataset.day) : undefined };
+        }
+        if (target) {
+          e.preventDefault();
+          L.removeAt(target.id, target.day);
+        }
       } else if (e.key === "Escape" && L.clip && !document.querySelector(".ss-pop, .ss-menu")) {
         setClip(null);
       }
@@ -1137,6 +1206,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         key={`${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
         className={`${cls}${swapWith && swapWith.bid === baseId(sc.schedule.id) && swapWith.day === sc.day ? " is-swap-target" : ""}${swapWith && drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-swapping" : ""}`}
         data-bid={baseId(sc.schedule.id)}
+        data-day={sc.day}
         data-c={colourOf(sc.schedule)}
         style={blockStyle}
         aria-label={`${nameOf(sc.schedule)} ${formatMinutes(sc.start)}`}
@@ -1437,7 +1507,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           onColour={(i) => { setBlockColor(menu.id, i); setMenu(null); }}
           onMoreColours={() => { setEditor({ kind: "edit", id: menu.id, rect: menu.rect, day: menu.day }); setMenu(null); }}
           onToggle={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void update(sc.id, { enabled: !sc.enabled }); }}
-          onDelete={() => { setDeleteError(null); setDeleteId(menu.id); setMenu(null); }}
+          onDelete={() => { const sc = items.find((x) => x.id === menu.id); setMenu(null); if (sc) void deleteBlock(sc); }}
         />
       ) : null}
 
@@ -1505,7 +1575,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             }
           }}
           onPatch={(patch) => editing && void update(editing.id, patch)}
-          onDelete={() => { if (!editing) return; setDeleteError(null); setDeleteId(editing.id); setEditor(null); }}
+          onDelete={() => { if (editing) void deleteBlock(editing); }}
           onPlay={() => editing && void playNow(editing)}
           onCopy={() => { if (editing) { copyBlock(editing, editor?.day); setEditor(null); } }}
         />
@@ -1526,14 +1596,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         />
       ) : null}
 
-      <DeleteConfirmModal
-        isOpen={!!deleteId}
-        onClose={() => { setDeleteId(null); setDeleteError(null); }}
-        onConfirm={confirmDelete}
-        loading={deleting}
-        message={T.deleteScheduleConfirm}
-        errorHint={deleteError}
-      />
       <div className={`ss-toast${toast ? " is-on" : ""}`} role="status" aria-live="polite">
         <span>{toast?.msg}</span>
         {toast?.undo ? <button type="button" onClick={() => { toast.undo?.(); setToast(null); }}>{tr("Undo")}</button> : null}

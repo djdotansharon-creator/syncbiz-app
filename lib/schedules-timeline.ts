@@ -520,3 +520,39 @@ export function swapStarts(a: { start: number; end: number }, b: { start: number
   const secondNew = first.start;
   return aFirst ? { a: firstNew, b: secondNew } : { a: secondNew, b: firstNew };
 }
+
+// ── undo (owner 2026-11-15: "Ctrl/Cmd+Z undoes what I did on the schedule") ──
+/** the fields of a schedule that a person changes on the studio and that the server stores */
+const UNDO_FIELDS = ["name", "branchId", "targetType", "targetId", "sourceId", "deviceId", "recurrence", "oneOffDateLocal", "daysOfWeek", "startTimeLocal", "endTimeLocal", "enabled", "priority"] as const;
+
+/** what must be PATCHed on `current` to make it `earlier` again — only the fields that differ ({} = identical) */
+export function changedFields(current: Schedule, earlier: Schedule): Partial<Schedule> {
+  const out: Record<string, unknown> = {};
+  for (const k of UNDO_FIELDS) {
+    const a = (current as Record<string, unknown>)[k];
+    const b = (earlier as Record<string, unknown>)[k];
+    if (JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)) out[k] = b ?? null;
+  }
+  return out as Partial<Schedule>;
+}
+
+/** the POST body that makes a deleted schedule again (same music, branch, days, hours, state) */
+export function scheduleBody(s: Schedule): Record<string, unknown> {
+  const tid = (s.targetId || s.sourceId || "").trim();
+  const oneOff = s.recurrence === "one_off";
+  return {
+    name: s.name,
+    branchId: s.branchId,
+    targetType: s.targetType,
+    targetId: tid,
+    sourceId: s.targetType === "SOURCE" ? tid : undefined,
+    deviceId: s.deviceId || undefined,
+    recurrence: oneOff ? "one_off" : "weekly",
+    ...(oneOff ? { oneOffDateLocal: s.oneOffDateLocal } : {}),
+    daysOfWeek: oneOff ? [] : s.daysOfWeek,
+    startTimeLocal: s.startTimeLocal,
+    ...(s.endTimeLocal && s.endTimeLocal.trim() ? { endTimeLocal: s.endTimeLocal } : {}),
+    enabled: s.enabled,
+    priority: typeof s.priority === "number" ? s.priority : 1,
+  };
+}
