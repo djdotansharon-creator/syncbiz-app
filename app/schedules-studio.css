@@ -141,7 +141,8 @@ html[data-sb-display="white"] .ss-col.is-today { background-color: rgba(217, 119
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08), 0 6px 16px color-mix(in srgb, var(--c2) 38%, transparent);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
   display: flex; gap: 10px;
-  transition: top 220ms var(--ss-ease), height 220ms var(--ss-ease), inset-inline-start 220ms var(--ss-ease), width 220ms var(--ss-ease), box-shadow 160ms ease, transform 160ms var(--ss-ease), filter 160ms ease, --c1 520ms ease, --c2 520ms ease; }
+  /* NO gliding of top / height / start / width (owner 2026-11-15): zooming, moving and trimming answer at once — everything stretches together, nothing slides on its own */
+  transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), filter 160ms ease, --c1 520ms ease, --c2 520ms ease; }
 .ss-block[data-c="8"], .ss-block[data-c="9"] { text-shadow: none; }
 .ss-block--v { inset-inline: 4px; flex-direction: column; justify-content: flex-start; gap: 1px; padding: 8px 10px; margin-top: 1px; }
 .ss-block--h { inset-block: 8px; flex-direction: row; align-items: center; padding: 0 12px; container-type: inline-size; }
@@ -693,8 +694,6 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-htick.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
 .ss-haxis.is-smooth .ss-htick:not(.is-leaving), .ss-haxis.is-drag .ss-htick:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
 .ss-haxis.is-fine .ss-htick-min { display: inline; }
-/* zooming is INSTANT and rigid (owner 2026-11-15: "nothing moves on its own — everything just grows or shrinks together, like a zoom"): no gliding of blocks, markers or labels */
-.ss-dayview .ss-block--h, .ss-dayview .ss-jpin--h, .ss-dayview .ss-hnow, .ss-dayview .ss-htick { transition-property: opacity, filter; }
 @media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving, .ss-zoom-txt { animation: none; } .ss-htick.is-leaving { display: none; } }
 
 
@@ -719,8 +718,21 @@ html[data-sb-display="white"] .ss-hrow.is-drop-day .ss-htrack { background-color
 html[dir="rtl"] .ss-xcur { transform: translate(50%, -50%); }
 .ss-xcur--v { top: 0; inset-inline-start: auto; inset-inline-end: 3px; transform: translateY(-50%); }
 html[dir="rtl"] .ss-xcur--v { transform: translateY(-50%); }
-.ss-xband { position: absolute; z-index: 6; top: 0; bottom: 0; background: rgba(251, 191, 36, 0.26); border-inline: 1.5px solid rgba(251, 191, 36, 0.95); pointer-events: none; }
-.ss-xband > span { position: absolute; top: 100%; inset-inline-start: 0; margin-top: 4px; padding: 1px 8px; border-radius: 6px; background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 11px; font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
-.ss-xband--v { inset-inline: 0; top: 0; bottom: auto; border-inline: 0; border-block: 1.5px solid rgba(251, 191, 36, 0.95); }
-.ss-gutter .ss-xcur[hidden], .ss-gutter .ss-xband[hidden], .ss-haxis .ss-xcur[hidden], .ss-haxis .ss-xband[hidden] { display: none; }
+/* the block's two exact times: an orange pill at each edge on the axis (the start's outside its start, the end's outside its end) */
+.ss-xpill { position: absolute; z-index: 7; top: 50%; padding: 1px 8px; border-radius: 999px; background: var(--ss-now); color: var(--ss-now-ink); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
+.ss-xpill--s { transform: translate(calc(-100% - 3px), -50%); }
+.ss-xpill--e { transform: translate(3px, -50%); }
+html[dir="rtl"] .ss-xpill--s { transform: translate(calc(100% + 3px), -50%); }
+html[dir="rtl"] .ss-xpill--e { transform: translate(-3px, -50%); }
+.ss-xpill--v { top: 0; inset-inline-start: auto; inset-inline-end: 3px; }
+.ss-xpill--v.ss-xpill--s, html[dir="rtl"] .ss-xpill--v.ss-xpill--s { transform: translateY(calc(-100% - 2px)); }
+.ss-xpill--v.ss-xpill--e, html[dir="rtl"] .ss-xpill--v.ss-xpill--e { transform: translateY(2px); }
+.ss-gutter .ss-xcur[hidden], .ss-gutter .ss-xpill[hidden], .ss-haxis .ss-xcur[hidden], .ss-haxis .ss-xpill[hidden] { display: none; }
+
+/* the hours of the week's columns blur in and out while they zoom, like the day's ruler (owner 2026-11-15) */
+.ss-hour { transition: opacity 180ms ease, filter 180ms ease; }
+.ss-hour.is-fresh { animation: ss-tick-in 300ms var(--ss-ease) backwards; }
+.ss-hour.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
+.ss-gutter.is-smooth .ss-hour:not(.is-leaving), .ss-gutter.is-drag .ss-hour:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
+@media (prefers-reduced-motion: reduce) { .ss-hour.is-fresh, .ss-hour.is-leaving { animation: none; } .ss-hour.is-leaving { display: none; } }
 

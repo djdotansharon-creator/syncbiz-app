@@ -73,8 +73,8 @@ import {
 import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Schedule, ScheduleTargetType, Source } from "@/lib/types";
 
-const BASE_HOUR_H = 46; // px per hour in the week's columns (the starting height; the hours can be stretched / squeezed)
-const MIN_HOUR_H = 12;
+const BASE_HOUR_H = 46; // px per hour in the week's columns until the screen is measured; then the hours FIT the height of the screen and stretch from there
+const MIN_FIT_H = 24; // the hours never get squeezed below this to fit the screen (past that the column scrolls)
 const MAX_HOUR_H = 360;
 const PANEL_KEY = "syncbiz-schedule-lib-panel";
 const VIEW_KEY = "syncbiz-schedule-view";
@@ -258,7 +258,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const FIRST_H = range.first;
   const LAST_H = range.last;
   // the height of an hour in the week's columns (stretch / squeeze the hours: scroll or drag on the hours, − / +)
-  const [hourH, setHourH] = useState(BASE_HOUR_H);
+  // null = the hours fit the height of the screen (like the day view: the whole stretch is in view, zoom from there); a number = stretched to that many px per hour
+  const [zoomedH, setZoomedH] = useState<number | null>(null);
+  const [scrollH, setScrollH] = useState(0);
+  const fitH = scrollH > 0 ? Math.max(MIN_FIT_H, scrollH / Math.max(1, LAST_H - FIRST_H)) : BASE_HOUR_H;
+  const hourH = zoomedH !== null ? Math.max(zoomedH, fitH) : fitH;
   // lengths of playlists that had none stored, looked up when one is placed (owner 2026-11-15: a song comes into the day with its own length)
   const [learned, setLearned] = useState<Record<string, number>>({});
   const askedLength = useRef<Set<string>>(new Set());
@@ -276,10 +280,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const m = Math.round(minutes - h * 60);
     return [h > 0 ? tr("{n} h", { n: h }) : "", m > 0 || h === 0 ? tr("{n} min", { n: m }) : ""].filter(Boolean).join(" ");
   };
-  const spanTextRef = useRef(spanText);
-  useEffect(() => {
-    spanTextRef.current = spanText;
-  });
   // the hours named in the margin of the week's columns: every hour at the usual height, fewer when squeezed, quarters / halves when stretched
   const labelStep = hourH >= 300 ? 15 : hourH >= 150 ? 30 : hourH >= 34 ? 60 : hourH >= 20 ? 120 : 240;
   const hourLabels = useMemo(() => {
@@ -368,13 +368,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   useEffect(() => {
     if (!dvEl) return;
     const hide = () => {
-      dvEl.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xband").forEach((n) => { n.hidden = true; });
+      dvEl.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xpill").forEach((n) => { n.hidden = true; });
     };
     const onMove = (e: PointerEvent) => {
       const ax = dvEl.querySelector<HTMLElement>(".ss-haxis");
       const cur = ax?.querySelector<HTMLElement>(".ss-xcur");
-      const band = ax?.querySelector<HTMLElement>(".ss-xband");
-      if (!ax || !cur || !band) return;
+      const ps = ax?.querySelector<HTMLElement>(".ss-xpill--s");
+      const pe = ax?.querySelector<HTMLElement>(".ss-xpill--e");
+      if (!ax || !cur || !ps || !pe) return;
       const r = ax.getBoundingClientRect();
       if (r.width < 10) return;
       const { a, b } = zoomSrc.current;
@@ -389,14 +390,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
         const s0 = Number(blk.dataset.start);
         const e0 = Number(blk.dataset.end);
-        const lo = Math.min(1, Math.max(0, (s0 - a) / (b - a)));
-        const hi = Math.min(1, Math.max(0, (e0 - a) / (b - a)));
-        band.hidden = false;
-        band.style.insetInlineStart = `${lo * 100}%`;
-        band.style.width = `${(hi - lo) * 100}%`;
-        const label = band.firstElementChild as HTMLElement | null;
-        if (label) label.textContent = `${formatMinutes(s0)} – ${formatMinutes(Math.min(DAY_MINUTES - 1, e0))} · ${spanTextRef.current(e0 - s0)}`;
-      } else band.hidden = true;
+        // the block's two exact times, each in an orange pill at its own edge on the axis (the start's outside the block's start, the end's outside its end — they never cover each other)
+        ps.hidden = false;
+        ps.style.insetInlineStart = `${Math.min(1, Math.max(0, (s0 - a) / (b - a))) * 100}%`;
+        ps.textContent = formatMinutes(s0);
+        pe.hidden = false;
+        pe.style.insetInlineStart = `${Math.min(1, Math.max(0, (e0 - a) / (b - a))) * 100}%`;
+        pe.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, e0));
+        cur.hidden = true; // on a block the two pills say it all (the pointer's own time would sit on top of them)
+      } else {
+        ps.hidden = true;
+        pe.hidden = true;
+      }
     };
     dvEl.addEventListener("pointermove", onMove);
     dvEl.addEventListener("pointerleave", hide);
@@ -441,6 +446,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [clipDay, setClipDay] = useState<number | undefined>(undefined);
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollObs = useRef<ResizeObserver | null>(null);
+  const scrollNode = useCallback((el: HTMLDivElement | null) => {
+    scrollRef.current = el;
+    scrollObs.current?.disconnect();
+    scrollObs.current = null;
+    if (!el) return;
+    setScrollH(el.clientHeight);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setScrollH(el.clientHeight));
+    ro.observe(el);
+    scrollObs.current = ro;
+  }, []);
   const toastTimer = useRef<number | null>(null);
 
   // ── the hours of the week's columns: stretch / squeeze them like a music app's timeline (owner 2026-11-15) — scroll on the hours (or Ctrl + scroll anywhere), press on the hours and drag
@@ -448,20 +465,21 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const hourRef = useRef(hourH);
   const vAnchor = useRef<{ min: number; y: number } | null>(null);
   const zoomHoursTo = useCallback(
-    (target: number, clientY?: number) => {
+    (target: number, clientY?: number, mode: "smooth" | "drag" = "smooth") => {
       const el = scrollRef.current;
-      const next = Math.min(MAX_HOUR_H, Math.max(MIN_HOUR_H, target));
+      const next = Math.min(MAX_HOUR_H, Math.max(fitH, target)); // never squeezed past "the whole stretch fits the screen"
       const h = hourRef.current;
-      if (!el || next === h) return;
+      if (!el || Math.abs(next - h) < 0.01) return;
       const y = clientY !== undefined ? clientY - el.getBoundingClientRect().top : el.clientHeight / 2;
       vAnchor.current = { min: FIRST_H * 60 + ((el.scrollTop + y) * 60) / h, y };
       hourRef.current = next;
-      setHourH(next);
+      setZoomedH(next <= fitH + 0.5 ? null : next);
+      nudgeZoom(mode); // the labels blur in and out while the hours zoom, like the day's ruler
     },
-    [FIRST_H],
+    [FIRST_H, fitH, nudgeZoom],
   );
   const zoomHours = useCallback((factor: number, clientY?: number) => zoomHoursTo(hourRef.current * factor, clientY), [zoomHoursTo]);
-  const resetHours = useCallback(() => zoomHoursTo(BASE_HOUR_H), [zoomHoursTo]);
+  const resetHours = useCallback(() => zoomHoursTo(fitH), [zoomHoursTo, fitH]);
   useLayoutEffect(() => {
     hourRef.current = hourH;
     const a = vAnchor.current;
@@ -489,14 +507,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const el = scrollRef.current;
     if (!el || !columnsView) return;
     const hide = () => {
-      el.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xband").forEach((n) => { n.hidden = true; });
+      el.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xpill").forEach((n) => { n.hidden = true; });
     };
     const onMove = (e: PointerEvent) => {
       const g = el.querySelector<HTMLElement>(".ss-gutter");
       const cur = g?.querySelector<HTMLElement>(".ss-xcur");
-      const band = g?.querySelector<HTMLElement>(".ss-xband");
+      const ps = g?.querySelector<HTMLElement>(".ss-xpill--s");
+      const pe = g?.querySelector<HTMLElement>(".ss-xpill--e");
       const body = el.querySelector<HTMLElement>(".ss-body");
-      if (!g || !cur || !band || !body) return;
+      if (!g || !cur || !ps || !pe || !body) return;
       const h = hourRef.current;
       const m = Math.round(FIRST_H * 60 + ((e.clientY - body.getBoundingClientRect().top) * 60) / h);
       if (m < FIRST_H * 60 || m > LAST_H * 60) return hide();
@@ -505,12 +524,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       cur.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, m));
       const blk = (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
-        const s0 = Math.max(FIRST_H * 60, Number(blk.dataset.start));
-        const e0 = Math.min(LAST_H * 60, Number(blk.dataset.end));
-        band.hidden = false;
-        band.style.top = `${((s0 - FIRST_H * 60) * h) / 60}px`;
-        band.style.height = `${Math.max(2, ((e0 - s0) * h) / 60)}px`;
-      } else band.hidden = true;
+        const s0 = Number(blk.dataset.start);
+        const e0 = Number(blk.dataset.end);
+        ps.hidden = false;
+        ps.style.top = `${((Math.max(FIRST_H * 60, s0) - FIRST_H * 60) * h) / 60}px`;
+        ps.textContent = formatMinutes(s0);
+        pe.hidden = false;
+        pe.style.top = `${((Math.min(LAST_H * 60, e0) - FIRST_H * 60) * h) / 60}px`;
+        pe.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, e0));
+        cur.hidden = true;
+      } else {
+        ps.hidden = true;
+        pe.hidden = true;
+      }
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerleave", hide);
@@ -525,7 +551,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const sy = e.clientY;
     const h0 = hourRef.current;
     const releaseCursor = holdCursor("ns-resize");
-    const move = (ev: PointerEvent) => zoomHoursTo(h0 * Math.exp((ev.clientY - sy) / RULER_ZOOM_PX), sy);
+    const move = (ev: PointerEvent) => zoomHoursTo(h0 * Math.exp((ev.clientY - sy) / RULER_ZOOM_PX), sy, "drag");
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
@@ -1582,7 +1608,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
               </span>
             ) : null}
             {!horizontalView && view === "week" ? (
-              <ZoomControl pxPerMin={hourH / 60} zoomed={hourH !== BASE_HOUR_H} onIn={() => zoomHours(1.6)} onOut={() => zoomHours(1 / 1.6)} onReset={resetHours} />
+              <ZoomControl pxPerMin={hourH / 60} zoomed={zoomedH !== null} onIn={() => zoomHours(1.6)} onOut={() => zoomHours(1 / 1.6)} onReset={resetHours} />
             ) : null}
             {horizontalView ? (
               <ZoomControl
@@ -1658,13 +1684,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 </button>
               ))}
             </div>
-            <div className="ss-scroll" ref={scrollRef}>
+            <div className="ss-scroll" ref={scrollNode}>
               <div className="ss-body" style={{ height: (LAST_H - FIRST_H) * HOUR_H }}>
-                <div className="ss-gutter" title={tr("Zoom: drag along the hours, or Ctrl + scroll")} onPointerDown={onGutterPointerDown} onDoubleClick={resetHours}>
-                  {hourLabels.map((m, i) => (
-                    <span key={m} className="ss-hour" style={{ top: ((m - FIRST_H * 60) * HOUR_H) / 60 }} data-first={i === 0 ? "1" : undefined}>{formatMinutes(m)}</span>
-                  ))}
-                  <div className="ss-xband ss-xband--v" hidden aria-hidden />
+                <div className={`ss-gutter${zooming ? ` is-${zooming}` : ""}`} title={tr("Zoom: drag along the hours, or Ctrl + scroll")} onPointerDown={onGutterPointerDown} onDoubleClick={resetHours}>
+                  <GutterHours minutes={hourLabels} first={FIRST_H * 60} hourH={HOUR_H} />
+                  <div className="ss-xpill ss-xpill--v ss-xpill--s" hidden aria-hidden />
+                  <div className="ss-xpill ss-xpill--v ss-xpill--e" hidden aria-hidden />
                   <div className="ss-xcur ss-xcur--v" hidden aria-hidden />
                 </div>
                 {WEEK_DAYS.map((d) => (
@@ -2723,6 +2748,45 @@ function RulerTick({ m, a, span, live, leaving }: { m: number; a: number; span: 
   );
 }
 
+/** the hours down the side of the week's columns: labels that leave blur out, ones that arrive blur in — the same effect as the day's ruler (owner 2026-11-15) */
+function GutterHours({ minutes, first, hourH }: { minutes: number[]; first: number; hourH: number }) {
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setLive(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const prev = useRef<number[]>(minutes);
+  const [ghosts, setGhosts] = useState<number[]>([]);
+  const timers = useRef<number[]>([]);
+  useEffect(() => {
+    const now = new Set(minutes);
+    const gone = prev.current.filter((m) => !now.has(m));
+    prev.current = minutes;
+    if (gone.length === 0) return;
+    setGhosts((g) => Array.from(new Set([...g, ...gone])));
+    timers.current.push(window.setTimeout(() => setGhosts((g) => g.filter((m) => !gone.includes(m))), 260));
+  }, [minutes]);
+  useEffect(() => {
+    const ids = timers.current;
+    return () => ids.forEach((id) => window.clearTimeout(id));
+  }, []);
+  const shown = new Set(minutes);
+  return (
+    <>
+      {minutes.map((m) => <GutterTick key={`t${m}`} m={m} first={first} hourH={hourH} live={live} />)}
+      {ghosts.filter((m) => !shown.has(m)).map((m) => <GutterTick key={`g${m}`} m={m} first={first} hourH={hourH} live={live} leaving />)}
+    </>
+  );
+}
+function GutterTick({ m, first, hourH, live, leaving }: { m: number; first: number; hourH: number; live: boolean; leaving?: boolean }) {
+  const [fresh] = useState(live);
+  return (
+    <span className={`ss-hour${leaving ? " is-leaving" : fresh ? " is-fresh" : ""}`} style={{ top: ((m - first) * hourH) / 60 }} aria-hidden={leaving || undefined}>
+      {formatMinutes(m)}
+    </span>
+  );
+}
+
 /** the hours along the top of the day: the step between labels follows the zoom (whole hours … 5 / 2 / 1 minute); labels that leave blur out, ones that arrive blur in */
 function HoursRuler({
   a, b, width, zooming, zoomed, axisRef, onPanStart, onReset,
@@ -2770,7 +2834,8 @@ function HoursRuler({
       {mins.map((m) => <RulerTick key={`t${m}`} m={m} a={a} span={span} live={live} />)}
       {ghosts.filter((m) => !shown.has(m)).map((m) => <RulerTick key={`g${m}`} m={m} a={a} span={span} live={live} leaving />)}
       {/* the time under the pointer, and the stretch of the block the pointer is on — written straight into the DOM by the studio (no re-render per mouse move) */}
-      <div className="ss-xband" hidden aria-hidden><span /></div>
+      <div className="ss-xpill ss-xpill--s" hidden aria-hidden />
+      <div className="ss-xpill ss-xpill--e" hidden aria-hidden />
       <div className="ss-xcur" hidden aria-hidden />
     </div>
   );
