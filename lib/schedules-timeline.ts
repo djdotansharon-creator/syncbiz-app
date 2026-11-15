@@ -456,8 +456,11 @@ export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[
   const open = biz ? WEEK_DAYS.map((d) => bizDay(biz, d)).filter((h): h is { open: number; close: number } => h !== null) : [];
   if (biz && (biz.h24 || open.some(isOvernight))) return { first: 0, last: 24 };
   if (open.length > 0) {
+    // ACTIVE HOURS = the business's own hours and nothing else (owner 2026-11-16): the closing marker, and whatever is scheduled outside the hours, are for the "Full day" view — this is also the
+    // furthest the hours can be stretched / zoomed out to
     first = Math.floor(Math.min(...open.map((h) => h.open)) / 60);
-    last = Math.min(24, Math.ceil(Math.max(...open.map(closeOf)) / 60) + 1); // + 1: the closing marker itself stays in view
+    last = Math.min(24, Math.ceil(Math.max(...open.map(closeOf)) / 60));
+    return thinnest(first, last);
   } else if (starts.length > 0) {
     first = Math.floor(Math.min(...starts) / 60) - 1;
     last = Math.ceil(Math.max(...starts) / 60) + 2;
@@ -471,9 +474,13 @@ export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[
   }
   // the END of a block is part of what is scheduled too (a block that starts at 10:00 and ends at 16:45 must not be cut at 13:00)
   if (ends.length > 0) last = Math.max(last, Math.min(24, Math.ceil(Math.max(...ends) / 60) + 1)); // + 1 hour of room, so a long block can still be carried later
+  return thinnest(first, last);
+}
+
+/** whole hours inside the day, never thinner than eight hours */
+function thinnest(first: number, last: number): { first: number; last: number } {
   first = Math.max(0, first);
   last = Math.min(24, last);
-  // never thinner than eight hours
   while (last - first < 8) {
     if (first > 0) first -= 1;
     if (last - first < 8 && last < 24) last += 1;
@@ -496,6 +503,14 @@ export function zoomWindow(w: TimeWindow, factor: number, anchorRatio: number): 
   const ratio = Math.min(1, Math.max(0, anchorRatio));
   const a = Math.min(Math.max(0, w.a + ratio * width - ratio * next), DAY_MINUTES - next);
   return { a, b: a + next };
+}
+
+/** keep a window inside `bounds` (the hours the timeline shows): never wider than them, never sliding out of them */
+export function clampWindow(w: TimeWindow, bounds: TimeWindow): TimeWindow {
+  const room = bounds.b - bounds.a;
+  const width = Math.min(room, Math.max(0, w.b - w.a));
+  const a = Math.min(Math.max(bounds.a, w.a), bounds.b - width);
+  return { a, b: a + width };
 }
 
 /** slide a window along the day by some minutes (its width stays) */

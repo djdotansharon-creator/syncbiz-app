@@ -154,7 +154,7 @@ html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), va
 .ss-block--h { background: linear-gradient(90deg, var(--c1), var(--c2)); }
 html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), var(--c2)); }
 .ss-block:hover { transform: translateY(-2px) scale(1.012); z-index: 5; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08), 0 10px 24px color-mix(in srgb, var(--c2) 52%, transparent); filter: brightness(1.05) saturate(1.05); }
-.ss-block.is-dragging { transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), translate 0s; z-index: 6; cursor: grabbing; transform: scale(1.015); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5); }
+.ss-block.is-dragging { translate: var(--ss-tx, 0px) var(--ss-ty, 0px); transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), translate 0s; z-index: 6; cursor: grabbing; transform: scale(1.015); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5); }
 .ss-block.is-selected { box-shadow: inset 0 0 0 2.5px #fff, 0 8px 20px rgba(0, 0, 0, 0.3); }
 .ss-block.is-copied { outline: 2px dashed rgba(255, 255, 255, 0.85); outline-offset: -4px; }
 .ss-block:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
@@ -705,19 +705,21 @@ html[data-sb-display="white"] .ss-col.is-drop-day { background-color: rgba(0, 0,
 html[data-sb-display="white"] .ss-hrow.is-drop-day .ss-htrack { background-color: rgba(0, 0, 0, 0.05); }
 
 /* ══ (owner 2026-11-15) the time under the pointer, on the axis — like the price label of a trading chart; over a block the axis lights the stretch it fills ══ */
-.ss-xcur { position: absolute; z-index: 8; top: 50%; padding: 1px 7px; border-radius: 6px; transform: translate(-50%, -50%); background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.ss-xcur { position: absolute; z-index: 8; top: 50%; transform: translate(-50%, -50%); color: var(--ss-fg); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 html[dir="rtl"] .ss-xcur { transform: translate(50%, -50%); }
 .ss-xcur--v { top: 0; inset-inline-start: auto; inset-inline-end: 3px; transform: translateY(-50%); }
 html[dir="rtl"] .ss-xcur--v { transform: translateY(-50%); }
-/* the block's two exact times: an orange pill at each edge on the axis (the start's outside its start, the end's outside its end) */
-.ss-xpill { position: absolute; z-index: 7; top: 50%; padding: 1px 8px; border-radius: 999px; background: var(--ss-now); color: var(--ss-now-ink); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
-.ss-xpill--s { transform: translate(calc(-100% - 3px), -50%); }
-.ss-xpill--e { transform: translate(3px, -50%); }
-html[dir="rtl"] .ss-xpill--s { transform: translate(calc(100% + 3px), -50%); }
-html[dir="rtl"] .ss-xpill--e { transform: translate(-3px, -50%); }
+/* the block's two exact times: yellow numbers, no frame, one at each edge on the axis (the start's outside its start, the end's outside its end) */
+.ss-xpill { position: absolute; z-index: 7; top: 50%; color: var(--ss-now); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.ss-xpill--s { transform: translate(calc(-100% - 4px), -50%); }
+.ss-xpill--e { transform: translate(4px, -50%); }
+html[dir="rtl"] .ss-xpill--s { transform: translate(calc(100% + 4px), -50%); }
+html[dir="rtl"] .ss-xpill--e { transform: translate(-4px, -50%); }
 .ss-xpill--v { top: 0; inset-inline-start: auto; inset-inline-end: 3px; }
 .ss-xpill--v.ss-xpill--s, html[dir="rtl"] .ss-xpill--v.ss-xpill--s { transform: translateY(calc(-100% - 2px)); }
 .ss-xpill--v.ss-xpill--e, html[dir="rtl"] .ss-xpill--v.ss-xpill--e { transform: translateY(2px); }
+/* an hour label under a number the readout is showing is hidden (the same time would be written twice, one on top of the other) */
+.ss-htick.is-covered, .ss-hour.is-covered { opacity: 0 !important; }
 .ss-gutter .ss-xcur[hidden], .ss-gutter .ss-xpill[hidden], .ss-haxis .ss-xcur[hidden], .ss-haxis .ss-xpill[hidden] { display: none; }
 
 /* the hours of the week's columns blur in and out while they zoom, like the day's ruler (owner 2026-11-15) */

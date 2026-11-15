@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { flushSync } from "react-dom";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTr } from "@/lib/i18n/use-tr";
@@ -54,6 +55,7 @@ import {
   parseTypedTime,
   pastedScheduleBody,
   panWindow,
+  clampWindow,
   snapMinutes,
   startMinutes,
   swapStarts,
@@ -233,7 +235,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   // the block being carried: where it is (start / end), the other day it hovers over, and — when it has passed the middle of a neighbour — that neighbour's place while it makes room (`preview`)
   // and the empty slot the carried block will land in (`slot`, in minutes; `row` = the branch of its row)
-  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; dy?: number; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   const [dp, setDp] = useState<Rect | null>(null);
@@ -271,6 +273,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const HOUR_H = hourH;
   // zooming + panning the hours (owner 2026-11-12): null = the whole range; otherwise the part of the day shown. It drives the horizontal views (the week's rows, the day's rows).
   const [zoomWin, setZoomWin] = useState<TimeWindow | null>(null);
+  useEffect(() => {
+    setZoomWin(null); // another range of hours (Active hours <-> Full day, other business hours): a window from the old range does not fit
+  }, [FIRST_H, LAST_H]);
   const winA = zoomWin ? zoomWin.a : FIRST_H * 60;
   const winB = zoomWin ? zoomWin.b : LAST_H * 60;
   const SPAN = winB - winA;
@@ -328,7 +333,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   });
   const applyZoom = useCallback(
     (fn: (w: TimeWindow) => TimeWindow, mode: "smooth" | "drag" = "smooth") => {
-      setZoomWin((prev) => fn(prev ?? { a: zoomSrc.current.autoA, b: zoomSrc.current.autoB }));
+      setZoomWin((prev) => {
+        // the hours can be stretched (zoomed out) no further than the hours shown: Active hours stop at the business's own, only Full day goes to 24 h (owner 2026-11-16)
+        const bounds = { a: zoomSrc.current.autoA, b: zoomSrc.current.autoB };
+        const next = clampWindow(fn(prev ?? bounds), bounds);
+        return Math.abs(next.a - bounds.a) < 0.5 && Math.abs(next.b - bounds.b) < 0.5 ? null : next; // back at the whole range = not zoomed
+      });
       nudgeZoom(mode);
     },
     [nudgeZoom],
@@ -367,12 +377,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // spot that was pressed. Shift + drag slides the hours instead (when they are zoomed in).
   // ── the time under the pointer, on the axis (owner 2026-11-15: "like the price label of a trading chart — anywhere I stand in the timeline, the time at that spot, to the minute, on the axis") ──
   // Over a block the axis also lights the stretch the block fills, with its start, end and length. Written straight into the DOM: a re-render of the whole studio per mouse move would lag.
+  // The readout is ONE thing on the ruler at a time, as plain numbers (no frame): the time under the pointer; over a block — or while one is carried — the block's start and end in yellow.
+  // Hour labels that sit under a number are hidden (the same time was written twice, one on top of the other).
+  const repaintH = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!dvEl) return;
+    let lastEv: PointerEvent | null = null;
     const hide = () => {
       dvEl.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xpill").forEach((n) => { n.hidden = true; });
+      dvEl.querySelectorAll<HTMLElement>(".ss-htick.is-covered").forEach((t) => t.classList.remove("is-covered"));
     };
-    const onMove = (e: PointerEvent) => {
+    const paint = (e: PointerEvent) => {
       const ax = dvEl.querySelector<HTMLElement>(".ss-haxis");
       const cur = ax?.querySelector<HTMLElement>(".ss-xcur");
       const ps = ax?.querySelector<HTMLElement>(".ss-xpill--s");
@@ -383,31 +398,48 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const { a, b } = zoomSrc.current;
       let ratio = (e.clientX - r.left) / r.width;
       if (isRtl()) ratio = 1 - ratio;
-      if (ratio < 0 || ratio > 1) return hide();
+      const carried = dvEl.querySelector<HTMLElement>(".ss-block.is-dragging:not(.is-ghost)");
+      if (!carried && (ratio < 0 || ratio > 1)) return hide();
       const m = Math.min(DAY_MINUTES - 1, Math.max(0, Math.round(a + ratio * (b - a))));
-      cur.hidden = false;
-      cur.style.insetInlineStart = `${((m - a) / (b - a)) * 100}%`;
-      cur.textContent = formatMinutes(m);
-      const blk = (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const blk = carried ?? (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const shown: number[] = [];
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
         const s0 = Number(blk.dataset.start);
         const e0 = Number(blk.dataset.end);
-        // the block's two exact times, each in an orange pill at its own edge on the axis (the start's outside the block's start, the end's outside its end — they never cover each other)
+        // the block's two exact times, each at its own edge on the axis (the start's outside the block's start, the end's outside its end — they never cover each other)
         ps.hidden = false;
         ps.style.insetInlineStart = `${Math.min(1, Math.max(0, (s0 - a) / (b - a))) * 100}%`;
         ps.textContent = formatMinutes(s0);
         pe.hidden = false;
         pe.style.insetInlineStart = `${Math.min(1, Math.max(0, (e0 - a) / (b - a))) * 100}%`;
         pe.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, e0));
-        cur.hidden = true; // on a block the two pills say it all (the pointer's own time would sit on top of them)
+        cur.hidden = true; // on a block the two numbers say it all
+        shown.push(s0, e0);
       } else {
         ps.hidden = true;
         pe.hidden = true;
+        cur.hidden = false;
+        cur.style.insetInlineStart = `${((m - a) / (b - a)) * 100}%`;
+        cur.textContent = formatMinutes(m);
+        shown.push(m);
       }
+      ax.querySelectorAll<HTMLElement>(".ss-htick:not(.is-leaving)").forEach((t) => {
+        const tm = Number(t.dataset.m);
+        const covered = shown.some((x) => Math.abs(((tm - x) / (b - a)) * r.width) < 40);
+        if (covered !== t.classList.contains("is-covered")) t.classList.toggle("is-covered", covered);
+      });
+    };
+    const onMove = (e: PointerEvent) => {
+      lastEv = e;
+      paint(e);
+    };
+    repaintH.current = () => {
+      if (lastEv) paint(lastEv);
     };
     dvEl.addEventListener("pointermove", onMove);
     dvEl.addEventListener("pointerleave", hide);
     return () => {
+      repaintH.current = null;
       dvEl.removeEventListener("pointermove", onMove);
       dvEl.removeEventListener("pointerleave", hide);
     };
@@ -504,13 +536,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     return () => el.removeEventListener("wheel", onWheel);
   }, [columnsView, zoomHours]);
   // the same readout for the week's columns: the time at the pointer on the hours at the side, and the stretch of the block it is on
+  const repaintV = useRef<(() => void) | null>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !columnsView) return;
+    let lastEv: PointerEvent | null = null;
     const hide = () => {
       el.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xpill").forEach((n) => { n.hidden = true; });
+      el.querySelectorAll<HTMLElement>(".ss-gutter .ss-hour.is-covered").forEach((t) => t.classList.remove("is-covered"));
     };
-    const onMove = (e: PointerEvent) => {
+    const paint = (e: PointerEvent) => {
       const g = el.querySelector<HTMLElement>(".ss-gutter");
       const cur = g?.querySelector<HTMLElement>(".ss-xcur");
       const ps = g?.querySelector<HTMLElement>(".ss-xpill--s");
@@ -519,11 +554,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (!g || !cur || !ps || !pe || !body) return;
       const h = hourRef.current;
       const m = Math.round(FIRST_H * 60 + ((e.clientY - body.getBoundingClientRect().top) * 60) / h);
-      if (m < FIRST_H * 60 || m > LAST_H * 60) return hide();
-      cur.hidden = false;
-      cur.style.top = `${((m - FIRST_H * 60) * h) / 60}px`;
-      cur.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, m));
-      const blk = (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const carried = el.querySelector<HTMLElement>(".ss-block.is-dragging:not(.is-ghost)");
+      if (!carried && (m < FIRST_H * 60 || m > LAST_H * 60)) return hide();
+      const blk = carried ?? (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const shown: number[] = [];
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
         const s0 = Number(blk.dataset.start);
         const e0 = Number(blk.dataset.end);
@@ -534,18 +568,42 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         pe.style.top = `${((Math.min(LAST_H * 60, e0) - FIRST_H * 60) * h) / 60}px`;
         pe.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, e0));
         cur.hidden = true;
+        shown.push(s0, e0);
       } else {
         ps.hidden = true;
         pe.hidden = true;
+        cur.hidden = false;
+        cur.style.top = `${((m - FIRST_H * 60) * h) / 60}px`;
+        cur.textContent = formatMinutes(Math.min(DAY_MINUTES - 1, m));
+        shown.push(m);
       }
+      g.querySelectorAll<HTMLElement>(".ss-hour:not(.is-leaving)").forEach((t) => {
+        const tm = Number(t.dataset.m);
+        const covered = shown.some((x) => Math.abs(((tm - x) * h) / 60) < 15);
+        if (covered !== t.classList.contains("is-covered")) t.classList.toggle("is-covered", covered);
+      });
+    };
+    const onMove = (e: PointerEvent) => {
+      lastEv = e;
+      paint(e);
+    };
+    repaintV.current = () => {
+      if (lastEv) paint(lastEv);
     };
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerleave", hide);
     return () => {
+      repaintV.current = null;
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerleave", hide);
     };
   }, [columnsView, FIRST_H, LAST_H]);
+  // while a block is carried or trimmed its two times follow it (written after the block was redrawn on its new minute)
+  useEffect(() => {
+    if (!drag) return;
+    repaintH.current?.();
+    repaintV.current?.();
+  }, [drag]);
   const onGutterPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -1309,6 +1367,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     // must not grow back to its full length (owner 2026-11-16: "it just widens from the side and doesn't move")
     const L = Math.max(5, Math.min(sc.end, END_MAX) - sc.start);
     const startY = e.clientY;
+    // the carried block follows the pointer EXACTLY (not step to step of the snap): it is drawn on its snapped minute and shifted by the rest, through two CSS variables written straight
+    // into the DOM — no re-render per mouse move (owner 2026-11-16: "it jumps"; and nothing may slow the page down)
+    const rootEl = el.closest<HTMLElement>(".ss");
+    const setLift = (x: number, y: number) => {
+      rootEl?.style.setProperty("--ss-tx", `${x}px`);
+      rootEl?.style.setProperty("--ss-ty", `${y}px`);
+    };
+    const clearLift = () => {
+      rootEl?.style.removeProperty("--ss-tx");
+      rootEl?.style.removeProperty("--ss-ty");
+    };
+    clearLift();
+    let drawn = "";
     const rowOf = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
     const neighbours = fixedLen
       ? everyScene.filter((x) => x.day === sc.day && baseId(x.schedule.id) !== baseId(sc.schedule.id) && !x.paused && !x.shadowed && !x.quiet && rowOf(x.schedule) === rowOf(sc.schedule) && (x.endSet || musicMinutes(x.schedule) !== null))
@@ -1327,11 +1398,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         releaseCursor = holdCursor("grabbing");
       }
       moved = true;
-      last = snapMinutes(startMin + d / perMin, dragStep);
       // a block never slides off the edge of the hours shown, and one that has an end keeps its LENGTH there: it stops at the edge instead of being clipped or squeezed shorter
       // by dragging on (and never past the end of the day) — only the strips change the length
       const keep = L;
-      last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, END_MAX) - keep));
+      const lo = Math.min(FIRST_H * 60, startMin);
+      const hi = Math.max(startMin, Math.min(LAST_H * 60, END_MAX) - keep);
+      const rawStart = Math.min(Math.max(startMin + d / perMin, lo), hi);
+      last = Math.min(Math.max(snapMinutes(startMin + d / perMin, dragStep), lo), hi);
       if (inWeek) {
         const dayEl = document.elementsFromPoint(ev.clientX, ev.clientY).find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.day !== undefined && (n.classList.contains("ss-col") || n.classList.contains("ss-hrow")));
         if (dayEl) overDay = Number(dayEl.dataset.day);
@@ -1357,9 +1430,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           slot = { start: to.a, len: L, row: rowOf(sc.schedule) };
         }
       }
-      // the block is lifted: it follows the pointer a little up or down too (a row-wide strip in the day, the day's column in the week keep their own meaning: only a horizontal block floats)
-      const dy = orient === "h" ? Math.max(-LIFT_MAX, Math.min(LIFT_MAX, ev.clientY - startY)) : 0;
-      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, end: minutesToTimeLocal(Math.min(END_MAX, last + L)), ...(dy !== 0 ? { dy } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) });
+      // the block is lifted: it follows the pointer a little up or down too (only a horizontal block floats; the week's column keeps up / down for the hours)
+      const dy = orient === "h" && overDay === sc.day ? Math.max(-LIFT_MAX, Math.min(LIFT_MAX, ev.clientY - startY)) : 0;
+      const fine = (rawStart - last) * perMin; // the rest of the pointer's way between two snapped minutes, in px (sign = reading direction)
+      // React hears of it only when something it draws changes (the snapped minute, the neighbour that steps aside, the day under the pointer) — and at once (flushSync), so the new
+      // snapped place and the new shift reach the screen in the same frame (never a frame with one of them only)
+      const key = `${last}|${overDay}|${pv?.id ?? ""}:${pv?.start ?? ""}|${slot?.start ?? ""}`;
+      if (key !== drawn) {
+        drawn = key;
+        flushSync(() => setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, end: minutesToTimeLocal(Math.min(END_MAX, last + L)), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) }));
+      }
+      setLift(orient === "h" ? fine : 0, orient === "h" ? dy : fine);
       if (canSwap && !fixedLen && overDay === sc.day) {
         const over = document
           .elementsFromPoint(ev.clientX, ev.clientY)
@@ -1374,6 +1455,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
+      clearLift(); // the block settles into its place (the CSS spring on `translate`)
       if (cancelled) {
         // the system took the pointer away (a touch scroll, a gesture): the block goes back, nothing is saved
         releaseCursor?.();
@@ -1493,8 +1575,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const d = (orient === "v" ? ev.clientY : ev.clientX) - startPt;
       const m = snapMinutes(from + d / perMin, dragStep);
       if (side === "end") {
-        if (Number.isFinite(maxLen)) last = Math.min(Math.max(begin + 5, m), begin + maxLen, END_MAX);
-        else if (live) last = m >= END_MAX ? null : Math.max(begin + 5, m);
+        // a strip never stretches a block past the last hour shown (Active hours = the business's own hours)
+        const capEnd = Math.min(END_MAX, LAST_H * 60);
+        if (Number.isFinite(maxLen)) last = Math.min(Math.max(begin + 5, m), begin + maxLen, capEnd);
+        else if (live) last = LAST_H * 60 >= END_MAX ? (m >= END_MAX ? null : Math.max(begin + 5, m)) : Math.min(Math.max(begin + 5, m), capEnd);
         else {
           // the music's length is not known: the strip only CUTS — it never takes the block past where it ends now (the card's "Ends at" sets any time exactly)
           const cut = Math.min(m, from);
@@ -1542,10 +1626,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const tall = orient === "v" && vHeight > 60;
     const plain = sc.paused || sc.quiet;
     const tone = plain ? null : toneOf(sc.schedule);
-    const toned: CSSProperties = tone ? { ...style, ["--c1" as string]: tone.c1, ["--c2" as string]: tone.c2 } : style;
-    // the carried block floats up or down with the pointer (it springs back into its row when let go)
-    const lift = drag && drag.dy && orient === "h" && !ghost && drag.id === baseId(sc.schedule.id) && drag.day === sc.day && (drag.overDay === undefined || drag.overDay === drag.day) ? drag.dy : 0;
-    const blockStyle: CSSProperties = lift ? { ...toned, translate: `0 ${lift}px` } : toned;
+    const blockStyle: CSSProperties = tone ? { ...style, ["--c1" as string]: tone.c1, ["--c2" as string]: tone.c2 } : style;
     // what shows: the picture (a small placeholder when the music has none and only the picture was asked for), the name, the hours, the length
     // "fog": the picture fills the whole block and melts into black / white; the details sit in the solid part below. Music without a picture (or "text only") gets its colour instead.
     const fog = display.style === "fog" && !plain;
@@ -1628,7 +1709,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   return (
-    <div className="ss" data-carry={drag?.dy ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
+    <div className="ss" data-carry={drag ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
       <div className="ss-main">
         <header className="ss-top">
           <div className="ss-titles">
@@ -2811,7 +2892,7 @@ const mm = (m: number) => String(Math.round(m % 60)).padStart(2, "0");
 function RulerTick({ m, a, span, live, leaving }: { m: number; a: number; span: number; live: boolean; leaving?: boolean }) {
   const [fresh] = useState(live); // true only for labels that arrive after the ruler was first drawn
   return (
-    <span className={`ss-htick${leaving ? " is-leaving" : fresh ? " is-fresh" : ""}`} style={{ insetInlineStart: `${((m - a) / span) * 100}%` }} aria-hidden={leaving || undefined}>
+    <span className={`ss-htick${leaving ? " is-leaving" : fresh ? " is-fresh" : ""}`} data-m={m} style={{ insetInlineStart: `${((m - a) / span) * 100}%` }} aria-hidden={leaving || undefined}>
       {hh(m)}
       <span className="ss-htick-min">:{mm(m)}</span>
     </span>
@@ -2851,7 +2932,7 @@ function GutterHours({ minutes, first, hourH }: { minutes: number[]; first: numb
 function GutterTick({ m, first, hourH, live, leaving }: { m: number; first: number; hourH: number; live: boolean; leaving?: boolean }) {
   const [fresh] = useState(live);
   return (
-    <span className={`ss-hour${leaving ? " is-leaving" : fresh ? " is-fresh" : ""}`} style={{ top: ((m - first) * hourH) / 60 }} aria-hidden={leaving || undefined}>
+    <span className={`ss-hour${leaving ? " is-leaving" : fresh ? " is-fresh" : ""}`} data-m={m} style={{ top: ((m - first) * hourH) / 60 }} aria-hidden={leaving || undefined}>
       {formatMinutes(m)}
     </span>
   );
