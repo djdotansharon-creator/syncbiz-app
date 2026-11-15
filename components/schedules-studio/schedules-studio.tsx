@@ -231,7 +231,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [menu, setMenu] = useState<{ id: string; rect: Rect; day: number } | null>(null);
   const [hover, setHover] = useState<{ key: string; min: number } | null>(null);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number } | null>(null);
+  // the block being carried: where it is (start / end), the other day it hovers over, and — when it has passed the middle of a neighbour — that neighbour's place while it makes room (`preview`)
+  // and the empty slot the carried block will land in (`slot`, in minutes; `row` = the branch of its row)
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   const [dp, setDp] = useState<Rect | null>(null);
@@ -776,12 +778,21 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     if (!src) return items;
     const start = minutesToTimeLocal(drag.start);
     const edit = { startTimeLocal: start, ...(drag.end ? { endTimeLocal: drag.end } : {}) };
+    // the neighbour the carried block has passed the middle of steps aside (its length stays what it was)
+    const pv = drag.preview;
+    const base = pv ? items.map((s) => (s.id === pv.id ? { ...s, startTimeLocal: minutesToTimeLocal(pv.start), endTimeLocal: minutesToTimeLocal(Math.min(END_MAX, pv.end)) } : s)) : items;
     // a block shared by several days: ONLY the day under the pointer moves (the others stay where they are)
     if (isMultiDayWeekly(src)) {
-      return [...items.filter((s) => s.id !== src.id), { ...src, daysOfWeek: src.daysOfWeek.filter((d) => d !== drag.day) }, { ...src, id: `${src.id}#drag`, daysOfWeek: [drag.day], ...edit }];
+      return [...base.filter((s) => s.id !== src.id), { ...src, daysOfWeek: src.daysOfWeek.filter((d) => d !== drag.day) }, { ...src, id: `${src.id}#drag`, daysOfWeek: [drag.day], ...edit }];
     }
-    return items.map((s) => (s.id === drag.id ? { ...s, ...edit } : s));
+    return base.map((s) => (s.id === drag.id ? { ...s, ...edit } : s));
   }, [items, drag]);
+  // the carried block floats outside the sequence of blocks (it never shortens, nor shortens, its neighbours)
+  const floatingId = useMemo(() => {
+    if (!drag) return undefined;
+    const src = items.find((s) => s.id === drag.id);
+    return src && isMultiDayWeekly(src) ? `${drag.id}#drag` : drag.id;
+  }, [drag, items]);
   const shownItems = useMemo(() => (branchFilter === "all" ? viewItems : viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === branchFilter)), [viewItems, branchFilter]);
   // how long a block's own music lasts (null = not known, or live): a block with no end of its own is drawn only that long (owner 2026-11-15)
   const musicMinutes = useCallback((s: Schedule): number | null => {
@@ -793,13 +804,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const norm = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
     const ids = Array.from(new Set(shownItems.map(norm)));
     return WEEK_DAYS.map((d) =>
-      ids.length <= 1 ? buildDayScenes(shownItems, d, weekDates, musicMinutes) : ids.flatMap((id) => buildDayScenes(shownItems.filter((x) => norm(x) === id), d, weekDates, musicMinutes)).sort((a, b) => a.start - b.start),
+      ids.length <= 1 ? buildDayScenes(shownItems, d, weekDates, musicMinutes, floatingId) : ids.flatMap((id) => buildDayScenes(shownItems.filter((x) => norm(x) === id), d, weekDates, musicMinutes, floatingId)).sort((a, b) => a.start - b.start),
     );
-  }, [shownItems, musicMinutes, weekDates]);
+  }, [shownItems, musicMinutes, weekDates, floatingId]);
   const dayRows = useMemo(() => {
     const ids = branchFilter !== "all" ? [branchFilter] : branchIds.length > 0 ? branchIds : [branches[0]?.id ?? "default"];
-    return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes) }));
-  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes]);
+    return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes, floatingId) }));
+  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes, floatingId]);
   const nowMin = clock.getHours() * 60 + clock.getMinutes();
   const hoursBranches = useMemo(() => {
     const ids = Array.from(new Set([...branches.map((b) => b.id), ...branchIds]));
@@ -1281,6 +1292,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     // dropping this block ON another music block of the same row swaps the two (see swapBlocks)
     const canSwap = !sc.quiet && !sc.paused && !sc.shadowed;
     const everyScene = [...weekScenes.flat(), ...dayRows.flatMap((r) => r.scenes)];
+    // A block with a length of its own (its music's, or an end set on it) KEEPS that length while it is carried (owner 2026-11-15: "it must never shrink"): it floats above its neighbours,
+    // and once its middle has passed the middle of a neighbour that neighbour steps aside and an empty slot of exactly its size opens where it will land; let go before that
+    // and it settles flush against the neighbour it was pressed to. A block that runs "until the next one" (a station, a quiet block, music of unknown length) moves as before.
+    const own0 = explicitEndMinutes(sc.schedule);
+    const openEnd = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK" || sc.schedule.targetType === "SILENCE";
+    const fixedLen = !openEnd && (own0 !== null || musicMinutes(sc.schedule) !== null);
+    const L = sc.end - sc.start;
+    const rowOf = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
+    const neighbours = fixedLen
+      ? everyScene.filter((x) => x.day === sc.day && baseId(x.schedule.id) !== baseId(sc.schedule.id) && !x.paused && !x.shadowed && !x.quiet && rowOf(x.schedule) === rowOf(sc.schedule) && (x.endSet || musicMinutes(x.schedule) !== null))
+      : [];
     let swapTarget: Scene | null = null;
     let moved = false;
     let releaseCursor: (() => void) | null = null;
@@ -1299,14 +1321,34 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       last = snapMinutes(startMin + d / perMin, dragStep);
       // a block never slides off the edge of the hours shown, and one that has an end keeps its LENGTH there: it stops at the edge instead of being clipped or squeezed shorter
       // by dragging on (and never past the end of the day) — only the strips change the length
-      const keep = own !== null ? own - startMin : 5;
-      last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, own !== null ? END_MAX : DAY_MINUTES) - keep));
+      const keep = fixedLen ? L : 5;
+      last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, fixedLen ? END_MAX : DAY_MINUTES) - keep));
       if (inWeek) {
         const dayEl = document.elementsFromPoint(ev.clientX, ev.clientY).find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.day !== undefined && (n.classList.contains("ss-col") || n.classList.contains("ss-hrow")));
         if (dayEl) overDay = Number(dayEl.dataset.day);
       }
-      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}) });
-      if (canSwap && overDay === sc.day) {
+      let pv: { id: string; start: number; end: number } | undefined;
+      let slot: { start: number; len: number; row: string } | undefined;
+      swapTarget = null;
+      if (canSwap && fixedLen && overDay === sc.day) {
+        const cd = last + L / 2;
+        for (const o of neighbours) {
+          if (!(last < o.end && last + L > o.start)) continue;
+          // passed the middle of it, coming from the side it was on
+          if (startMin < o.start ? cd >= (o.start + o.end) / 2 : cd <= (o.start + o.end) / 2) {
+            swapTarget = o;
+            break;
+          }
+        }
+        if (swapTarget) {
+          const to = swapStarts({ start: startMin, end: startMin + L }, { start: swapTarget.start, end: swapTarget.end });
+          const lb = swapTarget.end - swapTarget.start;
+          pv = { id: baseId(swapTarget.schedule.id), start: to.b, end: to.b + lb };
+          slot = { start: to.a, len: L, row: rowOf(sc.schedule) };
+        }
+      }
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) });
+      if (canSwap && !fixedLen && overDay === sc.day) {
         const over = document
           .elementsFromPoint(ev.clientX, ev.clientY)
           .find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains("ss-block") && n.parentElement === track && n.dataset.bid !== baseId(sc.schedule.id) && !/\bis-(quiet|paused|shadowed)\b/.test(n.className));
@@ -1342,10 +1384,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       setSwapWith(null);
       markPopupClose(); // (same: the click that ends a drag opens nothing)
       if (swapTarget && overDay === sc.day) {
-        void swapBlocks(sc, swapTarget); // dropped ON another block: the two trade places
+        void swapBlocks(sc, swapTarget); // past the middle of a neighbour: the two trade places (the neighbour already stepped aside)
         return;
       }
-      if (last !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last, ...(overDay !== sc.day ? { toDay: overDay } : {}) });
+      // let go while pressed against a neighbour but not past its middle: the block settles flush against it, on the side it came from
+      let landed = last;
+      if (fixedLen && overDay === sc.day) {
+        for (const o of neighbours) {
+          if (landed < o.end && landed + L > o.start) landed = startMin < o.start ? o.start - L : o.end;
+        }
+        landed = Math.min(Math.max(landed, 0), END_MAX - L);
+      }
+      if (landed !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: landed, ...(overDay !== sc.day ? { toDay: overDay } : {}) });
     };
     const cancel = () => {
       cancelled = true;
@@ -1356,6 +1406,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     window.addEventListener("pointercancel", cancel);
   };
 
+  // the empty slot a carried block will land in once a neighbour has stepped aside for it: a dashed outline exactly its size
+  const slotFor = (day: number, orient: Orient, rowId?: string) => {
+    if (!drag?.slot || drag.day !== day || drag.overDay !== undefined) return null;
+    if (rowId !== undefined && drag.slot.row !== rowId) return null;
+    const { start, len } = drag.slot;
+    const end = start + len;
+    const style: CSSProperties =
+      orient === "v"
+        ? { top: topOf(start), height: Math.max(26, ((Math.min(end, LAST_H * 60) - Math.max(start, FIRST_H * 60)) * HOUR_H) / 60 - 3) }
+        : { insetInlineStart: `${pct(start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(start))}% - 4px)` };
+    return <div className={`ss-slot ss-slot--${orient}`} style={style} aria-hidden />;
+  };
   // while a block is carried over ANOTHER day of the week, a see-through copy shows where it will land
   const ghostFor = (d: number, orient: Orient) => {
     if (!drag || drag.overDay !== d || drag.day === d) return null;
@@ -1462,7 +1524,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       orient === "v"
         ? { top: topOf(sc.start), height: vHeight }
         : { insetInlineStart: `${pct(sc.start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(sc.start))}% - 4px)` };
-    const cls = `ss-block ss-block--${orient}${ghost ? " is-ghost" : ""}${!ghost && drag && drag.overDay !== undefined && drag.overDay !== drag.day && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-leaving" : ""}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
+    const cls = `ss-block ss-block--${orient}${drag?.preview && drag.preview.id === baseId(sc.schedule.id) ? " is-making-room" : ""}${ghost ? " is-ghost" : ""}${!ghost && drag && drag.overDay !== undefined && drag.overDay !== drag.day && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-leaving" : ""}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
     const tall = orient === "v" && vHeight > 60;
     const plain = sc.paused || sc.quiet;
     const tone = plain ? null : toneOf(sc.schedule);
@@ -1659,6 +1721,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                     >
                       {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "h"))}
                       {ghostFor(d, "h")}
+                      {slotFor(d, "h")}
                       {branchFilter === "all" || branchFilter === stationBranch ? jinglePins(d, weekDates[d]!, "h") : null}
                       {hover?.key === `w${d}` ? (
                         <div className="ss-hhover" style={{ insetInlineStart: `${pct(hover.min)}%` }} aria-hidden><span>{formatMinutes(hover.min)}</span></div>
@@ -1706,6 +1769,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                   >
                     {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "v"))}
                     {ghostFor(d, "v")}
+                    {slotFor(d, "v")}
                     {branchFilter === "all" || branchFilter === stationBranch ? jinglePins(d, weekDates[d]!, "v") : null}
                     {hover?.key === `d${d}` ? (
                       <div className="ss-hover" style={{ top: topOf(hover.min) }} aria-hidden><span>{formatMinutes(hover.min)}</span></div>
@@ -1740,6 +1804,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       onDrop={(e) => void trackDrop(e, focusDay, "h", dayRows.length > 1 ? row.id : undefined)}
                     >
                       {row.scenes.map((sc) => renderBlock(sc, "h"))}
+                      {slotFor(focusDay, "h", row.id)}
                       {row.id === stationBranch || dayRows.length === 1 ? jinglePins(focusDay, focusKey, "h") : null}
                       {hover?.key === `r${row.id}` ? (
                         <div className="ss-hhover" style={{ insetInlineStart: `${pct(hover.min)}%` }} aria-hidden><span>{formatMinutes(hover.min)}</span></div>

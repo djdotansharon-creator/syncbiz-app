@@ -100,10 +100,13 @@ export function appliesOnDay(s: Schedule, day: number, weekDates: string[]): boo
  * `musicMinutes` (owner 2026-11-15: "a song cannot be stretched beyond what it is"): how long a block's own music lasts, in whole minutes (null = not known / live). A block with no
  * end of its own is then drawn only as long as its music — what follows until the next block is not the block's: the player fills it with suggested songs (lib/schedule-driven.ts).
  */
-export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[], musicMinutes?: (s: Schedule) => number | null): Scene[] {
+export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[], musicMinutes?: (s: Schedule) => number | null, floatingId?: string): Scene[] {
   const mine = schedules.filter((s) => appliesOnDay(s, day, weekDates));
+  // a block that is being CARRIED (owner 2026-11-15) is not part of the sequence: it floats above the others, keeps its own length (a block next to it never cuts it short, and it never
+  // cuts the others short), and what it covers is only its own stretch
+  const floating = floatingId ? mine.find((s) => s.id === floatingId && s.enabled) : undefined;
   const active = mine
-    .filter((s) => s.enabled)
+    .filter((s) => s.enabled && s.id !== floatingId)
     .sort((a, b) => {
       const d = startMinutes(a) - startMinutes(b);
       if (d !== 0) return d;
@@ -133,6 +136,18 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
   for (const s of mine.filter((x) => !x.enabled)) {
     const start = startMinutes(s);
     scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), endSet: false, quiet: isSilenceBlock(s), paused: true, shadowed: false });
+  }
+  if (floating) {
+    const start = startMinutes(floating);
+    const quiet = isSilenceBlock(floating);
+    const own = explicitEndMinutes(floating);
+    const nextDistinct = distinct.find((m) => m > start);
+    let end = own ?? (nextDistinct ?? DAY_MINUTES);
+    if (own === null && !quiet && musicMinutes) {
+      const len = musicMinutes(floating);
+      if (len !== null && len > 0) end = start + len;
+    }
+    scenes.push({ schedule: floating, day, start, end: Math.min(DAY_MINUTES, Math.max(start + 5, end)), endSet: own !== null, quiet, paused: false, shadowed: false });
   }
   return scenes.sort((a, b) => a.start - b.start);
 }

@@ -736,3 +736,11 @@ html[dir="rtl"] .ss-xpill--e { transform: translate(-3px, -50%); }
 .ss-gutter.is-smooth .ss-hour:not(.is-leaving), .ss-gutter.is-drag .ss-hour:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
 @media (prefers-reduced-motion: reduce) { .ss-hour.is-fresh, .ss-hour.is-leaving { animation: none; } .ss-hour.is-leaving { display: none; } }
 
+/* ══ (owner 2026-11-15) a block carried over its neighbours: it floats above them and never shrinks; the neighbour it passed the middle of steps aside (a short glide — the one thing that moves
+   on its own, because it is the answer to "make room"), and a dashed outline marks the empty slot of exactly the carried block's size ══ */
+.ss-block.is-making-room { transition: top 150ms var(--ss-ease), height 150ms var(--ss-ease), inset-inline-start 150ms var(--ss-ease), width 150ms var(--ss-ease), box-shadow 160ms ease, transform 160ms var(--ss-ease), filter 160ms ease; opacity: 0.92; }
+.ss-slot { position: absolute; z-index: 1; box-sizing: border-box; border: 1.5px dashed rgba(255, 255, 255, 0.55); border-radius: 16px; background: rgba(255, 255, 255, 0.05); pointer-events: none; }
+html[data-sb-display="white"] .ss-slot { border-color: rgba(0, 0, 0, 0.4); background: rgba(0, 0, 0, 0.04); }
+.ss-slot--v { inset-inline: 4px; margin-top: 1px; }
+.ss-slot--h { inset-block: 8px; }
+
