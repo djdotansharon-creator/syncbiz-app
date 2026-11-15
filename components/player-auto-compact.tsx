@@ -17,7 +17,7 @@
  * Renders null.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 const ENABLED = true;
@@ -94,19 +94,24 @@ export function PlayerAutoCompact(): null {
   // the management pages (Control Room …) hide the player — nothing to shrink there, and no attribute flips while the operator uses them
   const management = MANAGEMENT_ROUTE.test(pathname ?? "");
   const locked = LOCKED_COMPACT.test(pathname ?? "");
+  // was the previous page a folded-bar one (Schedules)? Leaving it OPENS the player with the same choreography as every other opening — it used to be cleared in one stroke (the title block and timeline jumped to the big layout while the bar was still thin, the live glass stayed on) (owner 2026-11-16)
+  const wasLocked = useRef(false);
   useScrollingFlag(management);
   useEffect(() => {
     const root = document.documentElement;
     const ATTRS = ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving"];
     const clearAll = () => ATTRS.forEach((a) => root.removeAttribute(a));
-    clearAll(); // a new page always starts with the full player
-    if (!ENABLED || management) return;
+    let off = !ENABLED || management;
     try {
-      if (localStorage.getItem("syncbiz:compactPlayer") === "off") return;
+      if (localStorage.getItem("syncbiz:compactPlayer") === "off") off = true;
     } catch {
       /* ignore */
     }
-    let compact = false;
+    const unfold = wasLocked.current && !locked && !off && root.getAttribute("data-sb-player") === "compact";
+    wasLocked.current = locked;
+    if (!unfold) clearAll(); // a new page always starts with the full player (except when the folded bar is opening: below)
+    if (off) return;
+    let compact = unfold;
     let lockUntil = 0;
     let timers: ReturnType<typeof setTimeout>[] = [];
     const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
@@ -163,12 +168,13 @@ export function PlayerAutoCompact(): null {
     if (locked) {
       set(true); // folds (with the usual glide) and stays folded; no scroll / wheel listeners here
       return () => {
+        // the attributes stay: if the next page is a normal one it opens the bar from this state (above); anything else clears them itself
         timers.forEach(clearTimeout);
-        clearAll();
       };
     }
     document.addEventListener("scroll", onScroll, true);
     document.addEventListener("wheel", onWheel, { passive: true, capture: true });
+    if (unfold) set(false); // the bar opens with the full choreography (content fades, glass off for the glide)
     return () => {
       document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("wheel", onWheel, true);
@@ -176,5 +182,10 @@ export function PlayerAutoCompact(): null {
       clearAll();
     };
   }, [pathname, management, locked]);
+  // the player's attributes are cleared when the page really goes away (the locked page's cleanup no longer does it)
+  useEffect(() => {
+    const root = document.documentElement;
+    return () => ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving"].forEach((a) => root.removeAttribute(a));
+  }, []);
   return null;
 }

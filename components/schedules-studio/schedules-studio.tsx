@@ -54,7 +54,6 @@ import {
   parseTypedTime,
   pastedScheduleBody,
   panWindow,
-  scaleBar,
   snapMinutes,
   startMinutes,
   swapStarts,
@@ -87,6 +86,7 @@ const RULER_ZOOM_PX = 170; // dragging this far along the hours changes the zoom
 const HISTORY_GROUP_MS = 900; // changes this close together are ONE undo step
 const HISTORY_MAX = 40;
 const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
+const LIFT_MAX = 96; // how far (px) a carried block may float up or down with the pointer
 const CLOSING_NAME = "Closing"; // the quiet block the Day-hours dialog keeps for each closing time
 
 type RadioRow = { id: string; name: string; branchId?: string | null };
@@ -233,7 +233,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [hoverDate, setHoverDate] = useState<string | null>(null);
   // the block being carried: where it is (start / end), the other day it hovers over, and — when it has passed the middle of a neighbour — that neighbour's place while it makes room (`preview`)
   // and the empty slot the carried block will land in (`slot`, in minutes; `row` = the branch of its row)
-  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; dy?: number; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   const [dp, setDp] = useState<Rect | null>(null);
@@ -442,7 +442,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     setZoomWin(null);
     nudgeZoom("smooth");
   };
-  const horizontalView = view === "day" || display.weekLayout === "rows";
   const alive = useRef(true);
   const [jmenu, setJmenu] = useState<{ item: JingleLike; day: number; min: number; rect: Rect } | null>(null);
   const [clipDay, setClipDay] = useState<number | undefined>(undefined);
@@ -569,7 +568,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute("data-sb-studio", "1");
-    return () => root.removeAttribute("data-sb-studio");
+    return () => {
+      root.removeAttribute("data-sb-studio");
+      // on the way back the side rails open again with the grid gliding: the page's heavy glass (blurs) is off while they move, exactly as when a rail is toggled by hand (owner 2026-11-16: the way back was not smooth)
+      const grid = document.querySelector<HTMLElement>(".workspace-rail-grid");
+      if (grid) {
+        grid.setAttribute("data-moving", "1");
+        window.setTimeout(() => grid.removeAttribute("data-moving"), 700);
+      }
+    };
   }, []);
   useEffect(() => {
     try {
@@ -1298,7 +1305,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const own0 = explicitEndMinutes(sc.schedule);
     const openEnd = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK" || sc.schedule.targetType === "SILENCE";
     const fixedLen = !openEnd && (own0 !== null || musicMinutes(sc.schedule) !== null);
-    const L = sc.end - sc.start;
+    // the length the block has ON SCREEN when it is picked up — a block cut short by the one that follows it (a quiet "Closing" after it, say) is carried exactly that long: the moment it is lifted it
+    // must not grow back to its full length (owner 2026-11-16: "it just widens from the side and doesn't move")
+    const L = Math.max(5, Math.min(sc.end, END_MAX) - sc.start);
+    const startY = e.clientY;
     const rowOf = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
     const neighbours = fixedLen
       ? everyScene.filter((x) => x.day === sc.day && baseId(x.schedule.id) !== baseId(sc.schedule.id) && !x.paused && !x.shadowed && !x.quiet && rowOf(x.schedule) === rowOf(sc.schedule) && (x.endSet || musicMinutes(x.schedule) !== null))
@@ -1317,12 +1327,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         releaseCursor = holdCursor("grabbing");
       }
       moved = true;
-      const own = explicitEndMinutes(sc.schedule);
       last = snapMinutes(startMin + d / perMin, dragStep);
       // a block never slides off the edge of the hours shown, and one that has an end keeps its LENGTH there: it stops at the edge instead of being clipped or squeezed shorter
       // by dragging on (and never past the end of the day) — only the strips change the length
-      const keep = fixedLen ? L : 5;
-      last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, fixedLen ? END_MAX : DAY_MINUTES) - keep));
+      const keep = L;
+      last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, END_MAX) - keep));
       if (inWeek) {
         const dayEl = document.elementsFromPoint(ev.clientX, ev.clientY).find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.day !== undefined && (n.classList.contains("ss-col") || n.classList.contains("ss-hrow")));
         if (dayEl) overDay = Number(dayEl.dataset.day);
@@ -1334,8 +1343,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         const cd = last + L / 2;
         for (const o of neighbours) {
           if (!(last < o.end && last + L > o.start)) continue;
-          // passed the middle of it, coming from the side it was on
-          if (startMin < o.start ? cd >= (o.start + o.end) / 2 : cd <= (o.start + o.end) / 2) {
+          // passed the middle of it, coming from the side it was on — or, when the carried block is the longer one, as soon as it covers the neighbour whole (it does not have to pass the middle of what it already covers)
+          const covers = last <= o.start && last + L >= o.end;
+          if (covers || (startMin < o.start ? cd >= (o.start + o.end) / 2 : cd <= (o.start + o.end) / 2)) {
             swapTarget = o;
             break;
           }
@@ -1347,7 +1357,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           slot = { start: to.a, len: L, row: rowOf(sc.schedule) };
         }
       }
-      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) });
+      // the block is lifted: it follows the pointer a little up or down too (a row-wide strip in the day, the day's column in the week keep their own meaning: only a horizontal block floats)
+      const dy = orient === "h" ? Math.max(-LIFT_MAX, Math.min(LIFT_MAX, ev.clientY - startY)) : 0;
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, end: minutesToTimeLocal(Math.min(END_MAX, last + L)), ...(dy !== 0 ? { dy } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) });
       if (canSwap && !fixedLen && overDay === sc.day) {
         const over = document
           .elementsFromPoint(ev.clientX, ev.clientY)
@@ -1395,7 +1407,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         }
         landed = Math.min(Math.max(landed, 0), END_MAX - L);
       }
-      if (landed !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: landed, ...(overDay !== sc.day ? { toDay: overDay } : {}) });
+      // the block keeps what was drawn: when its stored end is not that length (no end of its own, or cut short on screen by the next block) the end is written, so it does not change size when it lands
+      const endEdit = own0 !== null && own0 - startMin === L ? undefined : landed + L >= END_MAX ? null : landed + L;
+      if (landed !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: landed, ...(endEdit !== undefined ? { end: endEdit } : {}), ...(overDay !== sc.day ? { toDay: overDay } : {}) });
     };
     const cancel = () => {
       cancelled = true;
@@ -1528,7 +1542,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const tall = orient === "v" && vHeight > 60;
     const plain = sc.paused || sc.quiet;
     const tone = plain ? null : toneOf(sc.schedule);
-    const blockStyle: CSSProperties = tone ? { ...style, ["--c1" as string]: tone.c1, ["--c2" as string]: tone.c2 } : style;
+    const toned: CSSProperties = tone ? { ...style, ["--c1" as string]: tone.c1, ["--c2" as string]: tone.c2 } : style;
+    // the carried block floats up or down with the pointer (it springs back into its row when let go)
+    const lift = drag && drag.dy && orient === "h" && !ghost && drag.id === baseId(sc.schedule.id) && drag.day === sc.day && (drag.overDay === undefined || drag.overDay === drag.day) ? drag.dy : 0;
+    const blockStyle: CSSProperties = lift ? { ...toned, translate: `0 ${lift}px` } : toned;
     // what shows: the picture (a small placeholder when the music has none and only the picture was asked for), the name, the hours, the length
     // "fog": the picture fills the whole block and melts into black / white; the details sit in the solid part below. Music without a picture (or "text only") gets its colour instead.
     const fog = display.style === "fog" && !plain;
@@ -1611,7 +1628,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   return (
-    <div className="ss" data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
+    <div className="ss" data-carry={drag?.dy ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
       <div className="ss-main">
         <header className="ss-top">
           <div className="ss-titles">
@@ -1668,18 +1685,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 {view === "day" ? <button type="button" className="ss-pill ss-pill--on" onClick={() => void pasteOn(focusKey)}>{tr("Paste here")}</button> : <span className="ss-clip-hint">{tr("click a day's title to paste")}</span>}
                 <button type="button" className="ss-clip-x" onClick={() => setClip(null)} aria-label={tr("Clear")}>×</button>
               </span>
-            ) : null}
-            {!horizontalView && view === "week" ? (
-              <ZoomControl pxPerMin={hourH / 60} zoomed={zoomedH !== null} onIn={() => zoomHours(1.6)} onOut={() => zoomHours(1 / 1.6)} onReset={resetHours} />
-            ) : null}
-            {horizontalView ? (
-              <ZoomControl
-                pxPerMin={pxPerMinNow}
-                zoomed={!!zoomWin}
-                onIn={() => applyZoom((w) => zoomWindow(w, 1 / 1.6, 0.5))}
-                onOut={() => applyZoom((w) => zoomWindow(w, 1.6, 0.5))}
-                onReset={resetZoom}
-              />
             ) : null}
             <button type="button" className={`ss-iconbtn ss-iconbtn--sm ss-dtoggle${dmenu ? " is-open" : ""}`} aria-haspopup="dialog" aria-expanded={!!dmenu} title={tr("Display")} aria-label={tr("Display")} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setDmenu(dmenu ? null : { x: r.left, y: r.top, w: r.width, h: r.height }); }}>
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2.2" /><circle cx="9" cy="17" r="2.2" /></svg>
@@ -2902,27 +2907,6 @@ function HoursRuler({
       <div className="ss-xpill ss-xpill--s" hidden aria-hidden />
       <div className="ss-xpill ss-xpill--e" hidden aria-hidden />
       <div className="ss-xcur" hidden aria-hidden />
-    </div>
-  );
-}
-
-/** − / + and a map-style scale bar ("30 min"): the bar is the length of time it names, at this zoom; the number rolls over when it changes; click it to go back to the full view */
-function ZoomControl({ pxPerMin, zoomed, onIn, onOut, onReset }: { pxPerMin: number; zoomed: boolean; onIn: () => void; onOut: () => void; onReset: () => void }) {
-  const tr = useTr();
-  const bar = scaleBar(pxPerMin);
-  const label = bar.minutes % 60 === 0 ? tr("{n} h", { n: bar.minutes / 60 }) : tr("{n} min", { n: bar.minutes });
-  return (
-    <div className="ss-zoom" role="group" aria-label={tr("Zoom")} title={tr("Zoom: drag along the hours, or Ctrl + scroll")}>
-      <button type="button" className="ss-zoom-btn" onClick={onOut} aria-label={tr("Zoom out")}>
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
-      </button>
-      <button type="button" className={`ss-zoom-scale${zoomed ? " is-zoomed" : ""}`} onClick={onReset} disabled={!zoomed} title={zoomed ? tr("Back to the full view") : undefined} aria-label={zoomed ? tr("Back to the full view") : label}>
-        <span className="ss-zoom-txt" key={label}>{label}</span>
-        <span className="ss-zoom-bar" style={{ width: Math.max(8, bar.px) }} aria-hidden />
-      </button>
-      <button type="button" className="ss-zoom-btn" onClick={onIn} aria-label={tr("Zoom in")}>
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M6 12h12M12 6v12" /></svg>
-      </button>
     </div>
   );
 }

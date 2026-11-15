@@ -142,7 +142,7 @@ html[data-sb-display="white"] .ss-col.is-today { background-color: rgba(217, 119
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
   display: flex; gap: 10px;
   /* NO gliding of top / height / start / width (owner 2026-11-15): zooming, moving and trimming answer at once — everything stretches together, nothing slides on its own */
-  transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), filter 160ms ease, --c1 520ms ease, --c2 520ms ease; }
+  transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), translate 220ms var(--ss-ease), filter 160ms ease, --c1 520ms ease, --c2 520ms ease; }
 .ss-block[data-c="8"], .ss-block[data-c="9"] { text-shadow: none; }
 .ss-block--v { inset-inline: 4px; flex-direction: column; justify-content: flex-start; gap: 1px; padding: 8px 10px; margin-top: 1px; }
 .ss-block--h { inset-block: 8px; flex-direction: row; align-items: center; padding: 0 12px; container-type: inline-size; }
@@ -154,7 +154,7 @@ html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), va
 .ss-block--h { background: linear-gradient(90deg, var(--c1), var(--c2)); }
 html[dir="rtl"] .ss-block--h { background: linear-gradient(270deg, var(--c1), var(--c2)); }
 .ss-block:hover { transform: translateY(-2px) scale(1.012); z-index: 5; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08), 0 10px 24px color-mix(in srgb, var(--c2) 52%, transparent); filter: brightness(1.05) saturate(1.05); }
-.ss-block.is-dragging { transition: box-shadow 160ms ease, transform 160ms var(--ss-ease); z-index: 6; cursor: grabbing; transform: scale(1.015); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5); }
+.ss-block.is-dragging { transition: box-shadow 160ms ease, transform 160ms var(--ss-ease), translate 0s; z-index: 6; cursor: grabbing; transform: scale(1.015); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5); }
 .ss-block.is-selected { box-shadow: inset 0 0 0 2.5px #fff, 0 8px 20px rgba(0, 0, 0, 0.3); }
 .ss-block.is-copied { outline: 2px dashed rgba(255, 255, 255, 0.85); outline-offset: -4px; }
 .ss-block:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
@@ -299,6 +299,8 @@ html[data-sb-display="white"] .ss-pill--on { background: #1c1c1e; color: #fff; }
 .ss-htick { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--ss-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[dir="rtl"] .ss-htick { transform: translateX(50%); }
 .ss-htrack { position: relative; border-radius: 20px; background-color: var(--ss-surface-2); cursor: copy; overflow: hidden; }
+/* a block lifted up or down while it is carried floats OUT of its row (only the sides stay clipped) */
+.ss[data-carry] .ss-htrack { overflow-x: clip; overflow-y: visible; }
 .ss-hhover { position: absolute; inset-block: 0; width: 0; border-inline-start: 1.5px dashed var(--ss-faint); pointer-events: none; z-index: 2; }
 .ss-hhover span { position: absolute; top: 6px; inset-inline-start: 5px; padding: 1px 6px; border-radius: 999px; background: var(--ss-fg); color: var(--ss-pop-bg); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 html[data-sb-display="white"] .ss-hhover span { background: #1c1c1e; color: #fff; }
@@ -674,17 +676,6 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 /* ══ zooming + sliding the hours (owner 2026-11-12: "like After Effects / the scale of Apple Maps") ══
    Wheel / pinch on the timeline zooms around the pointer, − / + zoom around the middle, the ruler is dragged to slide, a double click on it (or the scale) goes back to the full view.
    The hour labels follow the zoom (whole hours … 5 / 2 / 1 minute); a label that arrives blurs in, one that leaves blurs out, and while the view moves they are a touch soft. */
-.ss-zoom { display: inline-flex; align-items: center; gap: 2px; }
-.ss-zoom-btn { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ss-dim); cursor: pointer; transition: background-color 140ms ease, color 140ms ease, transform 140ms ease; }
-.ss-zoom-btn:hover { background: var(--ss-surface-2); color: var(--ss-fg); }
-.ss-zoom-btn:active { transform: scale(0.9); }
-.ss-zoom-scale { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 62px; padding: 3px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font: inherit; font-size: 10.5px; line-height: 1; cursor: default; transition: background-color 140ms ease, color 140ms ease; }
-.ss-zoom-scale:disabled { opacity: 1; }
-.ss-zoom-scale.is-zoomed { color: var(--ss-fg); cursor: pointer; }
-.ss-zoom-scale.is-zoomed:hover { background: var(--ss-surface-2); }
-.ss-zoom-txt { font-variant-numeric: tabular-nums; font-weight: 600; animation: ss-roll-in 260ms var(--ss-ease) backwards; }
-/* the scale bar of a map: a line with a short tick at each end */
-.ss-zoom-bar { display: block; height: 5px; border: 1.5px solid currentColor; border-top: 0; border-radius: 0 0 2px 2px; opacity: 0.8; transition: width 240ms var(--ss-ease); }
 @keyframes ss-roll-in { from { opacity: 0; translate: 0 8px; filter: blur(4px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
 @keyframes ss-tick-in { from { opacity: 0; translate: 0 8px; filter: blur(5px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
 @keyframes ss-tick-out { from { opacity: 1; translate: 0 0; filter: blur(0); } to { opacity: 0; translate: 0 -8px; filter: blur(5px); } }
@@ -694,7 +685,7 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-htick.is-leaving { animation: ss-tick-out 260ms var(--ss-ease) forwards; pointer-events: none; }
 .ss-haxis.is-smooth .ss-htick:not(.is-leaving), .ss-haxis.is-drag .ss-htick:not(.is-leaving) { filter: blur(0.6px); opacity: 0.82; }
 .ss-haxis.is-fine .ss-htick-min { display: inline; }
-@media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving, .ss-zoom-txt { animation: none; } .ss-htick.is-leaving { display: none; } }
+@media (prefers-reduced-motion: reduce) { .ss-htick.is-fresh, .ss-htick.is-leaving { animation: none; } .ss-htick.is-leaving { display: none; } }
 
 
 /* ══ swap (owner 2026-11-12): a block dragged ONTO another block of its row — that block shows a ring: let go and the two trade places ══ */
