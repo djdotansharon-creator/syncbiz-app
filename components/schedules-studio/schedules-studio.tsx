@@ -316,7 +316,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (r.width < 10) return;
       const rtl = isRtl();
       const { a, b, zoomed } = zoomSrc.current;
-      const onRuler = !!(e.target as Element | null)?.closest?.(".ss-haxis");
+      const tgt = e.target as Element | null;
+      // scrolling on the hours zooms (owner 2026-11-15, like a music app); in the DAY view the whole timeline does (nothing there needs the wheel — the list under it does, so it is left alone)
+      const onRuler = !!tgt?.closest?.(".ss-haxis") || (!dvEl.querySelector(".ss-hrows--week") && !!tgt?.closest?.(".ss-hrows"));
       const pinch = e.ctrlKey || e.metaKey; // a trackpad pinch arrives as ctrl + wheel
       const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY);
       if (pinch || (onRuler && !e.shiftKey && !sideways)) {

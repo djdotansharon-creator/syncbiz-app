@@ -228,5 +228,7 @@ assert("S74 Cmd/Ctrl+Z undoes the last change on the schedule — the same singl
 assert("S75 pressing on the hours and dragging sideways zooms like the time ruler of a music app (right = closer, left = further, around the pressed spot); Shift + drag slides the zoomed hours; no slider in the toolbar", /const onRulerPointerDown = \(e: React\.PointerEvent<HTMLElement>\) => \{\s+if \(e\.button !== 0\) return;/.test(comp) && /zoomWindow\(start, Math\.exp\(-dx \/ RULER_ZOOM_PX\), ratio\)/.test(comp) && /e\.shiftKey && zoomSrc\.current\.zoomed/.test(comp) && /panWindow\(start, -dx \/ pxPerMin\)/.test(comp) && !/ss-zoom-range|spanToSlider/.test(comp) && !/ss-zoom-range/.test(css) && /\.ss-haxis \{ cursor: ew-resize; touch-action: none; \}/.test(css));
 assert("S76 the little hint bar of a trim strip never catches the pointer: on a narrow block (the end of the day) a press in the middle moves the block instead of trimming it", /\.ss-b-resize::after \{[^}]*pointer-events: none;/.test(css));
 
+assert("S77 scrolling the wheel on the hours zooms (up = closer, down = further, around the pointer); in the Day view the whole timeline does, the week rows only the hours, and the list under the day is left to scroll", /!!tgt\?\.closest\?\.\("\.ss-haxis"\) \|\| \(!dvEl\.querySelector\("\.ss-hrows--week"\) && !!tgt\?\.closest\?\.\("\.ss-hrows"\)\)/.test(comp) && /Math\.exp\(e\.deltaY \* \(pinch/.test(comp));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
