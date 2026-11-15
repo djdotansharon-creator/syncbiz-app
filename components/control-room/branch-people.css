@@ -1,0 +1,31 @@
+/* CONTROL ROOM — the people of a branch (owner 2026-11-15). The Control Room's language: frameless, soft, glass; round discs; the same text colours as the rest of the branch screen. */
+
+.cr-bpp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.cr-bpp-head .cr-bp-title { margin-bottom: 0; }
+.cr-bpp-more { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--sb-text-secondary); font-size: 13.5px; font-weight: 550; text-decoration: none; cursor: pointer; transition: background-color 240ms ease, color 240ms ease; }
+.cr-bpp-more:hover { background: rgba(255, 255, 255, 0.08); color: var(--sb-text); }
+.cr-bpp-more:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 2px; }
+.cr-bpp-count { font-size: 12.5px; font-weight: 550; color: var(--sb-text-tertiary); font-variant-numeric: tabular-nums; }
+
+/* the strip: up to four people side by side */
+.cr-bpp-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.cr-bpp-one { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 5px; padding: 12px 4px 10px; border-radius: 20px; text-align: center; transition: background-color 240ms ease; }
+.cr-bpp-one:hover { background: rgba(255, 255, 255, 0.05); }
+
+.cr-bpp-disc { display: grid; flex: none; place-items: center; width: 50px; height: 50px; border-radius: 50%; font-size: 20px; font-weight: 650; line-height: 1; color: #fff; }
+.cr-bpp-disc.is-big { width: 58px; height: 58px; font-size: 23px; }
+.cr-bpp-disc.is-off { opacity: 0.45; }
+.cr-bpp-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--sb-text); }
+.cr-bpp-role { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--sb-text-secondary); }
+.cr-bpp-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--sb-text-tertiary); }
+.cr-bpp-sub.is-warn { color: #ffcf5c; }
+.cr-bpp-empty { padding: 4px 2px; font-size: 14px; color: var(--sb-text-tertiary); }
+.cr-bpp-hint { margin: -4px 0 12px; font-size: 13px; color: var(--sb-text-tertiary); }
+
+/* the whole screen */
+.cr-bpp-body { display: flex; flex-direction: column; gap: 34px; padding: 0 8px 28px; }
+.cr-bpp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+.cr-bpp-tile { display: flex; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 18px 10px 14px; border-radius: 26px; background: rgba(255, 255, 255, 0.05); text-align: center; transition: background-color 240ms ease; }
+.cr-bpp-tile:hover { background: rgba(255, 255, 255, 0.085); }
+.cr-bpp-tile .cr-bpp-disc { margin-bottom: 4px; }
+.cr-bpp-foot { padding-top: 4px; }
