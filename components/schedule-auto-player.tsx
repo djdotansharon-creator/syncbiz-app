@@ -11,6 +11,7 @@ import {
   SCHEDULE_AUTO_PREFS_EVENT,
 } from "@/lib/schedule-auto-preferences";
 import { decideScheduleAction } from "@/lib/schedule-actions";
+import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import type { Schedule, Source } from "@/lib/types";
 
 /** Fixed cadence (owner 2026-10-15, 400-branch network): schedules are minute-granular → one check every 30 s. */
@@ -21,6 +22,7 @@ const POLL_MS = 30_000;
  *   · START  — the block that should be playing now (**latest start** wins; then priority, then id) starts once per day (localStorage key), like before;
  *   · STOP   — a quiet block (SILENCE) stops the music at its start; a block with an explicit END that this engine started today stops it once the end has passed
  *              (2026-11-11, owner). The stop is the Stop button's own path (`stopScheduled` = device.stopOrSend).
+ * Branch scope (2026-11-15): only this window's own branch's schedules are fetched (`?branchId=`) — see lib/schedule-branch-scope.ts.
  * Only the block that took over LAST can act — an earlier block that never fired (the app was closed) no longer wins a later poll. Polls are aligned to :00 / :30 of
  * every minute so a stop lands within a second of its time. Respects Schedule engine on/off and per-block opt-out.
  */
@@ -29,6 +31,9 @@ export function ScheduleAutoPlayer() {
   const { engineEnabled } = useScheduleEngine();
   const { isRestoring } = usePlayback();
   const { stop, stopScheduled, setQueue, playSource, setLastMessage, route } = useSchedulePlaybackHandlers();
+  // 2026-11-15 (owner: "the schedule I set for one player affects all the others"): a window runs ONLY the schedules of the branch it plays for / controls. On the desktop the branch is
+  // MAIN's (null until the bridge answers — then nothing starts and the next poll retries); a browser / phone has "default" unless a branch was chosen in Control Room.
+  const stationBranch = useStationBranchId();
   const busyRef = useRef(false);
   // FLOOD FIX (2026-10-15): the playback handlers change identity on EVERY station status update (several per second).
   // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
@@ -48,6 +53,8 @@ export function ScheduleAutoPlayer() {
       if (isRestoring) return;
       // 2026-11-04: designated station window whose route is not known yet (MAIN designation pending) → retry next poll.
       if (handlersRef.current.route?.kind === "wait") return;
+      const branch = stationBranchIdNow();
+      if (branch === null) return; // this window's branch is not known yet: start nothing (never another branch's music)
 
       busyRef.current = true;
       try {
@@ -57,7 +64,7 @@ export function ScheduleAutoPlayer() {
         // "Failed to fetch" overlays on mobile for a recoverable condition.
         let schedules: Schedule[] | null = null;
         try {
-          const res = await fetch("/api/schedules", {
+          const res = await fetch(`/api/schedules?branchId=${encodeURIComponent(branch)}`, {
             credentials: "include",
             cache: "no-store",
           });
@@ -166,7 +173,7 @@ export function ScheduleAutoPlayer() {
       window.removeEventListener(SCHEDULE_AUTO_PREFS_EVENT, onPrefs);
       window.removeEventListener("storage", onPrefs);
     };
-  }, [engineEnabled, isRestoring]);
+  }, [engineEnabled, isRestoring, stationBranch]);
 
   return null;
 }
