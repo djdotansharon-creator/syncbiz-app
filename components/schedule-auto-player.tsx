@@ -11,6 +11,7 @@ import {
   SCHEDULE_AUTO_PREFS_EVENT,
 } from "@/lib/schedule-auto-preferences";
 import { decideScheduleAction } from "@/lib/schedule-actions";
+import { clearScheduleDriven } from "@/lib/schedule-driven";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import type { Schedule, Source } from "@/lib/types";
 
@@ -94,6 +95,7 @@ export function ScheduleAutoPlayer() {
           } catch {
             return; // retried next poll
           }
+          clearScheduleDriven(); // a quiet block: the schedule's music is over, nothing is lined up after it
           for (const k of action.fireKeys) {
             try {
               localStorage.setItem(k, "1");

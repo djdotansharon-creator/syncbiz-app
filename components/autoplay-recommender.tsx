@@ -22,6 +22,7 @@ import { useDevicePlayer } from "@/lib/device-player-context";
 import { getYouTubeVideoId } from "@/lib/playlist-utils";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { getRepeatMode } from "@/lib/mix-preferences";
+import { useScheduleDriven } from "@/lib/schedule-driven";
 import type { UnifiedSource } from "@/lib/source-types";
 
 const AUTOPLAY_GENRE = "Autoplay";
@@ -79,7 +80,9 @@ export function AutoplayRecommender(): null {
   const sessionLen = pb.currentPlaylist ? getPlaylistTracks(pb.currentPlaylist).length : 1;
   // 2026-10-23 (owner): with LOOP off the LAST song of a list gets a recommended next song lined up too — exactly like a single song
   // ("when an album ends the next song is ready automatically"). While loop is ON the list wraps by itself, so nothing is needed.
-  const lastOfList = sessionLen > 1 && pb.currentTrackIndex >= sessionLen - 1 && getRepeatMode() === "off";
+  // 2026-11-15 (owner): the music the SCHEDULE started never starts over — the last song of its list gets a suggested next song even with LOOP on (lib/schedule-driven.ts)
+  const driven = useScheduleDriven(src?.id ?? null, src?.genre ?? null);
+  const lastOfList = sessionLen > 1 && pb.currentTrackIndex >= sessionLen - 1 && (getRepeatMode() === "off" || driven);
   const title = (track?.title ?? src?.title ?? "").trim();
   const artist = ((track as { artist?: string } | null)?.artist ?? (src as { artist?: string } | null)?.artist ?? "").trim();
   const kind = src?.type ?? null;
@@ -117,7 +120,7 @@ export function AutoplayRecommender(): null {
     else if (sessionLen > 1 && !lastOfList) why = `part-of-a-playlist(${sessionLen} tracks)`;
     else {
       try {
-        if (localStorage.getItem("syncbiz:autoplayNext") !== "on") why = "switched-off"; // opt-in only (owner 2026-10-27)
+        if (localStorage.getItem("syncbiz:autoplayNext") !== "on" && !driven) why = "switched-off"; // opt-in only (owner 2026-10-27) — except for the music the schedule started (owner 2026-11-15)
       } catch {
         /* ignore */
       }
@@ -218,7 +221,7 @@ export function AutoplayRecommender(): null {
         if (runningFor.current === seed) runningFor.current = null;
       }
     })();
-  }, [seed, vid, playing, isControl, sessionLen, lastOfList, title, artist]);
+  }, [seed, vid, playing, isControl, sessionLen, lastOfList, title, artist, driven]);
 
   return null;
 }

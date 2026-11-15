@@ -231,7 +231,6 @@ assert("S76 the little hint bar of a trim strip never catches the pointer: on a 
 assert("S77 scrolling the wheel on the hours zooms (up = closer, down = further, around the pointer); in the Day view the whole timeline does, the week rows only the hours, and the list under the day is left to scroll", /!!tgt\?\.closest\?\.\("\.ss-haxis"\) \|\| \(!dvEl\.querySelector\("\.ss-hrows--week"\) && !!tgt\?\.closest\?\.\("\.ss-hrows"\)\)/.test(comp) && /Math\.exp\(e\.deltaY \* \(pinch/.test(comp));
 
 // ── the week's hours, cross-day drag, quiet blocks (owner 2026-11-15) ──
-import { viewRange } from "../lib/schedules-timeline";
 const wide = viewRange("active", null, [9 * 60 + 30], [16 * 60 + 45]);
 assert("S78 the hours shown cover every block's END too: a block 09:30 → 16:45 is never cut at 13:00 (it used to be: the range counted starts only); a quiet block's start counts", wide.first <= 8 && wide.last >= 17 && viewRange("active", null, [4 * 60, 9 * 60 + 30]).first <= 4 && viewRange("active", null, [9 * 60 + 30]).last - viewRange("active", null, [9 * 60 + 30]).first >= 8);
 assert("S79 the studio feeds the range with every enabled block (quiet ones too) and every explicit end; a block never runs out of the body of the hours (drawn to the last hour shown at most)", /const live = items\.filter\(\(x\) => x\.enabled\);\s+return viewRange\(display\.hours, biz, live\.map\(startMinutes\), live\.map\(\(x\) => explicitEndMinutes\(x\)\)/.test(comp) && /Math\.min\(sc\.end, orient === "v" \? LAST_H \* 60 : DAY_MINUTES\)/.test(comp));

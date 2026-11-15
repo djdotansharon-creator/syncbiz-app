@@ -260,6 +260,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const LAST_H = range.last;
   // the height of an hour in the week's columns (stretch / squeeze the hours: scroll or drag on the hours, − / +)
   const [hourH, setHourH] = useState(BASE_HOUR_H);
+  // lengths of playlists that had none stored, looked up when one is placed (owner 2026-11-15: a song comes into the day with its own length)
+  const [learned, setLearned] = useState<Record<string, number>>({});
+  const askedLength = useRef<Set<string>>(new Set());
   const HOUR_H = hourH;
   // zooming + panning the hours (owner 2026-11-12): null = the whole range; otherwise the part of the day shown. It drives the horizontal views (the week's rows, the day's rows).
   const [zoomWin, setZoomWin] = useState<TimeWindow | null>(null);
@@ -552,7 +555,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const colour = (targetType: string, targetId: string) => paletteIndex(`${targetType}:${targetId}`);
     const bid = (targetType: "SOURCE" | "PLAYLIST" | "RADIO", targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
     for (const p of playlists) {
-      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: "playlist", sub: p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) });
+      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: "playlist", sub: p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) ?? learned[p.id] ?? null });
     }
     for (const s of sources) {
       out.push({ key: scheduleTargetKey("SOURCE", s.id), targetType: "SOURCE", targetId: s.id, name: s.name, cover: (s.artworkUrl ?? "").trim() || null, kind: "song", sub: tr("Song"), branchId: bid("SOURCE", s.id), ci: colour("SOURCE", s.id), dur: null });
@@ -565,7 +568,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       out.push({ key: scheduleTargetKey("BANK", b.id), targetType: "BANK", targetId: b.id, name: b.name, cover: null, kind: "bank", sub: b.isPrivate ? tr("Private music bank") : tr("Royalty-free"), branchId: "", ci: colour("BANK", b.id), dur: null });
     }
     return out;
-  }, [playlists, sources, radioStations, bankPacks, tr]);
+  }, [playlists, sources, radioStations, bankPacks, learned, tr]);
   const libMap = useMemo(() => new Map(lib.map((l) => [l.key, l])), [lib]);
   const libFor = useCallback((s: Schedule) => libMap.get(scheduleTargetKey(s.targetType, (s.targetId || s.sourceId || "").trim())) ?? null, [libMap]);
   // "Quiet — no music": a block that stops the music at its start (the engine's SILENCE target). It lives in the music list as the first row.
@@ -756,8 +759,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   );
 
   const create = useCallback(
-    (item: LibItem, day: number, min: number, branchId?: string) =>
-      createFromBody({
+    async (item: LibItem, day: number, min: number, branchId?: string) => {
+      const created = await createFromBody({
         name: item.targetType === "SILENCE" ? "Quiet" : item.name,
         // a quiet block belongs to the branch whose row / filter it was added in
         branchId: item.targetType === "SILENCE" || item.targetType === "BANK" ? branchId ?? quietBranch : item.branchId,
@@ -771,8 +774,32 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         ...(item.targetType !== "SILENCE" && Number.isFinite(fitMinutes(item.dur)) && min + fitMinutes(item.dur) <= END_MAX ? { endTimeLocal: minutesToTimeLocal(min + fitMinutes(item.dur)) } : {}),
         enabled: true,
         priority: 1,
-      }),
-    [createFromBody, quietBranch],
+      });
+      if (created) void learnLength(item, created);
+      return created;
+    },
+    [createFromBody, quietBranch], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // a playlist whose length is not stored yet is asked for it once, when it is placed; when the answer comes the block takes the music's own length (no end = "until the next block"
+  // is exactly what the owner does not want). Where the length cannot be looked up (no YouTube access here, a local file) the block simply stays as it is.
+  const learnLength = useCallback(
+    async (item: LibItem, created: Schedule) => {
+      if (item.targetType !== "PLAYLIST" || item.dur || askedLength.current.has(item.targetId)) return;
+      askedLength.current.add(item.targetId);
+      try {
+        const res = await api<{ durationSeconds?: number | null }>("POST", `/api/playlists/${encodeURIComponent(item.targetId)}/refresh-duration`);
+        const sec = res?.durationSeconds;
+        if (typeof sec !== "number" || sec <= 0) return;
+        setLearned((prev) => ({ ...prev, [item.targetId]: sec }));
+        const cur = itemsRef.current.find((x) => x.id === created.id);
+        const start = startMinutes(created);
+        const end = start + fitMinutes(sec);
+        if (cur && explicitEndMinutes(cur) === null && end <= END_MAX) await update(created.id, { endTimeLocal: minutesToTimeLocal(end) });
+      } catch {
+        /* its length cannot be looked up here */
+      }
+    },
+    [update],
   );
 
   const removeNow = useCallback(

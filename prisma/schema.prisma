@@ -1060,6 +1060,8 @@ model PlaylistItem {
   url        String   @default("")
   cover      String?
   position   Int
+  /// 2026-11-15 (owner: "every playlist must carry how long it takes"): the track's own length in seconds; null = not known yet. The playlist's total (Playlist.durationSeconds) is the sum when every track is known.
+  durationSec Int?
   addedAt    DateTime @default(now())
 
   playlist Playlist     @relation(fields: [playlistId], references: [id], onDelete: Cascade)

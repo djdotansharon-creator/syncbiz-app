@@ -11,13 +11,15 @@
  *     quiet block this would have turned the music back on after closing time.)
  * An explicit end is exclusive ("ends 22:00" = silent from 22:00:00); the default end (23:59) keeps the old inclusive rule. A block that never fired today
  * (the app was closed, the block is opted out here) is never stopped. Playback itself (play / stop paths) is untouched: this only DECIDES.
+ *
+ * 2026-11-15 (owner: "the song must not start over; after it, if there is a gap the player itself pushes suitable songs; only a defined quiet time is silent"):
+ * the END of a MUSIC block is where ITS OWN music ends — it no longer stops anything. The music carries on by itself (the player lines up a suggested song, see
+ * lib/schedule-driven.ts) until the next block takes over; only a QUIET block silences. An old block whose end has passed and that never started today is simply not started late.
  */
 import type { Schedule } from "@/lib/types";
 import { isScheduleInActiveWindow, numericSchedulePriority, parseLocalTimeToMinutes, scheduleAutoFireStorageKey } from "@/lib/schedule-window";
 
 const DEFAULT_END_MINUTES = 23 * 60 + 59;
-/** an end that passed longer ago than this (a restart long after closing time) no longer triggers a stop */
-const END_GRACE_MINUTES = 90;
 
 export type ScheduleAction =
   | { kind: "start"; schedule: Schedule; fireKey: string }
@@ -107,11 +109,7 @@ export function decideScheduleAction(input: {
     return hasFired(startKey) && !input.reassertSilence ? null : { kind: "stop", schedule: current, reason: "silence", fireKeys: [startKey] };
   }
   const end = explicitEndMinutes(current);
-  if (end !== null && cur >= end) {
-    // its end has passed and no other block took over: stop ONCE, but only a block this engine started today, and not long after the fact (a late restart)
-    const endKey = scheduleEndFireStorageKey(current, now);
-    if (cur - end > END_GRACE_MINUTES || !hasFired(startKey) || hasFired(endKey)) return null;
-    return { kind: "stop", schedule: current, reason: "end", fireKeys: [endKey] };
-  }
+  // its own music is over: nothing stops (the player carries on with suggested songs until the next block) and it is not started late either
+  if (end !== null && cur >= end) return null;
   return hasFired(startKey) ? null : { kind: "start", schedule: current, fireKey: startKey };
 }

@@ -11,6 +11,7 @@ import { supportsEmbedded } from "@/lib/player-utils";
 import type { Schedule, Source } from "@/lib/types";
 import { stationMayStart, type ScheduleRoute } from "@/lib/schedule-station-route";
 import { bankPackToUnified, findBankPack } from "@/lib/music-bank/bank-play-source";
+import { markScheduleDriven } from "@/lib/schedule-driven";
 
 export type SchedulePlaybackHandlers = {
   stop: () => void;
@@ -56,11 +57,13 @@ export async function runSchedulePlayback(
       if (!stationMayStart(route, unified.type)) return false;
       setQueue([unified], { force: true });
       playSource(unified, stationTrackIndex);
+      markScheduleDriven(unified.id); // the player may line up a suggested song after it instead of starting it over (lib/schedule-driven.ts)
       return true;
     }
     stop();
     setQueue([unified], { force: true });
     playSource(unified, 0);
+    markScheduleDriven(unified.id);
     return true;
   };
 
@@ -170,6 +173,7 @@ export async function runSchedulePlayback(
   const unifiedSrc = sourceToUnified(src);
   if (route.kind === "station" && !stationMayStart(route, unifiedSrc.type)) return false;
   playSource(unifiedSrc, 0);
+  markScheduleDriven(unifiedSrc.id);
   const target = (src.target ?? src.uriOrPath ?? "").trim();
   if (!target) {
     setLastMessage("Failed: No target path");
