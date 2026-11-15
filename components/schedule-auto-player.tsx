@@ -17,6 +17,19 @@ import type { Schedule, Source } from "@/lib/types";
 
 /** Fixed cadence (owner 2026-10-15, 400-branch network): schedules are minute-granular → one check every 30 s. */
 const POLL_MS = 30_000;
+/** the last schedules this computer received for its branch, kept for the moments the network is down (not older than 36 hours) */
+const SCHEDULES_CACHE_KEY = "syncbiz-schedules-cache-v1";
+function readCachedSchedules(branch: string): Schedule[] | null {
+  try {
+    const raw = localStorage.getItem(`${SCHEDULES_CACHE_KEY}:${branch}`);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as { at?: number; schedules?: Schedule[] };
+    if (!v || typeof v.at !== "number" || !Array.isArray(v.schedules) || Date.now() - v.at > 36 * 3600_000) return null;
+    return v.schedules;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * While this browser tab is open, polls schedules and acts on `decideScheduleAction` (lib/schedule-actions.ts, pure + tested):
@@ -31,7 +44,7 @@ export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { engineEnabled } = useScheduleEngine();
   const { isRestoring } = usePlayback();
-  const { stop, stopScheduled, setQueue, playSource, setLastMessage, route } = useSchedulePlaybackHandlers();
+  const { stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady } = useSchedulePlaybackHandlers();
   // 2026-11-15 (owner: "the schedule I set for one player affects all the others"): a window runs ONLY the schedules of the branch it plays for / controls. On the desktop the branch is
   // MAIN's (null until the bridge answers — then nothing starts and the next poll retries); a browser / phone has "default" unless a branch was chosen in Control Room.
   const stationBranch = useStationBranchId();
@@ -40,9 +53,9 @@ export function ScheduleAutoPlayer() {
   // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
   // (TEST logs: up to 8 requests/s per app). The latest handlers now live in a ref read at fire time; the polling
   // effect depends only on the engine switch + restore state → exactly one request per POLL_MS.
-  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), setQueue, playSource, setLastMessage, route });
+  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), setQueue, playSource, setLastMessage, route, bankStreamReady });
   useEffect(() => {
-    handlersRef.current = { router, stop, stopScheduled, setQueue, playSource, setLastMessage, route };
+    handlersRef.current = { router, stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady };
   });
 
   useEffect(() => {
@@ -71,8 +84,15 @@ export function ScheduleAutoPlayer() {
           });
           if (!res.ok || cancelled) return;
           schedules = (await res.json()) as Schedule[];
+          try {
+            localStorage.setItem(`${SCHEDULES_CACHE_KEY}:${branch}`, JSON.stringify({ at: Date.now(), schedules }));
+          } catch {
+            /* no room: the copy is only a help */
+          }
         } catch {
-          return;
+          // the network is down (CLAUDE.md §14: nothing may need it): the last copy of this branch's schedules still decides — a closing time must silence the music even offline
+          schedules = readCachedSchedules(branch);
+          if (!schedules) return;
         }
         if (!Array.isArray(schedules) || schedules.length === 0) return;
 
@@ -132,7 +152,7 @@ export function ScheduleAutoPlayer() {
           ok = await runSchedulePlayback(
             winner,
             source,
-            { stop: h.stop, setQueue: h.setQueue, playSource: h.playSource, setLastMessage: h.setLastMessage, route: h.route },
+            { stop: h.stop, setQueue: h.setQueue, playSource: h.playSource, setLastMessage: h.setLastMessage, route: h.route, bankStreamReady: h.bankStreamReady },
             h.router,
           );
         } catch {

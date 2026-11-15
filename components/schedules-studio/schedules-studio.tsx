@@ -254,7 +254,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const range = useMemo(() => {
     // nothing scheduled is ever hidden: every block's start (a quiet one too) and every explicit end count (owner 2026-11-15: half of the day vanished — the hours were counted from non-quiet starts only)
     const live = items.filter((x) => x.enabled);
-    return viewRange(display.hours, biz, live.map(startMinutes), live.map((x) => explicitEndMinutes(x)).filter((m): m is number => m !== null));
+    return viewRange(display.hours, biz, items.map(startMinutes), live.map((x) => explicitEndMinutes(x)).filter((m): m is number => m !== null)); // a paused block is drawn too, so its start counts
   }, [display.hours, biz, items]);
   const FIRST_H = range.first;
   const LAST_H = range.last;
@@ -676,7 +676,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const m = fitMinutes(libFor(s)?.dur);
     return Number.isFinite(m) ? m : null;
   }, [libFor]);
-  const weekScenes = useMemo(() => WEEK_DAYS.map((d) => buildDayScenes(shownItems, d, weekDates, musicMinutes)), [shownItems, musicMinutes, weekDates]);
+  const weekScenes = useMemo(() => {
+    // every branch is its own sequence (the engine is per branch): another branch's block never cuts, hides or shadows this one's
+    const norm = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
+    const ids = Array.from(new Set(shownItems.map(norm)));
+    return WEEK_DAYS.map((d) =>
+      ids.length <= 1 ? buildDayScenes(shownItems, d, weekDates, musicMinutes) : ids.flatMap((id) => buildDayScenes(shownItems.filter((x) => norm(x) === id), d, weekDates, musicMinutes)).sort((a, b) => a.start - b.start),
+    );
+  }, [shownItems, musicMinutes, weekDates]);
   const dayRows = useMemo(() => {
     const ids = branchFilter !== "all" ? [branchFilter] : branchIds.length > 0 ? branchIds : [branches[0]?.id ?? "default"];
     return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes) }));
@@ -711,14 +718,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     itemsRef.current = items;
     colorsRef.current = blockColors;
   });
-  const remember = useCallback(() => {
-    if (undoing.current) return;
+  /** remembers the blocks before a change; true when it took a NEW snapshot (so a failed save can take it back) */
+  const remember = useCallback((): boolean => {
+    if (undoing.current) return false;
     const now = Date.now();
+    let pushed = false;
     if (now - lastChangeAt.current > HISTORY_GROUP_MS) {
       history.current.push({ items: itemsRef.current.filter((x) => !x.id.startsWith("tmp-")), colors: { ...colorsRef.current } });
       if (history.current.length > HISTORY_MAX) history.current.shift();
+      pushed = true;
     }
     lastChangeAt.current = now;
+    return pushed;
   }, []);
   const touch = useCallback(() => {
     lastChangeAt.current = Date.now();
@@ -727,15 +738,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // ── saving (optimistic, rolled back on a failure) ──
   const update = useCallback(
     async (id: string, patch: Partial<Schedule>) => {
-      const before = items.find((s) => s.id === id);
+      const before = itemsRef.current.find((s) => s.id === id) ?? items.find((s) => s.id === id);
       if (!before) return;
-      remember();
+      const pushed = remember();
       setItems((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
       try {
         const saved = await api<Schedule>("PATCH", `/api/schedules/${encodeURIComponent(id)}`, patch);
         setItems((prev) => prev.map((s) => (s.id === id ? { ...s, ...saved } : s)));
       } catch (e) {
         setItems((prev) => prev.map((s) => (s.id === id ? before : s)));
+        if (pushed) history.current.pop(); // nothing changed on the server: no step to undo
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
       }
       touch();
@@ -745,7 +757,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   const createFromBody = useCallback(
     async (body: Record<string, unknown>): Promise<Schedule | null> => {
-      remember();
+      const pushed = remember();
       const tmp = { id: `tmp-${Date.now()}`, accountId: "", ...body } as unknown as Schedule;
       setItems((prev) => [...prev, tmp]);
       try {
@@ -755,6 +767,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         return created;
       } catch (e) {
         setItems((prev) => prev.filter((s) => s.id !== tmp.id));
+        if (pushed) history.current.pop();
         showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
         touch();
         return null;
@@ -780,10 +793,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         enabled: true,
         priority: 1,
       });
-      if (created) void learnLength(item, created);
+      if (created) void learnRef.current(item, created);
       return created;
     },
-    [createFromBody, quietBranch], // eslint-disable-line react-hooks/exhaustive-deps
+    [createFromBody, quietBranch],
   );
   // a playlist whose length is not stored yet is asked for it once, when it is placed; when the answer comes the block takes the music's own length (no end = "until the next block"
   // is exactly what the owner does not want). Where the length cannot be looked up (no YouTube access here, a local file) the block simply stays as it is.
@@ -806,14 +819,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     },
     [update],
   );
+  const learnRef = useRef(learnLength);
+  useEffect(() => {
+    learnRef.current = learnLength;
+  });
 
   const removeNow = useCallback(
     async (id: string): Promise<boolean> => {
-      remember();
+      const pushed = remember();
       try {
         await api("DELETE", `/api/schedules/${encodeURIComponent(id)}`);
       } catch (e) {
         if (!(e instanceof Error) || !/not found|404/i.test(e.message)) {
+          if (pushed) history.current.pop();
           showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
           touch();
           return false;
@@ -841,6 +859,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   );
 
   const undoLast = useCallback(async () => {
+    if (undoing.current) return; // one undo at a time: a second press while the first is still writing would make the same block twice
     const snap = history.current.pop();
     if (!snap) {
       showToast(tr("Nothing to undo"));
@@ -906,10 +925,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       // a pasted song is as long as its music, never "until the end of the day" (owner 2026-11-15)
       const li = libFor(clip);
       const fit = fitMinutes(li?.dur);
-      if (!("endTimeLocal" in body) && Number.isFinite(fit) && startMinutes(clip) + fit <= END_MAX) body.endTimeLocal = minutesToTimeLocal(startMinutes(clip) + fit);
+      if (explicitEndMinutes(clip) === null && Number.isFinite(fit) && startMinutes(clip) + fit <= END_MAX) body.endTimeLocal = minutesToTimeLocal(startMinutes(clip) + fit);
       const created = await createFromBody(body);
       if (created) {
-        if (li) void learnLength(li, created);
+        if (li) void learnRef.current(li, created);
         if (blockColors[clip.id] !== undefined) setBlockColor(created.id, blockColors[clip.id]!);
         showToast(`${tr("Pasted")} · ${dateLabel(ymd)} ${formatMinutes(startMinutes(created))}`, true);
       }
@@ -1070,10 +1089,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (isTypingTarget(e.target) || e.altKey) return;
       const L = latest.current;
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "c" && L.editing) {
+      const isKey = (latin: string) => e.key.toLowerCase() === latin || e.code === `Key${latin.toUpperCase()}`; // a Hebrew layout types ז for Z: the physical key counts too
+      if (mod && isKey("c") && L.editing) {
         e.preventDefault();
         L.copyBlock(L.editing, L.editorDay);
-      } else if (mod && e.key.toLowerCase() === "v" && L.clip) {
+      } else if (mod && isKey("v") && L.clip) {
         const ymd = L.hoverDate ?? (L.view === "day" ? L.focusKey : null);
         e.preventDefault();
         if (!ymd) {
@@ -1081,9 +1101,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           return;
         }
         void L.pasteOn(ymd);
-      } else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      } else if (mod && isKey("z") && !e.shiftKey) {
         e.preventDefault();
-        void L.undo();
+        if (!e.repeat) void L.undo();
       } else if ((e.key === "Delete" || e.key === "Backspace") && !mod && !e.shiftKey) {
         let target: { id: string; day: number | undefined } | null = L.editing ? { id: L.editing.id, day: L.editorDay } : null;
         if (!target && !document.querySelector("[role='dialog'], .ss-menu")) {
@@ -1183,10 +1203,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         setSwapWith((prev) => (prev?.bid === key?.bid && prev?.day === key?.day ? prev : key));
       }
     };
+    let cancelled = false;
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointercancel", cancel);
+      if (cancelled) {
+        // the system took the pointer away (a touch scroll, a gesture): the block goes back, nothing is saved
+        releaseCursor?.();
+        setDrag(null);
+        setSwapWith(null);
+        return;
+      }
       if (!moved) {
         // a second click on the block whose card is already open closes it
         if (wasOpen) {
@@ -1207,9 +1235,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       }
       if (last !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last, ...(overDay !== sc.day ? { toDay: overDay } : {}) });
     };
+    const cancel = () => {
+      cancelled = true;
+      up();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointercancel", cancel);
   };
 
   // while a block is carried over ANOTHER day of the week, a see-through copy shows where it will land
@@ -1720,7 +1752,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 name: item.targetType === "SILENCE" ? "Quiet" : item.name,
                 targetType: item.targetType,
                 targetId: item.targetId,
-                sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
+                // null (not undefined): JSON drops undefined, and the old song id would stay on the server and win over the new music
+                sourceId: (item.targetType === "SOURCE" ? item.targetId : null) as unknown as undefined,
                 ...(item.targetType === "SILENCE" || item.targetType === "BANK" ? {} : { branchId: item.branchId }),
               });
             }
@@ -2220,7 +2253,7 @@ function ScenePopover({
           {devices.length > 0 && !quiet ? (
             <div className="ss-field">
               <span className="ss-label">{T.device}</span>
-              <select className="ss-select" value={schedule.deviceId ?? ""} onChange={(e) => onPatch({ deviceId: e.target.value || undefined })}>
+              <select className="ss-select" value={schedule.deviceId ?? ""} onChange={(e) => onPatch({ deviceId: (e.target.value || null) as unknown as undefined })}>
                 <option value="">{T.anyCompatibleDevice}</option>
                 {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
