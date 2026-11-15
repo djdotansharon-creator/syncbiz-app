@@ -938,6 +938,7 @@ export const HE_PHRASES: Record<string, string> = {
   "You": "את/ה",
   "Never signed in": "עוד לא התחבר",
   "Nothing to undo": "אין מה לבטל",
+  "Moved to {day}": "הועבר ל{day}",
   "Undone": "בוטל",
   "Deleted {name}": "{name} נמחק",
   "See more": "עוד",

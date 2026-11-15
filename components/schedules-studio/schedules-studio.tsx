@@ -74,7 +74,9 @@ import {
 import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Schedule, ScheduleTargetType, Source } from "@/lib/types";
 
-const HOUR_H = 46; // px per hour in the week view
+const BASE_HOUR_H = 46; // px per hour in the week's columns (the starting height; the hours can be stretched / squeezed)
+const MIN_HOUR_H = 12;
+const MAX_HOUR_H = 360;
 const PANEL_KEY = "syncbiz-schedule-lib-panel";
 const VIEW_KEY = "syncbiz-schedule-view";
 const POPOVER_W = 344;
@@ -230,7 +232,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [menu, setMenu] = useState<{ id: string; rect: Rect; day: number } | null>(null);
   const [hover, setHover] = useState<{ key: string; min: number } | null>(null);
   const [hoverDate, setHoverDate] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   const [dp, setDp] = useState<Rect | null>(null);
@@ -249,12 +251,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const markBadArt = useCallback((u: string) => setBadArt((prev) => (prev[u] ? prev : { ...prev, [u]: true })), []);
   // the business's opening hours, and which hours the timeline shows: the business's own (or what the schedule uses), or the whole day
   const [biz, setBiz] = useState<BizHours | null>(null);
-  const range = useMemo(
-    () => viewRange(display.hours, biz, items.filter((x) => x.enabled && !isSilenceBlock(x)).map(startMinutes)),
-    [display.hours, biz, items],
-  );
+  const range = useMemo(() => {
+    // nothing scheduled is ever hidden: every block's start (a quiet one too) and every explicit end count (owner 2026-11-15: half of the day vanished — the hours were counted from non-quiet starts only)
+    const live = items.filter((x) => x.enabled);
+    return viewRange(display.hours, biz, live.map(startMinutes), live.map((x) => explicitEndMinutes(x)).filter((m): m is number => m !== null));
+  }, [display.hours, biz, items]);
   const FIRST_H = range.first;
   const LAST_H = range.last;
+  // the height of an hour in the week's columns (stretch / squeeze the hours: scroll or drag on the hours, − / +)
+  const [hourH, setHourH] = useState(BASE_HOUR_H);
+  const HOUR_H = hourH;
   // zooming + panning the hours (owner 2026-11-12): null = the whole range; otherwise the part of the day shown. It drives the horizontal views (the week's rows, the day's rows).
   const [zoomWin, setZoomWin] = useState<TimeWindow | null>(null);
   const winA = zoomWin ? zoomWin.a : FIRST_H * 60;
@@ -262,6 +268,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const SPAN = winB - winA;
   const pct = (min: number) => ((Math.min(Math.max(min, winA), winB) - winA) / SPAN) * 100;
   const topOf = (min: number) => ((Math.max(min, FIRST_H * 60) - FIRST_H * 60) * HOUR_H) / 60;
+  // the hours named in the margin of the week's columns: every hour at the usual height, fewer when squeezed, quarters / halves when stretched
+  const labelStep = hourH >= 300 ? 15 : hourH >= 150 ? 30 : hourH >= 34 ? 60 : hourH >= 20 ? 120 : 240;
+  const hourLabels = useMemo(() => {
+    const out: number[] = [];
+    for (let m = FIRST_H * 60; m < LAST_H * 60; m += labelStep) out.push(m);
+    return out;
+  }, [FIRST_H, LAST_H, labelStep]);
   /** where in time is the pointer on a track (the week's day column runs down, the day's row runs along — against the reading direction in Hebrew) */
   const minuteAtPointer = (clientX: number, clientY: number, el: HTMLElement, orient: Orient): number => {
     const r = el.getBoundingClientRect();
@@ -375,6 +388,65 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<number | null>(null);
+
+  // ── the hours of the week's columns: stretch / squeeze them like a music app's timeline (owner 2026-11-15) — scroll on the hours (or Ctrl + scroll anywhere), press on the hours and drag
+  // down (closer) / up (further), − / +; the minute under the pointer stays where it is ──
+  const hourRef = useRef(hourH);
+  const vAnchor = useRef<{ min: number; y: number } | null>(null);
+  const zoomHoursTo = useCallback(
+    (target: number, clientY?: number) => {
+      const el = scrollRef.current;
+      const next = Math.min(MAX_HOUR_H, Math.max(MIN_HOUR_H, target));
+      const h = hourRef.current;
+      if (!el || next === h) return;
+      const y = clientY !== undefined ? clientY - el.getBoundingClientRect().top : el.clientHeight / 2;
+      vAnchor.current = { min: FIRST_H * 60 + ((el.scrollTop + y) * 60) / h, y };
+      hourRef.current = next;
+      setHourH(next);
+    },
+    [FIRST_H],
+  );
+  const zoomHours = useCallback((factor: number, clientY?: number) => zoomHoursTo(hourRef.current * factor, clientY), [zoomHoursTo]);
+  const resetHours = useCallback(() => zoomHoursTo(BASE_HOUR_H), [zoomHoursTo]);
+  useLayoutEffect(() => {
+    hourRef.current = hourH;
+    const a = vAnchor.current;
+    const el = scrollRef.current;
+    if (!a || !el) return;
+    vAnchor.current = null;
+    el.scrollTop = Math.max(0, ((a.min - FIRST_H * 60) * hourH) / 60 - a.y);
+  }, [hourH, FIRST_H]);
+  const columnsView = view === "week" && display.weekLayout === "columns";
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !columnsView) return;
+    const onWheel = (e: WheelEvent) => {
+      const onHours = !!(e.target as Element | null)?.closest?.(".ss-gutter");
+      const pinch = e.ctrlKey || e.metaKey; // a trackpad pinch arrives as ctrl + wheel
+      if (!pinch && !onHours) return;
+      e.preventDefault();
+      zoomHours(Math.exp(-e.deltaY * (pinch && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0024)), e.clientY);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [columnsView, zoomHours]);
+  const onGutterPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const sy = e.clientY;
+    const h0 = hourRef.current;
+    const releaseCursor = holdCursor("ns-resize");
+    const move = (ev: PointerEvent) => zoomHoursTo(h0 * Math.exp((ev.clientY - sy) / RULER_ZOOM_PX), sy);
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      releaseCursor();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
 
   // the whole screen is the studio: the page's side rails are hidden while it is open (CSS: html[data-sb-studio])
   useEffect(() => {
@@ -810,7 +882,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // A block that repeats on several days is one schedule in the data. Editing one day's block detaches that day: the others keep their time, the edited
   // day becomes its own weekly block (Undo puts it back). A block of one day, or a one-time block, is simply edited. A block that has an END keeps its length when it moves.
   const editOccurrence = useCallback(
-    async (src: Schedule, day: number, edit: { start?: number; end?: number | null }, opts?: { quiet?: boolean }): Promise<string | null> => {
+    async (src: Schedule, day: number, edit: { start?: number; end?: number | null; toDay?: number }, opts?: { quiet?: boolean }): Promise<string | null> => {
       const oldStart = startMinutes(src);
       const oldEnd = explicitEndMinutes(src);
       let newStart = edit.start ?? oldStart;
@@ -818,12 +890,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (edit.end === undefined && oldEnd !== null) newStart = Math.min(newStart, Math.max(oldStart, END_MAX - (oldEnd - oldStart)));
       let newEnd: number | null = edit.end !== undefined ? edit.end : oldEnd !== null ? Math.min(END_MAX, oldEnd + (newStart - oldStart)) : null;
       if (newEnd !== null && newEnd <= newStart) newEnd = null;
-      if (newStart === oldStart && newEnd === oldEnd) return src.id;
+      const toDay = edit.toDay !== undefined && edit.toDay !== day ? edit.toDay : null; // moved to another day of the week (owner 2026-11-15)
+      if (newStart === oldStart && newEnd === oldEnd && toDay === null) return src.id;
       remember();
       const patch: Partial<Schedule> = {};
       if (newStart !== oldStart) patch.startTimeLocal = minutesToTimeLocal(newStart);
       if (newEnd !== oldEnd) patch.endTimeLocal = newEnd === null ? "23:59:00" : minutesToTimeLocal(newEnd);
-      const endNote = newEnd !== oldEnd ? (newEnd === null ? tr("Runs until the next block") : tr("Ends {time}", { time: formatMinutes(newEnd) })) : "";
+      if (toDay !== null && !isMultiDayWeekly(src)) {
+        if (src.recurrence === "one_off") patch.oneOffDateLocal = weekDates[toDay];
+        else patch.daysOfWeek = [toDay];
+      }
+      const dayNote = toDay !== null ? `${tr("Moved to {day}", { day: dayName(toDay, "long") })} · ${formatMinutes(newStart)}` : "";
+      const endNote = dayNote || (newEnd !== oldEnd ? (newEnd === null ? tr("Runs until the next block") : tr("Ends {time}", { time: formatMinutes(newEnd) })) : "");
       if (!isMultiDayWeekly(src)) {
         await update(src.id, patch);
         if (endNote && !opts?.quiet) showToast(endNote, true);
@@ -831,7 +909,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       }
       const rest = src.daysOfWeek.filter((d) => d !== day);
       const before = items;
-      const tmp: Schedule = { ...src, id: `tmp-${Date.now()}`, daysOfWeek: [day], ...patch };
+      const tmp: Schedule = { ...src, id: `tmp-${Date.now()}`, daysOfWeek: [toDay ?? day], ...patch };
       setItems((prev) => [...prev.map((x) => (x.id === src.id ? { ...x, daysOfWeek: rest } : x)), tmp]);
       const tid = (src.targetId || src.sourceId || "").trim();
       try {
@@ -843,7 +921,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           sourceId: src.targetType === "SOURCE" ? tid : undefined,
           deviceId: src.deviceId || undefined,
           recurrence: "weekly",
-          daysOfWeek: [day],
+          daysOfWeek: [toDay ?? day],
           startTimeLocal: patch.startTimeLocal ?? src.startTimeLocal,
           endTimeLocal: patch.endTimeLocal ?? (src.endTimeLocal || undefined),
           enabled: src.enabled,
@@ -1037,6 +1115,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     let moved = false;
     let releaseCursor: (() => void) | null = null;
     let last = startMin;
+    let overDay = sc.day; // the week's day under the pointer: drop on another day's column / row and the block moves to that day
+    const inWeek = view === "week";
     const move = (ev: PointerEvent) => {
       const d = (orient === "v" ? ev.clientY : ev.clientX) - startPt;
       if (!moved && Math.abs(d) < 5) return;
@@ -1051,8 +1131,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       // by dragging on (and never past the end of the day) — only the strips change the length
       const keep = own !== null ? own - startMin : 5;
       last = Math.min(Math.max(last, Math.min(FIRST_H * 60, startMin)), Math.max(startMin, Math.min(LAST_H * 60, own !== null ? END_MAX : DAY_MINUTES) - keep));
-      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}) });
-      if (canSwap) {
+      if (inWeek) {
+        const dayEl = document.elementsFromPoint(ev.clientX, ev.clientY).find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.day !== undefined && (n.classList.contains("ss-col") || n.classList.contains("ss-hrow")));
+        if (dayEl) overDay = Number(dayEl.dataset.day);
+      }
+      setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, ...(own !== null ? { end: minutesToTimeLocal(Math.min(END_MAX, own + (last - startMin))) } : {}), ...(inWeek && overDay !== sc.day ? { overDay } : {}) });
+      if (canSwap && overDay === sc.day) {
         const over = document
           .elementsFromPoint(ev.clientX, ev.clientY)
           .find((n): n is HTMLElement => n instanceof HTMLElement && n.classList.contains("ss-block") && n.parentElement === track && n.dataset.bid !== baseId(sc.schedule.id) && !/\bis-(quiet|paused|shadowed)\b/.test(n.className));
@@ -1079,15 +1163,24 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       setDrag(null);
       setSwapWith(null);
       markPopupClose(); // (same: the click that ends a drag opens nothing)
-      if (swapTarget) {
+      if (swapTarget && overDay === sc.day) {
         void swapBlocks(sc, swapTarget); // dropped ON another block: the two trade places
         return;
       }
-      if (last !== startMin) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last });
+      if (last !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: last, ...(overDay !== sc.day ? { toDay: overDay } : {}) });
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+  };
+
+  // while a block is carried over ANOTHER day of the week, a see-through copy shows where it will land
+  const ghostFor = (d: number, orient: Orient) => {
+    if (!drag || drag.overDay !== d || drag.day === d) return null;
+    const from = (weekScenes[drag.day] ?? []).find((x) => baseId(x.schedule.id) === drag.id);
+    if (!from) return null;
+    const len = from.end - from.start;
+    return renderBlock({ ...from, day: d, start: drag.start, end: drag.start + len, shadowed: false }, orient, true);
   };
 
   // a jingle is a moment, not a stretch: it plays ON TOP of the music, so it is drawn as a small bell at its time (never as a block)
@@ -1130,7 +1223,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const perMin = orient === "v" ? HOUR_H / 60 : (track.getBoundingClientRect().width / SPAN) * (isRtl() ? -1 : 1);
     const begin = startMinutes(sc.schedule);
     const maxLen = maxLenOf(sc.schedule);
-    const live = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK"; // a live station (24/7) or a music bank has no length of its own: its strips stretch to any length the person wants
+    const live = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK" || sc.schedule.targetType === "SILENCE"; // a live station (24/7) or a music bank has no length of its own: its strips stretch to any length the person wants
     const base = items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule;
     const ownEnd = explicitEndMinutes(base);
     const naturalEnd = Math.min(sc.end, DAY_MINUTES - 1);
@@ -1176,17 +1269,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     window.addEventListener("pointercancel", up);
   };
 
-  const renderBlock = (sc: Scene, orient: Orient) => {
+  const renderBlock = (sc: Scene, orient: Orient, ghost = false) => {
     if (sc.end <= FIRST_H * 60) return null;
+    if (orient === "v" && sc.start >= LAST_H * 60) return null;
     if (orient === "h" && (sc.end <= winA || sc.start >= winB)) return null; // zoomed in: this block is out of sight
     const li = libFor(sc.schedule);
-    const end = Math.min(sc.end, DAY_MINUTES);
+    const end = Math.min(sc.end, orient === "v" ? LAST_H * 60 : DAY_MINUTES); // a block never runs out of the body of the hours (the week's columns end at the last hour shown)
     const vHeight = Math.max(26, ((end - Math.max(sc.start, FIRST_H * 60)) * HOUR_H) / 60 - 3);
     const style: CSSProperties =
       orient === "v"
         ? { top: topOf(sc.start), height: vHeight }
         : { insetInlineStart: `${pct(sc.start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(sc.start))}% - 4px)` };
-    const cls = `ss-block ss-block--${orient}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
+    const cls = `ss-block ss-block--${orient}${ghost ? " is-ghost" : ""}${!ghost && drag && drag.overDay !== undefined && drag.overDay !== drag.day && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-leaving" : ""}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
     const tall = orient === "v" && vHeight > 60;
     const plain = sc.paused || sc.quiet;
     const tone = plain ? null : toneOf(sc.schedule);
@@ -1216,10 +1310,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     if (display.length && !plain && li?.dur) lines.push(formatLength(li.dur));
     return (
       <div
-        key={`${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
+        key={`${ghost ? "ghost-" : ""}${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
         className={`${cls}${swapWith && swapWith.bid === baseId(sc.schedule.id) && swapWith.day === sc.day ? " is-swap-target" : ""}${swapWith && drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-swapping" : ""}`}
         data-bid={baseId(sc.schedule.id)}
         data-day={sc.day}
+        aria-hidden={ghost || undefined}
         data-c={colourOf(sc.schedule)}
         style={blockStyle}
         aria-label={`${nameOf(sc.schedule)} ${formatMinutes(sc.start)}`}
@@ -1246,7 +1341,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           <span className="ss-b-name">{nameOf(sc.schedule)}</span>
           {lines.map((ln, i) => <span key={i} className="ss-b-time">{ln}</span>)}
         </span>
-        {!sc.shadowed && !sc.paused && !sc.quiet ? (
+        {!sc.shadowed && !sc.paused && !ghost ? (
           <>
             <span className="ss-b-resize ss-b-resize--start" onPointerDown={(e) => onTrimPointerDown(e, sc, orient, "start")} title={tr("Drag the edge to cut from the start")} aria-hidden />
             <span className="ss-b-resize" onPointerDown={(e) => onTrimPointerDown(e, sc, orient, "end")} title={tr("Drag the edge to cut from the end")} aria-hidden />
@@ -1328,6 +1423,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 <button type="button" className="ss-clip-x" onClick={() => setClip(null)} aria-label={tr("Clear")}>×</button>
               </span>
             ) : null}
+            {!horizontalView && view === "week" ? (
+              <ZoomControl pxPerMin={hourH / 60} zoomed={hourH !== BASE_HOUR_H} onIn={() => zoomHours(1.6)} onOut={() => zoomHours(1 / 1.6)} onReset={resetHours} />
+            ) : null}
             {horizontalView ? (
               <ZoomControl
                 pxPerMin={pxPerMinNow}
@@ -1361,7 +1459,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
               </div>
               <div className="ss-hrows ss-hrows--week">
                 {WEEK_DAYS.map((d) => (
-                  <div key={d} className="ss-hrow has-label" data-day={d}>
+                  <div key={d} className={`ss-hrow has-label${drag?.overDay === d ? " is-drop-day" : ""}`} data-day={d}>
                     <button type="button" className={`ss-wlabel${weekDates[d] === todayKey ? " is-today" : ""}${clip ? " can-paste" : ""}`} onClick={() => onDayHeadClick(d)} title={clip ? tr("Paste here") : tr("Open this day")}>
                       <span className="ss-dayname">{dayName(d)}</span>
                       <span className="ss-daydate">{Number(weekDates[d]!.slice(8))}</span>
@@ -1376,6 +1474,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       onDrop={(e) => void trackDrop(e, d, "h")}
                     >
                       {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "h"))}
+                      {ghostFor(d, "h")}
                       {branchFilter === "all" || branchFilter === stationBranch ? jinglePins(d, weekDates[d]!, "h") : null}
                       {hover?.key === `w${d}` ? (
                         <div className="ss-hhover" style={{ insetInlineStart: `${pct(hover.min)}%` }} aria-hidden><span>{formatMinutes(hover.min)}</span></div>
@@ -1403,15 +1502,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             </div>
             <div className="ss-scroll" ref={scrollRef}>
               <div className="ss-body" style={{ height: (LAST_H - FIRST_H) * HOUR_H }}>
-                <div className="ss-gutter" aria-hidden>
-                  {Array.from({ length: LAST_H - FIRST_H }, (_, i) => (
-                    <span key={i} className="ss-hour" style={{ top: i * HOUR_H }}>{String(FIRST_H + i).padStart(2, "0")}:00</span>
+                <div className="ss-gutter" title={tr("Zoom: drag along the hours, or Ctrl + scroll")} onPointerDown={onGutterPointerDown} onDoubleClick={resetHours}>
+                  {hourLabels.map((m, i) => (
+                    <span key={m} className="ss-hour" style={{ top: ((m - FIRST_H * 60) * HOUR_H) / 60 }} data-first={i === 0 ? "1" : undefined}>{formatMinutes(m)}</span>
                   ))}
                 </div>
                 {WEEK_DAYS.map((d) => (
                   <div
                     key={d}
-                    className={`ss-col${weekDates[d] === todayKey ? " is-today" : ""}`}
+                    className={`ss-col${weekDates[d] === todayKey ? " is-today" : ""}${drag?.overDay === d ? " is-drop-day" : ""}`}
                     data-day={d}
                     onPointerMove={(e) => trackMove(e, `d${d}`, weekDates[d]!, "v")}
                     onPointerLeave={() => { setHover(null); setHoverDate(null); }}
@@ -1421,6 +1520,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                     onDrop={(e) => void trackDrop(e, d, "v")}
                   >
                     {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "v"))}
+                    {ghostFor(d, "v")}
                     {branchFilter === "all" || branchFilter === stationBranch ? jinglePins(d, weekDates[d]!, "v") : null}
                     {hover?.key === `d${d}` ? (
                       <div className="ss-hover" style={{ top: topOf(hover.min) }} aria-hidden><span>{formatMinutes(hover.min)}</span></div>

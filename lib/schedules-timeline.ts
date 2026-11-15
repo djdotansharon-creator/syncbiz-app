@@ -116,7 +116,7 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
     const nextStart = i + 1 < distinct.length ? distinct[i + 1]! : DAY_MINUTES;
     // the engine's own rule (lib/schedule-actions.ts): an explicit end stops the music at that time unless the next block comes first
     const quiet = isSilenceBlock(s);
-    const own = quiet ? null : explicitEndMinutes(s);
+    const own = explicitEndMinutes(s); // a quiet block can have its own end too (owner 2026-11-15: "I want to control the quiet time with the two bars")
     const end = own !== null && own < nextStart ? own : nextStart;
     const shadowed = seen.has(start);
     seen.add(start);
@@ -426,7 +426,7 @@ export function closingPlan(biz: BizHours): (number | null)[] {
 }
 
 /** the hours the timeline shows: [first, last] in whole hours (0–24). `starts` = the start minutes of the scheduled blocks, so nothing scheduled is ever hidden. */
-export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[]): { first: number; last: number } {
+export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[], ends: number[] = []): { first: number; last: number } {
   if (mode === "day") return { first: 0, last: 24 };
   let first: number;
   let last: number;
@@ -446,6 +446,8 @@ export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[
     first = Math.min(first, Math.floor(Math.min(...starts) / 60));
     last = Math.max(last, Math.min(24, Math.ceil(Math.max(...starts) / 60) + 1));
   }
+  // the END of a block is part of what is scheduled too (a block that starts at 10:00 and ends at 16:45 must not be cut at 13:00)
+  if (ends.length > 0) last = Math.max(last, Math.min(24, Math.ceil(Math.max(...ends) / 60) + 1)); // + 1 hour of room, so a long block can still be carried later
   first = Math.max(0, first);
   last = Math.min(24, last);
   // never thinner than eight hours

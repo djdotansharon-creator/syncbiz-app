@@ -703,3 +703,14 @@ html[data-sb-display="white"] .ss-bh .ss-btn--ghost, html[data-sb-display="white
 .ss-block.is-swap-target { z-index: 5; box-shadow: 0 0 0 2.5px var(--ss-fg), 0 12px 30px rgba(0, 0, 0, 0.45); }
 html[data-sb-display="white"] .ss-block.is-swap-target { box-shadow: 0 0 0 2.5px #1c1c1e, 0 12px 30px rgba(0, 0, 0, 0.22); }
 .ss-block.is-dragging.is-swapping { opacity: 0.72; } /* the block being carried turns see-through over its target, so the ring around the target shows */
+
+/* ══ (owner 2026-11-15) dragging on the timeline never highlights text; the hours of the week's columns zoom; a block carried over another day ══ */
+.ss-cal, .ss-dayview, .ss-scroll, .ss-gutter, .ss-haxis { user-select: none; -webkit-user-select: none; }
+html[class*="sb-ss-cursor-"], html[class*="sb-ss-cursor-"] * { user-select: none !important; -webkit-user-select: none !important; }
+.ss-gutter { cursor: ns-resize; touch-action: none; }
+.ss-block.is-ghost { opacity: 0.55; pointer-events: none; z-index: 5; }
+.ss-block.is-leaving { opacity: 0.3; }
+.ss-col.is-drop-day { background-color: rgba(255, 255, 255, 0.07); }
+html[data-sb-display="white"] .ss-col.is-drop-day { background-color: rgba(0, 0, 0, 0.05); }
+.ss-hrow.is-drop-day .ss-htrack { background-color: rgba(255, 255, 255, 0.07); border-radius: 14px; }
+html[data-sb-display="white"] .ss-hrow.is-drop-day .ss-htrack { background-color: rgba(0, 0, 0, 0.05); }
