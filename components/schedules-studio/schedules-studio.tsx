@@ -14,8 +14,9 @@
  * Display + editing only — firing schedules is still `ScheduleAutoPlayer` / `runSchedulePlayback`, untouched.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { InfoIcon } from "@/components/info-icon";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTr } from "@/lib/i18n/use-tr";
@@ -1775,9 +1776,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             <button type="button" className="ss-btn ss-btn--ghost" onClick={() => setHoursOpen(true)}>{tr("Business hours")}</button>
             {/* the circle at the very end of the header: a plus on a white disc (a black disc on the white display); standing on it names it; pressing it opens the music list (the list with the
                 search, at the side) and the plus turns in place into an X — pressing again closes it (owner 2026-11-16; this one button replaced "+ Add music" and the arrow) */}
-            <div className="ss-add">
-              <button type="button" className="ss-add-btn" onClick={togglePanel} aria-expanded={panelOpen} aria-label={panelOpen ? tr("Close the music list") : tr("Add music")}>
-                <span className="ss-add-label" aria-hidden>{panelOpen ? tr("Close the music list") : tr("Add music")}</span>
+            <div className="ss-add" aria-hidden={panelOpen || undefined}>
+              <button type="button" className="ss-add-btn" onClick={togglePanel} aria-expanded={panelOpen} tabIndex={panelOpen ? -1 : 0} aria-label={tr("Add music")}>
+                <span className="ss-add-label" aria-hidden>{tr("Add music")}</span>
                 <span className="ss-add-ico" aria-hidden>
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
                 </span>
@@ -1984,7 +1985,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       </div>
 
       <aside className="ss-panel" aria-hidden={!panelOpen} inert={!panelOpen}>
-        <LibraryPanel lib={lib} quiet={quietItem} onWarm={(it) => void lookupLength(it)} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), Math.max(FIRST_H * 60, LAST_H * 60 - 120)); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
+        <LibraryPanel lib={lib} quiet={quietItem} onWarm={(it) => void lookupLength(it)} onClose={togglePanel} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), Math.max(FIRST_H * 60, LAST_H * 60 - 120)); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
       </aside>
 
       {menu && items.find((x) => x.id === menu.id) ? (
@@ -2111,13 +2112,17 @@ function Cover({ item }: { item: LibItem }) {
   );
 }
 
-function FilterBar({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: string, v?: Record<string, string | number>) => string }) {
+function FilterBar({ f, tr, lead }: { f: ReturnType<typeof useFilteredLib>; tr: (s: string, v?: Record<string, string | number>) => string; lead?: ReactNode }) {
   return (
     <>
-      <label className="ss-search">
-        <span aria-hidden className="ss-search-ico" />
-        <input value={f.q} onChange={(e) => f.setQ(e.target.value)} placeholder={tr("Search playlists, songs, radio…")} aria-label={tr("Search playlists, songs, radio…")} />
-      </label>
+      <div className="ss-searchrow">
+        {lead}
+        {/* the search shows nothing of what can be searched — only the magnifier (owner 2026-11-16); the name is for screen readers */}
+        <label className="ss-search">
+          <svg className="ss-search-ico" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="10.5" cy="10.5" r="6.5" /><path d="m20 20-4.6-4.6" /></svg>
+          <input value={f.q} onChange={(e) => f.setQ(e.target.value)} aria-label={tr("Search playlists, songs, radio…")} />
+        </label>
+      </div>
       <div className="ss-chips" role="tablist">
         {(["all", "playlist", "song", "radio", "bank"] as const).map((k) => (
           <button key={k} type="button" role="tab" aria-selected={f.kind === k} className={`ss-chip${f.kind === k ? " is-on" : ""}`} onClick={() => f.setKind(k)}>
@@ -2129,13 +2134,33 @@ function FilterBar({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: st
   );
 }
 
-function LibraryPanel({ lib, quiet, onAddNext, onWarm }: { lib: LibItem[]; quiet: LibItem; onAddNext: (it: LibItem) => void; onWarm: (it: LibItem) => void }) {
+/** a small "i": standing on it (or focusing it) shows what the thing does, in a few words — there are no native tooltips in the app */
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="ss-info" tabIndex={0} role="img" aria-label={text} onPointerDown={(e) => e.stopPropagation()} draggable={false}>
+      <InfoIcon size={17} />
+      <span className="ss-info-bubble" role="tooltip">{text}</span>
+    </span>
+  );
+}
+
+function LibraryPanel({ lib, quiet, onAddNext, onWarm, onClose }: { lib: LibItem[]; quiet: LibItem; onAddNext: (it: LibItem) => void; onWarm: (it: LibItem) => void; onClose: () => void }) {
   const tr = useTr();
   const f = useFilteredLib(lib);
   return (
     <div className="ss-panel-in">
-      <h2 className="ss-panel-title">{tr("Your music")}</h2>
-      <FilterBar f={f} tr={tr} />
+      {/* no title: the round button that closes the list sits where it was, with the search beside it */}
+      <FilterBar
+        f={f}
+        tr={tr}
+        lead={
+          <button type="button" className="ss-add-btn ss-add-btn--panel" onClick={onClose} aria-label={tr("Close the music list")}>
+            <span className="ss-add-ico" aria-hidden>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            </span>
+          </button>
+        }
+      />
       <ul className="ss-list ss-list--quiet">
         <li
           className="ss-row ss-row--quiet"
@@ -2148,9 +2173,9 @@ function LibraryPanel({ lib, quiet, onAddNext, onWarm }: { lib: LibItem[]; quiet
           <Cover item={quiet} />
           <span className="ss-row-text">
             <span className="ss-row-name">{tr("Quiet — no music")}</span>
-            <span className="ss-row-sub">{tr("Quiet block: the music stops when it starts, until the next block.")}</span>
           </span>
-          <button type="button" className="ss-row-add" onClick={() => onAddNext(quiet)} title={tr("Add quiet")} aria-label={tr("Add quiet")}>+</button>
+          <InfoTip text={tr("Quiet block: the music stops when it starts, until the next block.")} />
+          <button type="button" className="ss-row-add" onClick={() => onAddNext(quiet)} aria-label={tr("Add quiet")}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg></button>
         </li>
       </ul>
       <ul className="ss-list">
@@ -2170,7 +2195,7 @@ function LibraryPanel({ lib, quiet, onAddNext, onWarm }: { lib: LibItem[]; quiet
               <span className="ss-row-name">{it.name}</span>
               <span className="ss-row-sub">{it.sub}</span>
             </span>
-            <button type="button" className="ss-row-add" onClick={() => onAddNext(it)} title={tr("Add music")} aria-label={`${tr("Add music")}: ${it.name}`}>+</button>
+            <button type="button" className="ss-row-add" onClick={() => onAddNext(it)} aria-label={`${tr("Add music")}: ${it.name}`}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg></button>
           </li>
         ))}
         {f.shown.length === 0 ? <li className="ss-none">{tr("Nothing found")}</li> : null}

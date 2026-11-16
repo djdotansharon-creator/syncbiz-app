@@ -8212,3 +8212,9 @@ html[data-sb-fx="lite"] .sb-player-drop { background: rgba(255, 255, 255, 0.3); 
 html[data-sb-display="white"] .sb-player-drop { color: #1c1c1e; background: rgba(0, 0, 0, 0.08); }
 html[data-sb-display="white"] .sb-player-drop svg { filter: none; }
 @media (prefers-reduced-motion: reduce) { .sb-player-drop, .sb-player-drop svg { transition: none; } }
+
+/* ══ 2026-11-16 (owner: "the way back from Schedules is laggy, the way in is smooth") coming back to the library: its list (about 2000 elements) used to be laid out and painted on every frame of the
+   player's unfold — measured 2.6x the paint / raster of the way in. Now it waits (not laid out, not painted: content-visibility) until the player is open, then fades in. Set by components/player-auto-compact.tsx. ══ */
+html[data-sb-arriving] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { content-visibility: hidden; visibility: hidden; opacity: 0; transition: none !important; animation: none !important; } /* no animation while waiting: a child that has its own entrance animation plays it when it comes back */
+html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { transition: opacity 460ms ease !important; } /* a transition, not an animation: an animation here would swap the elements' own entrance animation and replay it */
+@media (prefers-reduced-motion: reduce) { html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { transition: none !important; } }
