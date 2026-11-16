@@ -61,9 +61,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b0f16",
+  themeColor: "#0a0a0c",
   width: "device-width",
   initialScale: 1,
+  // the phone app (/mobile) draws its glass tab bar to the very bottom edge and pads by env(safe-area-inset-*); without `cover` those are always 0 (no effect on desktop)
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({

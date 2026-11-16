@@ -5,6 +5,7 @@ import Link from "next/link";
 import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
 import { MobileSectionHeader } from "@/components/mobile/mobile-section-header";
 import { useMobileSources } from "@/lib/mobile-sources-context";
+import { useMobileFleet } from "@/lib/mobile-fleet";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
 /**
@@ -19,13 +20,17 @@ import type { Schedule, ScheduleTargetType } from "@/lib/types";
  */
 export default function MobileSchedulingPage() {
   const { sources } = useMobileSources();
+  // the schedule of the branch that is OPEN (a schedule belongs to one branch's player)
+  const fleet = useMobileFleet();
+  const branchId = fleet.selected?.id ?? null;
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!fleet.loaded) return;
     let alive = true;
-    fetch("/api/schedules", { cache: "no-store" })
+    fetch(branchId ? `/api/schedules?branchId=${encodeURIComponent(branchId)}` : "/api/schedules", { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = (await r.json()) as Schedule[];
@@ -41,7 +46,7 @@ export default function MobileSchedulingPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [branchId, fleet.loaded]);
 
   const sorted = useMemo(() => {
     const list = schedules ?? [];
@@ -67,9 +72,14 @@ export default function MobileSchedulingPage() {
 
   return (
     <>
-      <MobilePageHeader title="Scheduling" showModePill />
+      <MobilePageHeader title="Scheduling" />
 
       <div className="px-4 py-3 pb-8">
+        {fleet.selected ? (
+          <p className="mb-3 text-sm text-slate-300">
+            {fleet.selected.name}
+          </p>
+        ) : null}
         <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100/90">
           Scheduling is read-only on mobile. Open SyncBiz on desktop to add,
           edit or remove a schedule.

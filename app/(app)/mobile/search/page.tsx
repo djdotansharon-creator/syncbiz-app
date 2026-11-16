@@ -1,54 +1,63 @@
 "use client";
 
-import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
+import { useMemo } from "react";
 import { MobileSearchBar } from "@/components/mobile-search-bar";
 import { MobileShazamImport } from "@/components/mobile/mobile-shazam-import";
-import { MobileInstallButton } from "@/components/mobile/mobile-install-button";
 import { MobileListenIdentify } from "@/components/mobile/mobile-listen-identify";
 import { useMobileSources } from "@/lib/mobile-sources-context";
-import { useMobileRole } from "@/lib/mobile-role-context";
-import { useStationController } from "@/lib/station-controller-context";
-import { usePlayback } from "@/lib/playback-provider";
+import { useMobileFleet } from "@/lib/mobile-fleet";
+import { useTr } from "@/lib/i18n/use-tr";
+import { VmPage, VmTarget, useVmUi } from "@/components/vm/vm-ui";
+import type { UnifiedSource } from "@/lib/source-types";
 
 /**
- * Mobile Search: reuses the existing MobileSearchBar (results panel, add + play flows) and
- * wires its callbacks to Controller or Player based on the current mobile role.
- *
- * The search bar is sticky directly under the header so the input stays accessible while
- * results / suggestions scroll.
+ * SEARCH — find a song or a playlist (the business's own library first, then YouTube) and send it to the branch that is open.
+ * Same search bar as before; what changed is WHERE a result goes: to the branch chosen in the chip (not to a player on this phone).
  */
 export default function MobileSearchPage() {
-  const { sources, contentScope, addSource, replaceSource, reload } = useMobileSources();
-  const { mobileRole } = useMobileRole();
-  const station = useStationController();
-  const { playSource } = usePlayback();
+  const { sources, contentScope, reload } = useMobileSources();
+  const f = useMobileFleet();
+  const tr = useTr();
+  const ui = useVmUi();
 
-  const isController = mobileRole === "controller";
-  const playHandler = isController ? station.sendPlaySource : playSource;
-  const addHandler = isController ? () => reload() : addSource;
+  const route = useMemo(
+    () => ({
+      play: (u: UnifiedSource) => {
+        if (!f.selected) return ui.openPicker();
+        if (!f.canControl) return ui.toast(tr("{name} is offline", { name: f.selected.name }));
+        f.playSource(u);
+        ui.toast(tr("Playing on {name}", { name: f.selected.name }));
+      },
+      queue: (u: UnifiedSource) => {
+        if (!f.selected) return ui.openPicker();
+        if (!f.canControl) return ui.toast(tr("{name} is offline", { name: f.selected.name }));
+        f.queueNext(u);
+        ui.toast(tr("Will play next on {name}", { name: f.selected.name }));
+      },
+    }),
+    [f, ui, tr],
+  );
 
   return (
-    <>
-      <MobilePageHeader title="Search" showModePill actions={<MobileInstallButton />} />
-      <div className="space-y-3 px-4 pt-3 pb-6">
+    <VmPage title={tr("Search")}>
+      <VmTarget />
+      <div style={{ padding: "12px 14px 0", display: "flex", flexDirection: "column", gap: 12 }}>
         <MobileSearchBar
           sources={sources}
-          onAdd={addHandler}
-          onPlay={playHandler}
-          onSendToPlayer={playHandler}
-          onReplaceSource={isController ? undefined : replaceSource}
-          placeholder="Search library or discover playlists…"
-          isControllerMode={isController}
+          onAdd={() => reload()}
+          onPlay={route.play}
+          onSendToPlayer={route.play}
+          placeholder={tr("Search songs and playlists…")}
+          isControllerMode
           editReturnTo="/mobile/search"
           unifiedContentScope={contentScope}
           hideRadio
         />
-        {/* One-tap mic identify (records → recognizes → auto-adds to queue),
-            directly under the search bar. */}
-        <MobileListenIdentify />
-        {/* Paste/share a Shazam link. */}
-        <MobileShazamImport variant="hero" />
+        {/* one-tap mic identify (records → recognizes → lines it up next on the open branch) */}
+        <MobileListenIdentify route={route} />
+        {/* a Shazam link */}
+        <MobileShazamImport variant="hero" route={route} />
       </div>
-    </>
+    </VmPage>
   );
 }

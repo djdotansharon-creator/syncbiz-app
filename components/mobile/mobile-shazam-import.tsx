@@ -37,7 +37,7 @@ function detectPlatform(): Platform {
   return "other";
 }
 
-export function MobileShazamImport({ variant = "icon" }: { variant?: "icon" | "hero" } = {}) {
+export function MobileShazamImport({ variant = "icon", route }: { variant?: "icon" | "hero"; /** the phone app sends the song to the branch it has OPEN (see mobile-listen-identify.tsx) */ route?: { play: (u: UnifiedSource) => void; queue: (u: UnifiedSource) => void } | null } = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
@@ -287,11 +287,12 @@ export function MobileShazamImport({ variant = "icon" }: { variant?: "icon" | "h
   const handlePlayNow = useCallback(
     () =>
       withAction((u) => {
-        if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(u);
+        if (route) route.play(u);
+        else if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(u);
         else if (isController && station.isCrossDevice) station.sendPlaySource(u);
         else playback.playSource(u);
       }, "Playing now"),
-    [withAction, deviceCtx, isController, station, playback]
+    [route, withAction, deviceCtx, isController, station, playback]
   );
 
   // Add to queue — routes to the MASTER's queue via QUEUE_NEXT (existing
@@ -301,11 +302,12 @@ export function MobileShazamImport({ variant = "icon" }: { variant?: "icon" | "h
   const handleAddToQueue = useCallback(
     () =>
       withAction((u) => {
-        if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
+        if (route) route.queue(u);
+        else if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
         else if (isController && station.isCrossDevice) station.sendQueueNext(u);
         else playback.addPlayNextSources([u]);
       }, "Added to the queue"),
-    [withAction, deviceCtx, isController, station, playback]
+    [route, withAction, deviceCtx, isController, station, playback]
   );
 
   const handleAddToLibrary = useCallback(
