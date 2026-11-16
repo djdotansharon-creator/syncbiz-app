@@ -17,7 +17,7 @@ ok(playlistTotalSeconds([{ durationSeconds: 0 }]) === null && playlistTotalSecon
 console.log("PD2 — a one-song playlist IS the song");
 ok(withSingleTrackLength([{ id: "a" } as { id: string; durationSeconds?: number }], 245)[0]!.durationSeconds === 245, "the song takes the playlist's own length");
 ok(withSingleTrackLength([{ durationSeconds: 100 }], 245)[0]!.durationSeconds === 100, "a song that has its own length keeps it");
-ok(withSingleTrackLength([{}, {}], 245).every((t) => t.durationSeconds === undefined), "a longer list is never given the figure of one song");
+ok(withSingleTrackLength<{ durationSeconds?: number }>([{}, {}], 245).every((t) => t.durationSeconds === undefined), "a longer list is never given the figure of one song");
 
 console.log("PD3 — what is stored as the total");
 ok(totalToStore([{ durationSeconds: 100 }, { durationSeconds: 50 }], 999) === 150, "every song known → the sum (the caller's figure is ignored)");
@@ -34,7 +34,8 @@ const route = read("app/api/playlists/[id]/refresh-duration/route.ts");
 ok(/gatePlaylistAccess\(user \?\? null, playlist\)/.test(route) && /type === "youtube"/.test(route) && /resolveYouTubeMetadata\(t\.url\)/.test(route) && /Math\.min\(3, queue\.length\)/.test(route), "the lookup route has the playlist's own access rule, asks YouTube only for YouTube songs, 3 at a time");
 ok(!/t\.type === "local"[^\n]*resolve/.test(route) && /a local file/.test(route), "a local file is never looked up or sent anywhere (its path stays on its machine)");
 const studio = read("components/schedules-studio/schedules-studio.tsx");
-ok(/refresh-duration/.test(studio) && /askedLength\.current\.has\(item\.targetId\)/.test(studio) && /explicitEndMinutes\(cur\) === null && end <= END_MAX/.test(studio) && /learned\[p\.id\]/.test(studio), "placing a playlist with no stored length asks once; the block then takes the music's own length");
+// (rewritten 2026-11-16 with the exact-length drop: the ask is ONE shared promise per playlist (lengthLookups), the drop waits for it (LOOKUP_WAIT_MS) and the block takes the music's own length; with no answer the 5-minute stub, later corrected by learnLength)
+ok(/refresh-duration/.test(studio) && /lengthLookups\.current\.get\(item\.targetId\)/.test(studio) && /lengthLookups\.current\.set\(item\.targetId, p\)/.test(studio) && /Promise\.race\(\[lookupLength\(item\)/.test(studio) && /setLearned\(\(prev\) => \(\{ \.\.\.prev, \[item\.targetId\]: sec \}\)\)/.test(studio) && /learned\[p\.id\]/.test(studio) && /e0 === start \+ PROVISIONAL_MIN/.test(studio), "placing a playlist with no stored length asks once (shared); the block then takes the music's own length, or the 5-minute stub until the answer comes");
 
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
