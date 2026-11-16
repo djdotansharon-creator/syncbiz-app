@@ -561,6 +561,27 @@ export function swapStarts(a: { start: number; end: number }, b: { start: number
   return aFirst ? { a: firstNew, b: secondNew } : { a: secondNew, b: firstNew };
 }
 
+/**
+ * The carried block `a` (length `aLen`) is held at `aAt`, and has passed the middle of the neighbour `b`. With free room around them (owner 2026-11-16, two songs with a gap between them):
+ * `a` lands exactly where it is held and `b` just steps aside, flush against it on the side `a` came from (`aCameFromLater` = a started after b). While `a` is still over b's old place b follows it
+ * smoothly; once `a` has passed b's old place whole, nothing is displaced any more and b stays where it was. Returns null when that does not fit — another block is in the way of either of them,
+ * or the edge of the day — and the two then trade places (`swapStarts`), as before.
+ */
+export function stepAside(
+  aAt: number,
+  aLen: number,
+  b: { start: number; end: number },
+  aCameFromLater: boolean,
+  others: { start: number; end: number }[],
+  bounds: { min: number; max: number },
+): { a: number; b: number } | null {
+  const bLen = b.end - b.start;
+  const bAt = aCameFromLater ? aAt + aLen : aAt - bLen;
+  if (aAt < bounds.min || aAt + aLen > bounds.max || bAt < bounds.min || bAt + bLen > bounds.max) return null;
+  const hit = (start: number, len: number) => others.some((o) => start < o.end && start + len > o.start);
+  return hit(aAt, aLen) || hit(bAt, bLen) ? null : { a: aAt, b: bAt };
+}
+
 // ── undo (owner 2026-11-15: "Ctrl/Cmd+Z undoes what I did on the schedule") ──
 /** the fields of a schedule that a person changes on the studio and that the server stores */
 const UNDO_FIELDS = ["name", "branchId", "targetType", "targetId", "sourceId", "deviceId", "recurrence", "oneOffDateLocal", "daysOfWeek", "startTimeLocal", "endTimeLocal", "enabled", "priority"] as const;

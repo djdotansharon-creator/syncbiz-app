@@ -59,6 +59,7 @@ import {
   snapMinutes,
   startMinutes,
   swapStarts,
+  stepAside,
   tickStep,
   weekDatesFor,
   windowTicks,
@@ -1213,8 +1214,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   });
   const [swapWith, setSwapWith] = useState<{ bid: string; day: number } | null>(null);
   const swapBlocks = useCallback(
-    async (a: Scene, b: Scene) => {
-      const to = swapStarts(a, b);
+    async (a: Scene, b: Scene, place?: { a: number; b: number }) => {
+      const to = place ?? swapStarts(a, b);
       if (to.a === a.start && to.b === b.start) return;
       const cur = (sc: Scene) => itemsRef.current.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule;
       const idA = await editRef.current(cur(a), a.day, { start: to.a }, { quiet: true });
@@ -1385,6 +1386,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       ? everyScene.filter((x) => x.day === sc.day && baseId(x.schedule.id) !== baseId(sc.schedule.id) && !x.paused && !x.shadowed && !x.quiet && rowOf(x.schedule) === rowOf(sc.schedule) && (x.endSet || musicMinutes(x.schedule) !== null))
       : [];
     let swapTarget: Scene | null = null;
+    let swapPlace: { a: number; b: number } | undefined; // where the two land if the block is let go now
     let moved = false;
     let releaseCursor: (() => void) | null = null;
     let last = startMin;
@@ -1412,6 +1414,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       let pv: { id: string; start: number; end: number } | undefined;
       let slot: { start: number; len: number; row: string } | undefined;
       swapTarget = null;
+      swapPlace = undefined;
       if (canSwap && fixedLen && overDay === sc.day) {
         const cd = last + L / 2;
         for (const o of neighbours) {
@@ -1424,9 +1427,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           }
         }
         if (swapTarget) {
-          const to = swapStarts({ start: startMin, end: startMin + L }, { start: swapTarget.start, end: swapTarget.end });
-          const lb = swapTarget.end - swapTarget.start;
-          pv = { id: baseId(swapTarget.schedule.id), start: to.b, end: to.b + lb };
+          const o = swapTarget;
+          // two songs with a GAP between them and room around: the carried block lands exactly where it is held and the neighbour steps aside, flush against it (it follows while the block
+          // is over its old place); songs that touch, or another block in the way: the two trade places, as before (owner: that swap is right)
+          const others = neighbours.filter((x) => baseId(x.schedule.id) !== baseId(o.schedule.id));
+          const gap0 = startMin < o.start ? o.start - (startMin + L) : startMin - o.end;
+          const aside = gap0 > 0 ? stepAside(last, L, { start: o.start, end: o.end }, startMin > o.start, others, { min: Math.min(FIRST_H * 60, startMin), max: END_MAX }) : null;
+          const to = aside ?? swapStarts({ start: startMin, end: startMin + L }, { start: o.start, end: o.end });
+          swapPlace = to;
+          const lb = o.end - o.start;
+          pv = { id: baseId(o.schedule.id), start: to.b, end: to.b + lb };
           slot = { start: to.a, len: L, row: rowOf(sc.schedule) };
         }
       }
@@ -1478,7 +1488,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       setSwapWith(null);
       markPopupClose(); // (same: the click that ends a drag opens nothing)
       if (swapTarget && overDay === sc.day) {
-        void swapBlocks(sc, swapTarget); // past the middle of a neighbour: the two trade places (the neighbour already stepped aside)
+        void swapBlocks(sc, swapTarget, swapPlace); // past the middle of a neighbour: it has already stepped aside — the block lands where it is held (or, with others in the way, the two trade places)
         return;
       }
       // let go while pressed against a neighbour but not past its middle: the block settles flush against it, on the side it came from
