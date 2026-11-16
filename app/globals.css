@@ -8198,3 +8198,14 @@ html:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .l
 html:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(255, 255, 255, 0.62) !important; }
 html[data-sb-display="white"]:not([data-sb-control]) :is(.library-nav-link, .library-nav-link-current, .library-source-card, .sb-pl-row, .sb-pl-add, .sb-djl, .library-command-rail-guest-my button, .library-command-rail-browse button):is(:hover, :focus-visible) { outline-color: rgba(28, 28, 30, 0.42) !important; }
 html[data-sb-display="white"]:not([data-sb-control]) .library-sources-input-shell:is(:hover, :focus-within) .sb-library-ingest-shell { border-color: rgba(28, 28, 30, 0.42) !important; }
+
+/* ══ 2026-11-16 (owner) a song dragged over the PLAYER: its own rounded shape (the hero shell: the cell's box less 8px each side, radius 16px — the same in the big player and in the slim bar)
+   lights up in white with a plus in the middle. No label, nothing light blue. It fades in and out; it never catches the pointer. ══ */
+.sb-player-drop { position: absolute; top: 0; bottom: 0; left: 8px; right: 8px; z-index: 30; display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-radius: 16px; color: #fff; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); opacity: 0; pointer-events: none; transition: opacity 220ms ease; }
+.sb-player-drop svg { height: min(104px, 76%); aspect-ratio: 1; transform: scale(0.7); filter: drop-shadow(0 0 22px rgba(255, 255, 255, 0.35)); transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-player-drop[data-on] { opacity: 1; }
+.sb-player-drop[data-on] svg { transform: scale(1); }
+/* the white display has a white player: the same light, drawn dark */
+html[data-sb-display="white"] .sb-player-drop { color: #1c1c1e; background: rgba(0, 0, 0, 0.08); box-shadow: inset 0 0 0 2px rgba(28, 28, 30, 0.7); }
+html[data-sb-display="white"] .sb-player-drop svg { filter: none; }
+@media (prefers-reduced-motion: reduce) { .sb-player-drop, .sb-player-drop svg { transition: none; } }
