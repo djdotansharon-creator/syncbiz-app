@@ -316,6 +316,8 @@ export const HE_PHRASES: Record<string, string> = {
   "All versions": "כל הגרסאות",
   // ── Schedules Studio ──
   "Auto-play": "ניגון אוטומטי",
+  "Schedule: On": "לוח זמנים: פעיל",
+  "Schedule: Off": "לוח זמנים: כבוי",
   "Auto-play is off — nothing starts by itself": "הניגון האוטומטי כבוי — שום דבר לא מתחיל מעצמו",
   "Now": "עכשיו",
   "Nothing scheduled right now": "כרגע אין תזמון",

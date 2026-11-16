@@ -21,7 +21,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTr } from "@/lib/i18n/use-tr";
 import { useLocale, useTranslations } from "@/lib/locale-context";
-import { useScheduleEngine } from "@/lib/schedule-engine-context";
+import { fetchScheduleSwitch, saveScheduleSwitch } from "@/lib/schedule-switch-client";
 import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
@@ -224,7 +224,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const { t } = useTranslations();
   const T = t as unknown as Record<string, string>;
   const { locale } = useLocale();
-  const { engineEnabled, setEngineEnabled } = useScheduleEngine();
   const { setLastMessage, stop, stopScheduled, setQueue, playSource, route } = useSchedulePlaybackHandlers();
 
   const [items, setItems] = useState<Schedule[]>(initialSchedules);
@@ -758,6 +757,41 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // "Quiet — no music": a block that stops the music at its start (the engine's SILENCE target). It lives in the music list as the first row.
   const quietItem = useMemo<LibItem>(() => ({ key: scheduleTargetKey("SILENCE", "silence"), targetType: "SILENCE", targetId: "silence", name: tr("Quiet"), cover: null, kind: "quiet", sub: tr("No music"), branchId: "", ci: 17, dur: null }), [tr]);
   const quietBranch = branchFilter !== "all" ? branchFilter : branchIds[0] ?? branches[0]?.id ?? "default";
+  // The branch's SCHEDULE switch (owner 2026-11-16): "the schedule of THIS player is on / off", kept with the branch on the server — whoever can edit the branch's schedules flips it, from anywhere, and
+  // the branch's player obeys. It belongs to the branch you are looking at (the filter), else to this window's own branch. null = not read yet.
+  const switchBranch = branchFilter !== "all" ? branchFilter : stationBranch;
+  const [sw, setSw] = useState<{ branch: string; enabled: boolean; switchable: boolean } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      void fetchScheduleSwitch(switchBranch).then((r) => {
+        if (alive && r) setSw((prev) => (prev && prev.branch === switchBranch && prev.enabled === r.enabled && prev.switchable === r.switchable ? prev : { branch: switchBranch, ...r }));
+      });
+    };
+    read();
+    const id = window.setInterval(read, 30_000); // somebody else may flip it from another screen
+    const onVis = () => { if (document.visibilityState === "visible") read(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [switchBranch]);
+  const scheduleOn = sw && sw.branch === switchBranch ? sw.enabled : true;
+  const scheduleSwitchable = !!sw && sw.branch === switchBranch && sw.switchable;
+  const flipSchedule = async () => {
+    if (!scheduleSwitchable) return;
+    const next = !scheduleOn;
+    setSw({ branch: switchBranch, enabled: next, switchable: true }); // at once; the server's answer confirms it
+    try {
+      const saved = await saveScheduleSwitch(switchBranch, next);
+      setSw({ branch: switchBranch, ...saved });
+    } catch (e) {
+      setSw({ branch: switchBranch, enabled: !next, switchable: true });
+      showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+    }
+  };
   const nameOf = (s: Schedule) => (isSilenceBlock(s) ? (s.name === CLOSING_NAME ? tr("Closing") : tr("Quiet")) : libFor(s)?.name ?? s.name ?? tr("Schedule"));
   // the colour of a block: the one the owner chose (remembered in this browser), else its base shade of blue
   useEffect(() => {
@@ -1849,15 +1883,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   return (
-    <div className="ss" data-carry={drag ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
+    <div className="ss" data-schedule={scheduleOn ? "on" : "off"} data-carry={drag ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
       <div className="ss-main">
         <header className="ss-top">
           <div className="ss-titles">
             <h1 className="ss-title">{T.schedules ?? tr("Schedule")}</h1>
           </div>
           <div className="ss-top-actions">
-            <button type="button" role="switch" aria-checked={engineEnabled} className="ss-switch" data-on={engineEnabled} onClick={() => setEngineEnabled(!engineEnabled)} title={T.scheduleEngineHint}>
-              <span className="ss-switch-label">{tr("Auto-play")}</span>
+            <button type="button" role="switch" aria-checked={scheduleOn} aria-disabled={!scheduleSwitchable || undefined} className="ss-switch" data-on={scheduleOn} data-inert={!scheduleSwitchable || undefined} onClick={() => void flipSchedule()}>
+              <span className="ss-switch-label">{scheduleOn ? tr("Schedule: On") : tr("Schedule: Off")}{branches.length > 1 ? <bdi className="ss-switch-branch"> · {branchName(switchBranch)}</bdi> : null}</span>
               <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
             </button>
             <button type="button" className="ss-btn ss-btn--ghost" onClick={() => setHoursOpen(true)}>{tr("Business hours")}</button>

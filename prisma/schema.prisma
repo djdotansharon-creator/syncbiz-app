@@ -527,6 +527,8 @@ model Branch {
   /// Control Room: the Google place the owner picked (Places Autocomplete) — verified server-side by Place ID.
   googlePlaceId    String?
   formattedAddress String?
+  /// The branch's SCHEDULE switch (owner 2026-11-16): false = the branch's player does not act on its schedule (nothing starts, nothing stops). Per branch, not per browser; default on.
+  scheduleEnabled  Boolean      @default(true)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

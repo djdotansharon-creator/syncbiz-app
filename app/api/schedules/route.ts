@@ -6,6 +6,7 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession, getAs
 import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import { schedulesForBranch } from "@/lib/schedule-branch-scope";
+import { getScheduleSwitch } from "@/lib/branch-schedule-switch";
 import { getCanonicalLegacyBranchId } from "@/lib/branch-resolver";
 import { prisma } from "@/lib/prisma";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
@@ -43,7 +44,13 @@ export async function GET(req: NextRequest) {
     } catch {
       /* no branch list → nothing is dropped (the old behaviour) */
     }
-    return NextResponse.json(schedulesForBranch(filtered, wanted, { canonicalDefaultBranchId, knownBranchIds }));
+    // The branch's schedule switch travels with its schedules (one request, no new traffic): the player reads `X-Schedule-Enabled` (1 | 0) and obeys. Only for a branch the caller may see.
+    const headers: Record<string, string> = {};
+    if (isOwner || allowedBranchIds.includes(wanted)) {
+      const sw = await getScheduleSwitch(user.tenantId, wanted);
+      headers["X-Schedule-Enabled"] = sw.enabled ? "1" : "0";
+    }
+    return NextResponse.json(schedulesForBranch(filtered, wanted, { canonicalDefaultBranchId, knownBranchIds }), { headers });
   }
   return NextResponse.json(filtered);
 }
