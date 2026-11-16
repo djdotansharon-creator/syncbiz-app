@@ -810,3 +810,13 @@ html[data-sb-display="white"] .ss-slot { border-color: rgba(0, 0, 0, 0.4); backg
 .ss-switch-branch { font-weight: 500; color: var(--ss-dim); }
 .ss-switch[data-inert] { cursor: default; opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) { .ss[data-schedule="off"] .ss-block { transition: none; } }
+
+/* ── LITE / WHITE graphics (pre-merge lag review 2026-11-16) ────────────────────────────────────────────────────────────────────
+   The Windows desktop app is ALWAYS "lite" and a weak chip is switched to it (app/lite-fx.css: no blur, no pinned layers). Two looks added this round are a
+   per-block offscreen pass (a `filter` on every block): the "schedule is off" look and the short fog block's blurred cover. There they are drawn flat:
+   the off look = the same paleness (opacity only, no blur / desaturate); the short block keeps its fog colour + veil without the cover. Same meaning, no filter. */
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .ss[data-schedule="off"] :is(.ss-block, .ss-jpin) { filter: none; opacity: 0.5; }
+:is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .ss[data-schedule="off"] :is(.ss-block:hover, .ss-block.is-dragging, .ss-block.is-selected) { opacity: 1; }
+@container (max-height: 62px) {
+  :is(html[data-sb-fx="lite"], html[data-sb-display="white"]) .ss[data-style="fog"] .ss-block:not(.is-paused):not(.is-shadowed):not(.is-quiet) > .ss-b-art:not(.ss-b-art--tone) { display: none; }
+}

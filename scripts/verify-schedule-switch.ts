@@ -41,5 +41,13 @@ assert("W10 the words exist in Hebrew", /"Schedule: On": "לוח זמנים: פ�
 assert("W11 the Branch list carries the flag (type + store mapping), so a screen that lists branches can show it", /scheduleEnabled\?: boolean;/.test(rd("lib/types.ts")) && /scheduleEnabled: row\.scheduleEnabled \?\? true,/.test(rd("lib/store.ts")));
 assert("W12 nothing of the playback chain, the desktop MAIN or the installer is touched by this change", existsSync(path.join(root, "lib/schedule-switch-client.ts")) && !/desktop\//.test(ap));
 
+assert("W13 weak graphics (lite / white look): the off look and the short fog block's blurred cover are drawn flat — no filter per block (pre-merge lag review)", /:is\(html\[data-sb-fx="lite"\], html\[data-sb-display="white"\]\) \.ss\[data-schedule="off"\] :is\(\.ss-block, \.ss-jpin\) \{ filter: none; opacity: 0\.5; \}/.test(css) && /\.ss-b-art:not\(\.ss-b-art--tone\) \{ display: none; \}/.test(css));
+{
+  // the local-only preview pages must never be tracked (they would ship to production with the next merge)
+  const { execSync } = require("node:child_process") as typeof import("node:child_process");
+  const tracked = execSync('git ls-files app/dev-update-preview "app/(app)/(workspace)/dev-schedules-preview"', { cwd: root, encoding: "utf-8" }).trim();
+  assert("W14 the local-only preview pages (dev-update-preview, dev-schedules-preview) are not tracked", tracked === "");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
