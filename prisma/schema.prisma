@@ -527,6 +527,8 @@ model Branch {
   /// Control Room: the Google place the owner picked (Places Autocomplete) — verified server-side by Place ID.
   googlePlaceId    String?
   formattedAddress String?
+  /// The branch's SCHEDULE switch (owner 2026-11-16): false = the branch's player does not act on its schedule (nothing starts, nothing stops). Per branch, not per browser; default on.
+  scheduleEnabled  Boolean      @default(true)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -1060,6 +1062,8 @@ model PlaylistItem {
   url        String   @default("")
   cover      String?
   position   Int
+  /// 2026-11-15 (owner: "every playlist must carry how long it takes"): the track's own length in seconds; null = not known yet. The playlist's total (Playlist.durationSeconds) is the sum when every track is known.
+  durationSec Int?
   addedAt    DateTime @default(now())
 
   playlist Playlist     @relation(fields: [playlistId], references: [id], onDelete: Cascade)

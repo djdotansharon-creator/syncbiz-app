@@ -83,6 +83,8 @@ export type Branch = {
   /** Control Room: the Google place picked for the branch (verified server-side) + its formatted address. */
   formattedAddress?: string | null;
   googlePlaceId?: string | null;
+  /** The branch's schedule switch (owner 2026-11-16): false = its player does not act on its schedule. Default on. */
+  scheduleEnabled?: boolean;
 };
 
 export type Device = {

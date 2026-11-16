@@ -17,7 +17,7 @@
  * Renders null.
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 const ENABLED = true;
@@ -29,6 +29,8 @@ const SWAP_OUT_MS = 150; // content fade-out (CSS: 140ms) → then the layout sw
 const SWAP_IN_SHRINK_MS = 270; // shrinking: content returns once the bar is ~85% down
 const SWAP_IN_GROW_MS = 380; // growing: content returns once the bar is nearly full height
 const LOCK_MS = 900; // no new flip until the glide + fade have finished
+const ARRIVE_MS = 780; // coming back from Schedules: the library's heavy list waits this long (until the player has unfolded), then fades in (CSS: data-sb-arriving / data-sb-arrived)
+const ARRIVE_FADE_MS = 460;
 const DIALOGS = ".sb-wz-backdrop, [role='dialog'], [aria-modal='true']";
 const QUEUE_ASIDE = ".library-deck-slot-aside"; // the player's own queue panel (open or folded to its cover strip): scrolling it is its own business
 
@@ -94,21 +96,27 @@ export function PlayerAutoCompact(): null {
   // the management pages (Control Room …) hide the player — nothing to shrink there, and no attribute flips while the operator uses them
   const management = MANAGEMENT_ROUTE.test(pathname ?? "");
   const locked = LOCKED_COMPACT.test(pathname ?? "");
+  // was the previous page a folded-bar one (Schedules)? Leaving it OPENS the player with the same choreography as every other opening — it used to be cleared in one stroke (the title block and timeline jumped to the big layout while the bar was still thin, the live glass stayed on) (owner 2026-11-16)
+  const wasLocked = useRef(false);
   useScrollingFlag(management);
   useEffect(() => {
     const root = document.documentElement;
-    const ATTRS = ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving"];
+    const ATTRS = ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving", "data-sb-arriving", "data-sb-arrived"];
     const clearAll = () => ATTRS.forEach((a) => root.removeAttribute(a));
-    clearAll(); // a new page always starts with the full player
-    if (!ENABLED || management) return;
+    let off = !ENABLED || management;
     try {
-      if (localStorage.getItem("syncbiz:compactPlayer") === "off") return;
+      if (localStorage.getItem("syncbiz:compactPlayer") === "off") off = true;
     } catch {
       /* ignore */
     }
-    let compact = false;
+    const unfold = wasLocked.current && !locked && !off && root.getAttribute("data-sb-player") === "compact";
+    wasLocked.current = locked;
+    if (!unfold) clearAll(); // a new page always starts with the full player (except when the folded bar is opening: below)
+    if (off) return;
+    let compact = unfold;
     let lockUntil = 0;
     let timers: ReturnType<typeof setTimeout>[] = [];
+    const arriveTimers: ReturnType<typeof setTimeout>[] = [];
     const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms));
     let pendingEl: HTMLElement | null = null; // a scroll that arrived while the glide was still running — judged again once it ends
     const lastY = new WeakMap<HTMLElement, number>();
@@ -163,18 +171,37 @@ export function PlayerAutoCompact(): null {
     if (locked) {
       set(true); // folds (with the usual glide) and stays folded; no scroll / wheel listeners here
       return () => {
+        // the attributes stay: if the next page is a normal one it opens the bar from this state (above); anything else clears them itself
         timers.forEach(clearTimeout);
-        clearAll();
       };
     }
     document.addEventListener("scroll", onScroll, true);
     document.addEventListener("wheel", onWheel, { passive: true, capture: true });
+    if (unfold) {
+      set(false); // the bar opens with the full choreography (content fades, glass off for the glide)
+      // The library's list is by far the heaviest thing on the screen (about 2000 elements): drawn while the player unfolds, every frame re-lays it out and re-paints it (measured: 2.6x the paint /
+      // raster of the way in, owner 2026-11-16 "the way back is laggy"). It waits — not laid out, not painted — until the player is open, then fades in. Separate timers: a later set() must not cancel them.
+      root.setAttribute("data-sb-arriving", "1");
+      arriveTimers.push(
+        setTimeout(() => {
+          root.removeAttribute("data-sb-arriving");
+          root.setAttribute("data-sb-arrived", "1");
+        }, ARRIVE_MS),
+        setTimeout(() => root.removeAttribute("data-sb-arrived"), ARRIVE_MS + ARRIVE_FADE_MS),
+      );
+    }
     return () => {
       document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("wheel", onWheel, true);
       timers.forEach(clearTimeout);
+      arriveTimers.forEach(clearTimeout);
       clearAll();
     };
   }, [pathname, management, locked]);
+  // the player's attributes are cleared when the page really goes away (the locked page's cleanup no longer does it)
+  useEffect(() => {
+    const root = document.documentElement;
+    return () => ["data-sb-player", "data-sb-pc-swap", "data-sb-pc-row", "data-sb-pc-moving", "data-sb-arriving", "data-sb-arrived"].forEach((a) => root.removeAttribute(a));
+  }, []);
   return null;
 }

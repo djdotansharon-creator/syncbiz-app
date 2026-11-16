@@ -1708,15 +1708,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                   : {})}
                 className={
                   isMediaThemeRoute
-                    ? `library-deck-player-cell relative flex min-h-[160px] flex-col lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors ${
-                        playerDropActive ? "ring-2 ring-inset ring-cyan-400/70" : ""
-                      }`
+                    ? "library-deck-player-cell relative flex min-h-[160px] flex-col lg:h-full lg:min-h-0 min-w-0 overflow-hidden transition-colors"
                     : "relative min-w-0 w-full"
                 }
               >
-                {isMediaThemeRoute && playerDropActive ? (
-                  <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-md border border-cyan-300/45 bg-cyan-500/14 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
-                    Drop To Play
+                {/* A song dragged over the player (owner 2026-11-16): the player's own rounded shape lights up in white with a plus in the middle — no label, nothing light blue. Styles: `.sb-player-drop` (globals.css). */}
+                {isMediaThemeRoute ? (
+                  <div className="sb-player-drop" data-on={playerDropActive ? "1" : undefined} aria-hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
                   </div>
                 ) : null}
                 <MemoAudioPlayer />

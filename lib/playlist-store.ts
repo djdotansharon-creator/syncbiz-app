@@ -6,6 +6,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { playlistTotalSeconds, totalToStore, withSingleTrackLength } from "./playlist-duration";
 import { canonicalContentBranchForWrite } from "./branch-resolver";
 import { enforceCanAddPlaylist } from "./entitlement-limits";
 import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
@@ -91,6 +92,7 @@ function rowToPlaylist(row: PlaylistRow): Playlist {
       if (item.catalogId) {
         track.catalogItemId = item.catalogId;
       }
+      if (typeof item.durationSec === "number" && item.durationSec > 0) track.durationSeconds = item.durationSec;
       return track;
     });
 
@@ -107,7 +109,8 @@ function rowToPlaylist(row: PlaylistRow): Playlist {
     tenantId: row.workspaceId,
     catalogItemId: row.catalogItemId ?? undefined,
     viewCount: row.viewCount ?? undefined,
-    durationSeconds: row.durationSeconds ?? undefined,
+    // the total is the sum of the songs when every one is known (owner 2026-11-15); otherwise what was stored
+    durationSeconds: playlistTotalSeconds(tracks) ?? row.durationSeconds ?? undefined,
     tracks: tracks.length > 0 ? tracks : undefined,
     order: row.trackOrder.length > 0 ? row.trackOrder : undefined,
     adminNotes: row.adminNotes ?? undefined,
@@ -167,7 +170,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
 
   await enforceCanAddPlaylist(wsId);
 
-  const tracksRaw = normalized.tracks ?? [];
+  const tracksRaw = withSingleTrackLength(normalized.tracks ?? [], normalized.durationSeconds);
   const tracks = await stripInvalidCatalogItemIds(tracksRaw);
   const order = normalized.order ?? tracks.map((t) => t.id);
 
@@ -184,7 +187,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
       branchId: normalized.branchId ? await canonicalContentBranchForWrite(wsId, normalized.branchId) : null,
       catalogItemId: normalized.type === "local" ? null : normalized.catalogItemId ?? null,
       viewCount: normalized.viewCount ?? null,
-      durationSeconds: normalized.durationSeconds ?? null,
+      durationSeconds: totalToStore(tracks, normalized.durationSeconds),
       adminNotes: normalized.adminNotes ?? null,
       useCase: normalized.useCase ?? null,
       useCases: normalized.useCases ?? [],
@@ -208,6 +211,7 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
           url: t.url,
           cover: t.cover ?? null,
           position: idx,
+          durationSec: typeof t.durationSeconds === "number" && t.durationSeconds > 0 ? Math.round(t.durationSeconds) : null,
         })),
       },
     },
@@ -253,9 +257,11 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
   }
 
   if (data.tracks !== undefined) {
-    const tracks = await stripInvalidCatalogItemIds(data.tracks);
+    const tracks = await stripInvalidCatalogItemIds(withSingleTrackLength(data.tracks, data.durationSeconds ?? existing.durationSeconds));
     const order = data.order ?? tracks.map((t) => t.id);
     updateData.trackOrder = order;
+    // the songs changed: the total follows them (a sum when every song's length is known, else unknown — never the old figure of a different list)
+    updateData.durationSeconds = totalToStore(tracks, data.durationSeconds ?? (tracks.length <= 1 ? existing.durationSeconds : null));
     updateData.items = {
       deleteMany: {},
       create: tracks.map((t, idx) => ({
@@ -266,6 +272,7 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
         url: t.url,
         cover: t.cover ?? null,
         position: idx,
+        durationSec: typeof t.durationSeconds === "number" && t.durationSeconds > 0 ? Math.round(t.durationSeconds) : null,
       })),
     };
   } else if (data.order !== undefined) {

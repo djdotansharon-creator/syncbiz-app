@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { decideScheduleAction, explicitEndMinutes, playingBlockAt, scheduleEndFireStorageKey, type ScheduleAction } from "../lib/schedule-actions";
+import { decideScheduleAction, explicitEndMinutes, playingBlockAt, scheduleEndFireStorageKey, todaysFiredKeys, type ScheduleAction } from "../lib/schedule-actions";
 import { scheduleAutoFireStorageKey } from "../lib/schedule-window";
 import type { Schedule } from "../lib/types";
 
@@ -55,7 +55,7 @@ assert("E5 the app opens at 22:30 (after closing): it only stops (once) — no e
 const BE = mk("B", "12:00:00", { endTimeLocal: "17:56:00" });
 const C2 = mk("C", "19:00:00");
 const ended = runDay([A, BE, C2], [6, 0], [23, 59]);
-assert("E6 a block with an end (12:00 → 17:56): the music stops at 17:56 exactly (an end is exclusive), once; the next block starts at its own time", ended.log.join() === "08:00 start A,12:00 start BE".replace("BE", "B") + ",17:56 stop(end) B,19:00 start C", ended.log.join());
+assert("E6 a block with an end (12:00 → 17:56): its end no longer stops the music (the player carries on by itself until the next block); the next block starts at its own time (owner 2026-11-15)", ended.log.join() === "08:00 start A,12:00 start B,19:00 start C", ended.log.join());
 const handover = runDay([A, mk("B", "12:00:00", { endTimeLocal: "17:00:00" }), C], [6, 0], [23, 59]);
 assert("E7 when the next block starts at the very minute the first one ends, the next one just starts — no stop in between", handover.log.join() === "08:00 start A,12:00 start B,17:00 start C", handover.log.join());
 const neverStarted = runDay([A, BE, C2], [17, 57], [18, 30]);
@@ -84,6 +84,31 @@ assert("E14 the auto player acts on the decision: start as before, stop through 
 const hk = rd("lib/use-schedule-playback-handlers.ts");
 assert("E15 stopScheduled is the Stop button's path on a station / controller (device.stopOrSend), else the plain stop", /const stopOrSend = device\?\.stopOrSend/.test(hk) && /const stopScheduled = stopOrSend \?\? stop/.test(hk));
 assert("E16 the type, the validator and the create route know the quiet block (SILENCE) and nothing else changed in the playback code", /"SILENCE"/.test(rd("lib/types.ts")) && /targetType === "SILENCE"\) return \{ ok: true \}/.test(rd("lib/schedule-target-validator.ts")) && /targetType === "SILENCE" \? "silence"/.test(rd("app/api/schedules/route.ts")));
+
+// ── the schedule's music never starts over (owner 2026-11-15) ──
+import { markScheduleDriven, clearScheduleDriven, isScheduleDriven } from "../lib/schedule-driven";
+assert("E19 nothing is 'the schedule's music' until the engine marks it; then that source and the songs the player lined up after it are; a quiet block clears it; a song played by hand never is", !isScheduleDriven("x", "Autoplay") && (markScheduleDriven("playlist-1"), isScheduleDriven("playlist-1") && isScheduleDriven("autoplay-abc", "Autoplay") && !isScheduleDriven("someone-elses-song", "Pop")) && (clearScheduleDriven(), !isScheduleDriven("playlist-1") && !isScheduleDriven("autoplay-abc", "Autoplay")));
+const pc = rd("lib/schedule-playback-client.ts");
+assert("E20 the engine marks what it started (a playlist / radio / bank through start(), a single source) and a quiet block clears the mark", (pc.match(/markScheduleDriven\(/g) ?? []).length === 3 && /clearScheduleDriven\(\);/.test(ap));
+const rec = rd("components/autoplay-recommender.tsx");
+assert("E21 the recommender lines up a suggested next song for the schedule's music even while it is switched off for the operator, and the LAST song of a scheduled list gets one even with LOOP on (so nothing starts over); a song the operator plays by hand is unchanged", /const driven = useScheduleDriven\(src\?\.id \?\? null, src\?\.genre \?\? null\);/.test(rec) && /\(getRepeatMode\(\) === "off" \|\| driven\)/.test(rec) && /autoplayNext"\) !== "on" && !driven\) why = "switched-off"/.test(rec) && /title, artist, driven\]/.test(rec));
+assert("E22 an end of a MUSIC block stops nothing and does not start it late; only a quiet block silences", !/kind: "stop", schedule: current, reason: "end"/.test(rd("lib/schedule-actions.ts")) && /if \(end !== null && cur >= end\) return null;/.test(rd("lib/schedule-actions.ts")));
+
+// ── turning the schedule switch ON starts the block that should be playing now (owner 2026-11-16) ──
+{
+  const day = new Date(2026, 10, 16, 14, 0);
+  const keys = ["syncbiz-schedule-auto-abc-2026-11-16-09:00:00", "syncbiz-schedule-end-abc-2026-11-16-10:00:00", "syncbiz-schedule-auto-abc-2026-11-15-09:00:00", "syncbiz-schedule-auto-off-ids", "syncbiz-schedule-engine-enabled", "syncbiz-locale"];
+  const gone = todaysFiredKeys(keys, day);
+  assert("E23 the marks of TODAY's starts and ends are what a switch-on clears — not yesterday's, not the opt-out list, not other settings", gone.length === 2 && gone.includes(keys[0]!) && gone.includes(keys[1]!));
+  const sched = { id: "abc", enabled: true, targetType: "PLAYLIST", targetId: "p", startTimeLocal: "09:00:00", endTimeLocal: "23:59:00", recurrence: "weekly", daysOfWeek: [day.getDay()], priority: 1, branchId: "b", name: "x", accountId: "a" } as unknown as Schedule;
+  const fired = new Set([scheduleAutoFireStorageKey(sched, day)]);
+  const before = decideScheduleAction({ schedules: [sched], now: day, hasFired: (k) => fired.has(k) });
+  for (const k of todaysFiredKeys([...fired], day)) fired.delete(k);
+  const after = decideScheduleAction({ schedules: [sched], now: day, hasFired: (k) => fired.has(k) });
+  assert("E24 a block that had already started today does not start again by itself — but after the switch-on cleared its mark it starts at once", before === null && after?.kind === "start");
+  const ctx = rd("lib/schedule-engine-context.tsx");
+  assert("E25 the switch's own handler clears today's marks when it is turned ON (not when turned off, not at load)", /if \(v\) \{[^}]*todaysFiredKeys\(Object\.keys\(localStorage\), new Date\(\)\)/.test(ctx));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

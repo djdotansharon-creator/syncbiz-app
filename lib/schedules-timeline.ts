@@ -96,10 +96,17 @@ export function appliesOnDay(s: Schedule, day: number, weekDates: string[]): boo
 }
 
 /** the scenes of one day, in time order */
-export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[]): Scene[] {
+/**
+ * `musicMinutes` (owner 2026-11-15: "a song cannot be stretched beyond what it is"): how long a block's own music lasts, in whole minutes (null = not known / live). A block with no
+ * end of its own is then drawn only as long as its music — what follows until the next block is not the block's: the player fills it with suggested songs (lib/schedule-driven.ts).
+ */
+export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[], musicMinutes?: (s: Schedule) => number | null, floatingId?: string): Scene[] {
   const mine = schedules.filter((s) => appliesOnDay(s, day, weekDates));
+  // a block that is being CARRIED (owner 2026-11-15) is not part of the sequence: it floats above the others, keeps its own length (a block next to it never cuts it short, and it never
+  // cuts the others short), and what it covers is only its own stretch
+  const floating = floatingId ? mine.find((s) => s.id === floatingId && s.enabled) : undefined;
   const active = mine
-    .filter((s) => s.enabled)
+    .filter((s) => s.enabled && s.id !== floatingId)
     .sort((a, b) => {
       const d = startMinutes(a) - startMinutes(b);
       if (d !== 0) return d;
@@ -116,8 +123,12 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
     const nextStart = i + 1 < distinct.length ? distinct[i + 1]! : DAY_MINUTES;
     // the engine's own rule (lib/schedule-actions.ts): an explicit end stops the music at that time unless the next block comes first
     const quiet = isSilenceBlock(s);
-    const own = quiet ? null : explicitEndMinutes(s);
-    const end = own !== null && own < nextStart ? own : nextStart;
+    const own = explicitEndMinutes(s); // a quiet block can have its own end too (owner 2026-11-15: "I want to control the quiet time with the two bars")
+    let end = own !== null && own < nextStart ? own : nextStart;
+    if (own === null && !quiet && musicMinutes) {
+      const len = musicMinutes(s);
+      if (len !== null && len > 0 && start + len < end) end = start + len;
+    }
     const shadowed = seen.has(start);
     seen.add(start);
     scenes.push({ schedule: s, day, start, end, endSet: own !== null && own <= nextStart, quiet, paused: false, shadowed });
@@ -125,6 +136,18 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
   for (const s of mine.filter((x) => !x.enabled)) {
     const start = startMinutes(s);
     scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), endSet: false, quiet: isSilenceBlock(s), paused: true, shadowed: false });
+  }
+  if (floating) {
+    const start = startMinutes(floating);
+    const quiet = isSilenceBlock(floating);
+    const own = explicitEndMinutes(floating);
+    const nextDistinct = distinct.find((m) => m > start);
+    let end = own ?? (nextDistinct ?? DAY_MINUTES);
+    if (own === null && !quiet && musicMinutes) {
+      const len = musicMinutes(floating);
+      if (len !== null && len > 0) end = start + len;
+    }
+    scenes.push({ schedule: floating, day, start, end: Math.min(DAY_MINUTES, Math.max(start + 5, end)), endSet: own !== null, quiet, paused: false, shadowed: false });
   }
   return scenes.sort((a, b) => a.start - b.start);
 }
@@ -426,15 +449,18 @@ export function closingPlan(biz: BizHours): (number | null)[] {
 }
 
 /** the hours the timeline shows: [first, last] in whole hours (0–24). `starts` = the start minutes of the scheduled blocks, so nothing scheduled is ever hidden. */
-export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[]): { first: number; last: number } {
+export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[], ends: number[] = []): { first: number; last: number } {
   if (mode === "day") return { first: 0, last: 24 };
   let first: number;
   let last: number;
   const open = biz ? WEEK_DAYS.map((d) => bizDay(biz, d)).filter((h): h is { open: number; close: number } => h !== null) : [];
   if (biz && (biz.h24 || open.some(isOvernight))) return { first: 0, last: 24 };
   if (open.length > 0) {
+    // ACTIVE HOURS = the business's own hours and nothing else (owner 2026-11-16): the closing marker, and whatever is scheduled outside the hours, are for the "Full day" view — this is also the
+    // furthest the hours can be stretched / zoomed out to
     first = Math.floor(Math.min(...open.map((h) => h.open)) / 60);
-    last = Math.min(24, Math.ceil(Math.max(...open.map(closeOf)) / 60) + 1); // + 1: the closing marker itself stays in view
+    last = Math.min(24, Math.ceil(Math.max(...open.map(closeOf)) / 60));
+    return thinnest(first, last);
   } else if (starts.length > 0) {
     first = Math.floor(Math.min(...starts) / 60) - 1;
     last = Math.ceil(Math.max(...starts) / 60) + 2;
@@ -446,9 +472,15 @@ export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[
     first = Math.min(first, Math.floor(Math.min(...starts) / 60));
     last = Math.max(last, Math.min(24, Math.ceil(Math.max(...starts) / 60) + 1));
   }
+  // the END of a block is part of what is scheduled too (a block that starts at 10:00 and ends at 16:45 must not be cut at 13:00)
+  if (ends.length > 0) last = Math.max(last, Math.min(24, Math.ceil(Math.max(...ends) / 60) + 1)); // + 1 hour of room, so a long block can still be carried later
+  return thinnest(first, last);
+}
+
+/** whole hours inside the day, never thinner than eight hours */
+function thinnest(first: number, last: number): { first: number; last: number } {
   first = Math.max(0, first);
   last = Math.min(24, last);
-  // never thinner than eight hours
   while (last - first < 8) {
     if (first > 0) first -= 1;
     if (last - first < 8 && last < 24) last += 1;
@@ -471,6 +503,14 @@ export function zoomWindow(w: TimeWindow, factor: number, anchorRatio: number): 
   const ratio = Math.min(1, Math.max(0, anchorRatio));
   const a = Math.min(Math.max(0, w.a + ratio * width - ratio * next), DAY_MINUTES - next);
   return { a, b: a + next };
+}
+
+/** keep a window inside `bounds` (the hours the timeline shows): never wider than them, never sliding out of them */
+export function clampWindow(w: TimeWindow, bounds: TimeWindow): TimeWindow {
+  const room = bounds.b - bounds.a;
+  const width = Math.min(room, Math.max(0, w.b - w.a));
+  const a = Math.min(Math.max(bounds.a, w.a), bounds.b - width);
+  return { a, b: a + width };
 }
 
 /** slide a window along the day by some minutes (its width stays) */
@@ -519,4 +559,61 @@ export function swapStarts(a: { start: number; end: number }, b: { start: number
   const firstNew = Math.min(DAY_MINUTES - 5, first.start + secondLen + gap);
   const secondNew = first.start;
   return aFirst ? { a: firstNew, b: secondNew } : { a: secondNew, b: firstNew };
+}
+
+/**
+ * The carried block `a` (length `aLen`) is held at `aAt`, and has passed the middle of the neighbour `b`. With free room around them (owner 2026-11-16, two songs with a gap between them):
+ * `a` lands exactly where it is held and `b` just steps aside, flush against it on the side `a` came from (`aCameFromLater` = a started after b). While `a` is still over b's old place b follows it
+ * smoothly; once `a` has passed b's old place whole, nothing is displaced any more and b stays where it was. Returns null when that does not fit — another block is in the way of either of them,
+ * or the edge of the day — and the two then trade places (`swapStarts`), as before.
+ */
+export function stepAside(
+  aAt: number,
+  aLen: number,
+  b: { start: number; end: number },
+  aCameFromLater: boolean,
+  others: { start: number; end: number }[],
+  bounds: { min: number; max: number },
+): { a: number; b: number } | null {
+  const bLen = b.end - b.start;
+  const bAt = aCameFromLater ? aAt + aLen : aAt - bLen;
+  if (aAt < bounds.min || aAt + aLen > bounds.max || bAt < bounds.min || bAt + bLen > bounds.max) return null;
+  const hit = (start: number, len: number) => others.some((o) => start < o.end && start + len > o.start);
+  return hit(aAt, aLen) || hit(bAt, bLen) ? null : { a: aAt, b: bAt };
+}
+
+// ── undo (owner 2026-11-15: "Ctrl/Cmd+Z undoes what I did on the schedule") ──
+/** the fields of a schedule that a person changes on the studio and that the server stores */
+const UNDO_FIELDS = ["name", "branchId", "targetType", "targetId", "sourceId", "deviceId", "recurrence", "oneOffDateLocal", "daysOfWeek", "startTimeLocal", "endTimeLocal", "enabled", "priority"] as const;
+
+/** what must be PATCHed on `current` to make it `earlier` again — only the fields that differ ({} = identical) */
+export function changedFields(current: Schedule, earlier: Schedule): Partial<Schedule> {
+  const out: Record<string, unknown> = {};
+  for (const k of UNDO_FIELDS) {
+    const a = (current as Record<string, unknown>)[k];
+    const b = (earlier as Record<string, unknown>)[k];
+    if (JSON.stringify(a ?? null) !== JSON.stringify(b ?? null)) out[k] = b ?? null;
+  }
+  return out as Partial<Schedule>;
+}
+
+/** the POST body that makes a deleted schedule again (same music, branch, days, hours, state) */
+export function scheduleBody(s: Schedule): Record<string, unknown> {
+  const tid = (s.targetId || s.sourceId || "").trim();
+  const oneOff = s.recurrence === "one_off";
+  return {
+    name: s.name,
+    branchId: s.branchId,
+    targetType: s.targetType,
+    targetId: tid,
+    sourceId: s.targetType === "SOURCE" ? tid : undefined,
+    deviceId: s.deviceId || undefined,
+    recurrence: oneOff ? "one_off" : "weekly",
+    ...(oneOff ? { oneOffDateLocal: s.oneOffDateLocal } : {}),
+    daysOfWeek: oneOff ? [] : s.daysOfWeek,
+    startTimeLocal: s.startTimeLocal,
+    ...(s.endTimeLocal && s.endTimeLocal.trim() ? { endTimeLocal: s.endTimeLocal } : {}),
+    enabled: s.enabled,
+    priority: typeof s.priority === "number" ? s.priority : 1,
+  };
 }

@@ -40,6 +40,7 @@ function rowToBranch(row: {
   locationCode?: string | null;
   street?: string; houseNumber?: string; latitude?: number | null; longitude?: number | null;
   formattedAddress?: string | null; googlePlaceId?: string | null;
+  scheduleEnabled?: boolean;
 }): Branch {
   return {
     locationCode: row.locationCode ?? null,
@@ -59,6 +60,7 @@ function rowToBranch(row: {
     status: row.status as Branch["status"],
     devicesOnline: row.devicesOnline,
     devicesTotal: row.devicesTotal,
+    scheduleEnabled: row.scheduleEnabled ?? true,
   };
 }
 

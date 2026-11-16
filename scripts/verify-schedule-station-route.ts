@@ -99,7 +99,7 @@ async function run() {
   assert("W1 the station route plays through device.playSourceOrSend (the manual-click path), every other route through the existing routed play", /route\.kind === "station" && stationPlay \? stationPlay : routedPlaySource/.test(hooks) && /const stationPlay = device\?\.playSourceOrSend;/.test(hooks));
   assert("W2 the route is fed by the designation signals of device-player-context (mainSnapResolved, isDesignatedAudioStation, isBranchConnected, masterDeviceId)", /device\?\.mainSnapResolved/.test(hooks) && /device\?\.isDesignatedAudioStation/.test(hooks) && /device\?\.isBranchConnected/.test(hooks) && /device\?\.masterDeviceId/.test(hooks));
   const auto = read("components/schedule-auto-player.tsx");
-  assert("W3 the auto-player skips a tick while the route is 'wait' and passes the route to runSchedulePlayback (fired-today is set only on success)", /handlersRef\.current\.route\?\.kind === "wait"\) return;/.test(auto) && /route: h\.route \}/.test(auto) && /if \(!ok\) return;\s*\n\s*const fireKey/.test(auto));
+  assert("W3 the auto-player skips a tick while the route is 'wait' and passes the route to runSchedulePlayback (fired-today is set only on success)", /handlersRef\.current\.route\?\.kind === "wait"\) return;/.test(auto) && /route: h\.route(, bankStreamReady: h\.bankStreamReady)? \}/.test(auto) && /if \(!ok\) return;\s*\n\s*const fireKey/.test(auto));
   const card = read("components/schedule-card.tsx");
   assert("W4 'Play now' uses the same route", /\{ stop, setQueue, playSource, setLastMessage, route \}/.test(card));
   const routed = read("lib/use-routed-play-source.ts");
