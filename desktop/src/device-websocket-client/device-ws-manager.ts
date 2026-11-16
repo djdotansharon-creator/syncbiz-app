@@ -13,6 +13,7 @@ import {
 } from "./url-auto-advance";
 import { isMainWsAttemptId } from "../main/main-attempt-id";
 import { readPlaybackSource, writePlaybackSource, type SavedUrlSession } from "../main/playback-source-store";
+import { resolveRemoteMediaTarget } from "../shared/remote-media-url-policy";
 
 /** P0 Drop Next: the next thing MAIN plays automatically — a queued item, or a URL playlist index. */
 type AutoTarget = { kind: "queue"; item: QueueItem } | { kind: "playlist"; index: number };
@@ -1126,7 +1127,16 @@ export class DeviceWsManager {
 
     switch (cmd) {
       case "PLAY": {
-        const url = (p?.url ?? "").trim();
+        const rawUrl = (p?.url ?? "").trim();
+        // C1 (A1): a remote PLAY url must be an approved PUBLIC http(s) target — never an internal/private host,
+        // loopback, UNC/SMB, file: or non-http(s) scheme. Empty url is the pause/resume path (unchanged below).
+        // Defense in depth with the engine gate (mpv-manager.loadInternal, A2), which re-checks every load target.
+        const url = rawUrl ? (resolveRemoteMediaTarget(rawUrl, this.config.apiBaseUrl) ?? "") : "";
+        if (rawUrl && !url) {
+          console.warn("[SyncBiz:desktop-mpv:route] PLAY rejected — forbidden/non-public media target (C1)");
+          this.lastCommandSummary = "PLAY rejected (forbidden target)";
+          break;
+        }
         const fadeSec = orch.getCrossfadeSec();
         // P0 Gate 1a: EVERY WS URL load goes through playMusicCrossfade() — the orchestrator decides crossfade vs cold
         // from the REAL active deck (cold only when nothing is audible). Never infer audibility from the
@@ -1174,10 +1184,20 @@ export class DeviceWsManager {
         {
           const rs = (payload as { source?: { type?: unknown; url?: unknown } } | null | undefined)?.source;
           const rUrl = typeof rs?.url === "string" ? rs.url.trim() : "";
-          if (rs && rs.type !== "local" && !rUrl) {
-            console.warn("[DeviceWsManager] PLAY_SOURCE rejected — non-LOCAL source without a playable URL (metadata unchanged)");
-            this.lastCommandSummary = "PLAY_SOURCE rejected (no playable URL)";
-            break;
+          if (rs && rs.type !== "local") {
+            if (!rUrl) {
+              console.warn("[DeviceWsManager] PLAY_SOURCE rejected — non-LOCAL source without a playable URL (metadata unchanged)");
+              this.lastCommandSummary = "PLAY_SOURCE rejected (no playable URL)";
+              break;
+            }
+            // C1 (A1): a non-LOCAL source whose url is an internal/private/loopback/UNC/file/non-public target is
+            // rejected here — BEFORE any session/display metadata or playback. Defense in depth with the engine
+            // gate (mpv-manager.loadInternal, A2). The co-located renderer still owns true LOCAL audio (type "local").
+            if (!resolveRemoteMediaTarget(rUrl, this.config.apiBaseUrl)) {
+              console.warn("[DeviceWsManager] PLAY_SOURCE rejected — forbidden/non-public media target (C1) (metadata unchanged)");
+              this.lastCommandSummary = "PLAY_SOURCE rejected (forbidden target)";
+              break;
+            }
           }
         }
         // P0 Gate 1f: the session that is published BEFORE this selection (restored if its standby load fails).

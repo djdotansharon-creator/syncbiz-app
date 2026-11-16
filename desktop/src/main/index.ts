@@ -4,6 +4,9 @@ import { app, BrowserWindow, net, protocol, screen, session, shell } from "elect
 
 import { initFileLogger, fileLog, getLogFilePath } from "./file-logger";
 import { registerMvpIpc, getEffectiveRuntimeConfig, getProtectionService, shutdownStationWs } from "./ipc-mvp";
+import { setTrustedAppOrigin } from "../shared/remote-media-url-policy";
+import { setTokenCipher, migrateTokenAtRestIfNeeded, setConfigWarnLogger } from "./runtime-config-service";
+import { electronTokenCipher } from "./token-at-rest";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat-writer";
 import { startEmbeddedNextServer, type EmbeddedNextHandle } from "./embedded-next-server";
 import { flushLocalCollectionTagSnapshotWrites } from "./local-collection-snapshot";
@@ -552,6 +555,18 @@ app.whenReady().then(async () => {
   // Initialize file logger first so every subsequent step is captured.
   initFileLogger();
 
+  // C6b (2026-11-14): seal the station token at rest (Electron safeStorage / Windows DPAPI). Installed BEFORE any
+  // config read/write below so startup uses the sealed form; a legacy plaintext token is migrated once. Fail-safe:
+  // on any error the token keeps working exactly as before (plaintext).
+  try {
+    setConfigWarnLogger((message, data) => fileLog("WARN", message, data)); // surface at-rest anomalies (no token value)
+    setTokenCipher(electronTokenCipher());
+    const migrated = migrateTokenAtRestIfNeeded(app.getPath("userData"));
+    fileLog("INFO", "app.whenReady: token-at-rest cipher installed", { migrated });
+  } catch (err) {
+    fileLog("WARN", "app.whenReady: token-at-rest setup failed — token not sealed this run", { err: (err as Error)?.message });
+  }
+
   // ── Comprehensive startup diagnostics ─────────────────────────────────────
   const bundledServerJs = path.join(packagedStandalonePath(), "server.js");
   fileLog("INFO", "app.whenReady: startup diagnostics", {
@@ -653,6 +668,9 @@ app.whenReady().then(async () => {
   // Seed the heartbeat with the durable MAIN identity (ProgramData deviceId) up front, so the FIRST heartbeat
   // already carries deviceId/branchId even if the renderer never loads / WS never connects / nothing plays.
   const effectiveConfig = getEffectiveRuntimeConfig();
+  // C1 (A2 same-origin exception): trust the station's OWN app origin from LOCAL config, so a dev/localhost origin
+  // does not make the engine reject its own jingle/media URLs. Local-only; never set from a WS/remote payload.
+  setTrustedAppOrigin(effectiveConfig.apiBaseUrl);
   startHeartbeat({
     appVersion: app.getVersion(),
     pid: process.pid,

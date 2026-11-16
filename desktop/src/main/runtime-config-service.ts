@@ -1,10 +1,50 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DesktopRuntimeConfig } from "../shared/mvp-types";
+import { identityTokenCipher, type TokenCipher } from "./token-at-rest";
 
 const CONFIG_NAME = "syncbiz-player-runtime.json";
+
+/**
+ * C6b (2026-11-14): the `wsToken` is sealed at rest through this cipher. Default cannot seal (no protection) so,
+ * unwired, a NEW token is never written in cleartext (the save preserves what is on disk). VONO MAIN injects the
+ * DPAPI cipher at startup via `setTokenCipher`, before any token save. The in-memory config always holds the
+ * PLAINTEXT token — only the on-disk JSON carries the sealed form; server verification is unchanged.
+ */
+let tokenCipher: TokenCipher = identityTokenCipher();
+export function setTokenCipher(cipher: TokenCipher): void {
+  tokenCipher = cipher;
+}
+
+/**
+ * C6b: a minimal WARN sink so the config service (a pure, electron-free module) can report at-rest anomalies WITHOUT
+ * the token value. Default is a no-op; VONO MAIN wires it to the file logger via `setConfigWarnLogger`.
+ */
+let warnLog: (message: string, data?: Record<string, unknown>) => void = () => {};
+export function setConfigWarnLogger(fn: (message: string, data?: Record<string, unknown>) => void): void {
+  warnLog = fn;
+}
+
+/** Outcome of a save, so callers can tell whether a NEW token was actually persisted (never reported falsely). */
+export type SaveRuntimeConfigResult = {
+  /** true when the token on disk now reflects the requested token (sealed, or an intentional clear). */
+  tokenPersisted: boolean;
+  /** true when a legacy cleartext token remains on disk because it could not be sealed. */
+  legacyPlaintextRemains: boolean;
+};
+
+/** The raw stored `wsToken` as it currently sits on disk (sealed / legacy-plaintext / "" / absent). Never throws. */
+function readStoredWsToken(file: string): string {
+  try {
+    if (!existsSync(file)) return "";
+    const data = JSON.parse(readFileSync(file, "utf-8")) as { wsToken?: unknown };
+    return typeof data.wsToken === "string" ? data.wsToken : "";
+  } catch {
+    return "";
+  }
+}
 
 /**
  * Known music-library locations to auto-adopt when the operator hasn't picked one.
@@ -103,7 +143,7 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
           ? data.apiBaseUrl.trim()
           : base.apiBaseUrl,
       wsUrl: typeof data.wsUrl === "string" && data.wsUrl.trim() ? data.wsUrl.trim() : base.wsUrl,
-      wsToken: typeof data.wsToken === "string" ? data.wsToken : "",
+      wsToken: typeof data.wsToken === "string" ? tokenCipher.open(data.wsToken) : "",
       lastAuthEmail:
         typeof data.lastAuthEmail === "string" && data.lastAuthEmail.trim()
           ? data.lastAuthEmail.trim()
@@ -135,10 +175,73 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
   }
 }
 
-export function saveRuntimeConfig(userData: string, config: DesktopRuntimeConfig): void {
+export function saveRuntimeConfig(userData: string, config: DesktopRuntimeConfig): SaveRuntimeConfigResult {
   mkdirSync(userData, { recursive: true });
-  const path = join(userData, CONFIG_NAME);
-  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  const file = join(userData, CONFIG_NAME);
+
+  // C6b: decide the on-disk token form. The in-memory `config` keeps the PLAINTEXT token; only the JSON is sealed.
+  const token = config.wsToken ?? "";
+  let onDiskToken: string;
+  let tokenPersisted = true;
+  let legacyPlaintextRemains = false;
+  if (!token) {
+    onDiskToken = ""; // intentional clear
+  } else {
+    const sealed = tokenCipher.seal(token); // string | null — NEVER plaintext
+    if (sealed !== null) {
+      onDiskToken = sealed; // encrypted-only
+    } else {
+      // Encryption unavailable / failed → NEVER write cleartext. Preserve the existing on-disk token (sealed or
+      // legacy); if nothing is there, store "" (no token). The in-memory token stays valid for this session.
+      const existing = readStoredWsToken(file);
+      onDiskToken = existing;
+      tokenPersisted = false;
+      legacyPlaintextRemains = existing !== "" && !tokenCipher.isSealed(existing);
+      warnLog("C6b token-at-rest: encryption unavailable — NEW token NOT persisted (no cleartext written)", {
+        legacyPlaintextRemains,
+      });
+    }
+  }
+
+  const onDisk: DesktopRuntimeConfig = { ...config, wsToken: onDiskToken };
+  // Atomic write (crash/partial-write safe): write a temp file then rename over the target, so a reader never sees a
+  // half-written file and a write failure leaves the PREVIOUS file (and its token) intact.
+  const tmp = `${file}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(onDisk, null, 2), "utf-8");
+    renameSync(tmp, file);
+  } catch (err) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* best-effort tmp cleanup */
+    }
+    throw err; // existing file is untouched (atomic); surface the failure — never report a save that did not happen
+  }
+  return { tokenPersisted, legacyPlaintextRemains };
+}
+
+/**
+ * C6b: one-time migration — if the stored token is LEGACY PLAINTEXT and OS protection is now available, re-save it
+ * so it becomes sealed. Idempotent (already-sealed or absent → no-op). Never throws; a failure just leaves the file
+ * untouched (the token still works via the legacy-plaintext open path). Returns true when a migration write happened.
+ */
+export function migrateTokenAtRestIfNeeded(userData: string): boolean {
+  try {
+    const file = join(userData, CONFIG_NAME);
+    if (!existsSync(file)) return false;
+    const stored = readStoredWsToken(file);
+    if (!stored || tokenCipher.isSealed(stored)) return false; // absent or already sealed → nothing to migrate
+    if (!tokenCipher.available()) {
+      // A legacy cleartext token remains because protection is unavailable. Record it EXPLICITLY — never the value.
+      warnLog("C6b token-at-rest: legacy cleartext token remains on disk — encryption unavailable, not migrated", {});
+      return false;
+    }
+    // Legacy plaintext + protection available → load (plaintext in memory) and re-save (seals). Confirm it persisted.
+    return saveRuntimeConfig(userData, loadRuntimeConfig(userData)).tokenPersisted;
+  } catch {
+    return false;
+  }
 }
 
 export function patchRuntimeConfig(

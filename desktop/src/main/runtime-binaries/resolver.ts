@@ -43,6 +43,7 @@ import type {
 } from "./types";
 import {
   fetchLatestRelease,
+  fetchReleaseByTag,
   fetchText,
   downloadToFile,
   type GithubRelease,
@@ -256,7 +257,11 @@ async function downloadFromGithub(
   onProgress?: ResolveProgressHandler,
 ): Promise<ResolvedBinary> {
   onProgress?.({ binary: name, phase: `Looking up ${name} release`, percent: -1 });
-  const release = await fetchLatestRelease(source.owner, source.repo);
+  // C4: a pinned binary (mpv) resolves a SPECIFIC release by tag — not "latest" — so the fallback download can only
+  // ever fetch the vetted build (and is then hash-verified below).
+  const release = source.pin
+    ? await fetchReleaseByTag(source.owner, source.repo, source.pin.releaseTag)
+    : await fetchLatestRelease(source.owner, source.repo);
   const version = release.tag_name || release.name || "unknown";
 
   const asset = pickAsset(release, new RegExp(source.assetPattern));
@@ -330,6 +335,16 @@ async function downloadFromGithub(
     finalSha256 = expectedSha256 ?? (await sha256File(finalPath));
   }
 
+  // C4: a pinned binary (mpv has no upstream sidecar) MUST match the owner-vetted hash. A mismatch REJECTS the
+  // download — we never cache or spawn it. The resolver prefers the bundled/cached binary (checked before this
+  // path), so this never blocks playback; it only refuses to install an UNVERIFIED player.
+  if (source.pin && finalSha256.toLowerCase() !== source.pin.exeSha256.toLowerCase()) {
+    await fs.rm(finalPath, { force: true });
+    throw new Error(
+      `${name} sha256 mismatch vs pin ${source.pin.releaseTag}: expected ${source.pin.exeSha256} got ${finalSha256}`,
+    );
+  }
+
   // chmod +x on *nix so the binary is executable right after a fresh install.
   if (process.platform !== "win32") {
     try {
@@ -343,9 +358,11 @@ async function downloadFromGithub(
     name,
     path: finalPath,
     version,
-    sha256: source.archive && source.archive.kind !== "raw" && !expectedSha256
-      ? finalSha256
-      : (expectedSha256 ?? "tls-only"),
+    sha256: source.pin
+      ? source.pin.exeSha256 // C4: store the trusted pin so the cache check (readValidCache) is a real trust check
+      : source.archive && source.archive.kind !== "raw" && !expectedSha256
+        ? finalSha256
+        : (expectedSha256 ?? "tls-only"),
     installedAt: new Date().toISOString(),
     lastCheckedAt: new Date().toISOString(),
     sourceKind: "github-release",

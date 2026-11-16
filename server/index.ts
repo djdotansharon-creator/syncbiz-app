@@ -52,6 +52,7 @@ import {
 } from "./branch-room.js";
 import { verifyWsToken } from "./ws-token.js";
 import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
+import { isForbiddenMediaTarget } from "./remote-media-url-policy.js";
 import {
   BRANCH_ALIAS_RUNTIME_MODE,
   applyAliasSync,
@@ -359,6 +360,19 @@ function inferSourceType(url: string): string {
   if (u.match(/\.(m3u8?|pls)(\?|$)/i)) return "winamp";
   if (u.startsWith("http")) return "stream-url";
   return "local";
+}
+
+/**
+ * C2 SECURITY: true when a URL-bearing COMMAND carries a forbidden immediate media target (internal/private/
+ * loopback/file/UNC/non-http(s)). Only PLAY / PLAY_SOURCE / QUEUE_NEXT / PLAY_INTERRUPT carry a URL; every other
+ * command returns false (untouched). Empty url and LOCAL (metadata-only) sources are NOT forbidden, and a
+ * server-relative "/api/jingles/..." path passes (jingles). sessionTracks are left to the station's A2 engine gate.
+ */
+function commandHasForbiddenMediaTarget(command: string, payload: unknown): boolean {
+  const p = (payload ?? {}) as { url?: unknown; source?: { url?: unknown } };
+  if (command === "PLAY" || command === "PLAY_INTERRUPT") return isForbiddenMediaTarget(p.url);
+  if (command === "PLAY_SOURCE" || command === "QUEUE_NEXT") return isForbiddenMediaTarget(p.source?.url);
+  return false;
 }
 
 /** Returns the currently connected primary MASTER device ID for a room. Desktop-only; null if disconnected, mobile, or grace-expired. */
@@ -1364,6 +1378,12 @@ wss.on("connection", (ws) => {
         ws.send(JSON.stringify({ type: "ERROR", message: "Valid URL required" } as ServerMessage));
         return;
       }
+      // C2 SECURITY: a guest-submitted URL must be a public media target — never an internal/loopback/file target
+      // (a guest could otherwise steer an approved PLAY_SOURCE at the brand's internal network).
+      if (isForbiddenMediaTarget(sourceUrl)) {
+        ws.send(JSON.stringify({ type: "ERROR", message: "URL not allowed" } as ServerMessage));
+        return;
+      }
       const rec: GuestRecommendationPayload = {
         id: `rec-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         sourceUrl,
@@ -1410,7 +1430,8 @@ wss.on("connection", (ws) => {
       if (msg.type === "APPROVE_GUEST_RECOMMEND") {
         const masterId = approverRoomKey ? getMasterForRoom(approverRoomKey) : null;
         const master = masterId ? devices.get(masterId) : null;
-        if (master && master.ws.readyState === 1) {
+        // C2 SECURITY: defense in depth — never forward an approved guest PLAY_SOURCE with a forbidden target.
+        if (master && master.ws.readyState === 1 && !isForbiddenMediaTarget(rec.sourceUrl)) {
           master.ws.send(JSON.stringify({
             type: "COMMAND",
             command: "PLAY_SOURCE",
@@ -1650,11 +1671,20 @@ wss.on("connection", (ws) => {
       // so one unavailable branch never stops the others. Without requestId nothing changes.
       const ackId = role === "owner_global" && typeof msg.requestId === "string" && msg.requestId.trim() ? msg.requestId.trim().slice(0, 64) : null;
       const ackBranch = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;
-      const sendAck = (delivered: boolean, reason?: "not_authorized" | "no_station") => {
+      const sendAck = (delivered: boolean, reason?: "not_authorized" | "no_station" | "forbidden") => {
         if (ackId && ws.readyState === 1) {
           ws.send(JSON.stringify({ type: "COMMAND_DELIVERY", requestId: ackId, targetBranchId: ackBranch, delivered, ...(reason ? { reason } : {}) } as ServerMessage));
         }
       };
+      // C2 SECURITY: reject a URL-bearing COMMAND whose immediate media target is forbidden (internal/loopback/
+      // file/UNC/non-http(s)) BEFORE any routing — defense in depth with the station A1/A2 gates. Relative
+      // "/api/jingles/..." and public http(s) pass untouched, so jingles / radio / YouTube / etc. keep working.
+      if (commandHasForbiddenMediaTarget(msg.command, msg.payload)) {
+        console.warn("[SyncBiz WS] COMMAND rejected — forbidden media target (C2)", { command: msg.command });
+        if (ackId) { sendAck(false, "forbidden"); return; }
+        ws.send(JSON.stringify({ type: "ERROR", message: "Media target not allowed" } as ServerMessage));
+        return;
+      }
       if (role === "owner_global") {
         const owner = owners.find((o) => o.ws === ws);
         const targetBranchId = (msg.targetBranchId ?? "").trim() || DEFAULT_BRANCH_ID;

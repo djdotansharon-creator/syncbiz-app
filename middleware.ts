@@ -2,8 +2,21 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { parseSessionValue } from "@/lib/auth-session";
 import { isPhoneUa } from "@/lib/ua-detection";
+import { buildContentSecurityPolicy } from "@/lib/csp";
 
 const COOKIE_NAME = "syncbiz-session";
+
+/**
+ * C5 step 2 (CSP) — DRAFT. Attaches a `Content-Security-Policy-Report-Only` header to document responses ONLY
+ * when `SYNCBIZ_CSP_REPORT_ONLY=1`. OFF by default → blocks nothing and changes nothing until explicitly enabled
+ * on a TEST environment (step C). Report-Only never enforces, so even enabled it cannot break playback/jingles/UI.
+ */
+function withCsp(res: NextResponse): NextResponse {
+  if (process.env.SYNCBIZ_CSP_REPORT_ONLY === "1") {
+    res.headers.set("Content-Security-Policy-Report-Only", buildContentSecurityPolicy());
+  }
+  return res;
+}
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -102,11 +115,11 @@ export async function middleware(req: NextRequest) {
   }
 
   if (!isProtected(pathname)) {
-    return NextResponse.next();
+    return withCsp(NextResponse.next());
   }
 
   if (isAllowed(pathname)) {
-    return NextResponse.next();
+    return withCsp(NextResponse.next());
   }
 
   if (!email) {
@@ -115,7 +128,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return withCsp(NextResponse.next());
 }
 
 export const config = {

@@ -47,6 +47,12 @@ export type GithubReleaseSource = {
   archive?: ArchiveSpec;
   /** Final filename to write under `userData/bin/`. */
   outputFileName: string;
+  /**
+   * C4: integrity pin for a binary WITHOUT an upstream sidecar (mpv). When set, the resolver fetches the PINNED
+   * release by `releaseTag` (not "latest") and verifies the final binary's sha256 against `exeSha256`; a mismatch
+   * REJECTS the download (the bundled / cached binary is preferred, so playback is never blocked).
+   */
+  pin?: { releaseTag: string; exeSha256: string };
 };
 
 export type SystemSource = {

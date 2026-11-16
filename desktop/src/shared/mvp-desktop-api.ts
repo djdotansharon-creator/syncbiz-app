@@ -9,13 +9,13 @@ import type {
   ApplyDesktopAuthPayload,
   BranchLibraryItem,
   BranchLibrarySummary,
-  DesktopRuntimeConfig,
   DesktopSignInResult,
   LocalMockTransportPayload,
   MusicFolderSnapshot,
   MusicLibrarySourcesResult,
   MvpConfigPatch,
   MvpStatusSnapshot,
+  RendererRuntimeConfig,
   PickMusicFolderResult,
   RemoveAdditionalMusicFolderResult,
   ScanLocalAudioFolderResult,
@@ -38,11 +38,11 @@ import type {
 
 /** Preload `contextBridge` contract (renderer uses `window.syncbizDesktop`). */
 export type SyncBizDesktopMvp = {
-  getConfig: () => Promise<DesktopRuntimeConfig>;
+  getConfig: () => Promise<RendererRuntimeConfig>;
   getStatus: () => Promise<MvpStatusSnapshot>;
   /** Running desktop app SemVer (`app.getVersion()`), for the in-app update check. */
   getAppVersion: () => Promise<string>;
-  saveConfig: (patch: MvpConfigPatch) => Promise<DesktopRuntimeConfig>;
+  saveConfig: (patch: MvpConfigPatch) => Promise<RendererRuntimeConfig>;
   connectCloud: () => Promise<MvpStatusSnapshot>;
   disconnectCloud: () => Promise<MvpStatusSnapshot>;
   fetchBranchLibrary: () => Promise<BranchLibrarySummary>;
