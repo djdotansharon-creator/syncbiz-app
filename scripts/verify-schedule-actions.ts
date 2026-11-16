@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { decideScheduleAction, explicitEndMinutes, playingBlockAt, scheduleEndFireStorageKey, type ScheduleAction } from "../lib/schedule-actions";
+import { decideScheduleAction, explicitEndMinutes, playingBlockAt, scheduleEndFireStorageKey, todaysFiredKeys, type ScheduleAction } from "../lib/schedule-actions";
 import { scheduleAutoFireStorageKey } from "../lib/schedule-window";
 import type { Schedule } from "../lib/types";
 
@@ -93,6 +93,22 @@ assert("E20 the engine marks what it started (a playlist / radio / bank through 
 const rec = rd("components/autoplay-recommender.tsx");
 assert("E21 the recommender lines up a suggested next song for the schedule's music even while it is switched off for the operator, and the LAST song of a scheduled list gets one even with LOOP on (so nothing starts over); a song the operator plays by hand is unchanged", /const driven = useScheduleDriven\(src\?\.id \?\? null, src\?\.genre \?\? null\);/.test(rec) && /\(getRepeatMode\(\) === "off" \|\| driven\)/.test(rec) && /autoplayNext"\) !== "on" && !driven\) why = "switched-off"/.test(rec) && /title, artist, driven\]/.test(rec));
 assert("E22 an end of a MUSIC block stops nothing and does not start it late; only a quiet block silences", !/kind: "stop", schedule: current, reason: "end"/.test(rd("lib/schedule-actions.ts")) && /if \(end !== null && cur >= end\) return null;/.test(rd("lib/schedule-actions.ts")));
+
+// ── turning the schedule switch ON starts the block that should be playing now (owner 2026-11-16) ──
+{
+  const day = new Date(2026, 10, 16, 14, 0);
+  const keys = ["syncbiz-schedule-auto-abc-2026-11-16-09:00:00", "syncbiz-schedule-end-abc-2026-11-16-10:00:00", "syncbiz-schedule-auto-abc-2026-11-15-09:00:00", "syncbiz-schedule-auto-off-ids", "syncbiz-schedule-engine-enabled", "syncbiz-locale"];
+  const gone = todaysFiredKeys(keys, day);
+  assert("E23 the marks of TODAY's starts and ends are what a switch-on clears — not yesterday's, not the opt-out list, not other settings", gone.length === 2 && gone.includes(keys[0]!) && gone.includes(keys[1]!));
+  const sched = { id: "abc", enabled: true, targetType: "PLAYLIST", targetId: "p", startTimeLocal: "09:00:00", endTimeLocal: "23:59:00", recurrence: "weekly", daysOfWeek: [day.getDay()], priority: 1, branchId: "b", name: "x", accountId: "a" } as unknown as Schedule;
+  const fired = new Set([scheduleAutoFireStorageKey(sched, day)]);
+  const before = decideScheduleAction({ schedules: [sched], now: day, hasFired: (k) => fired.has(k) });
+  for (const k of todaysFiredKeys([...fired], day)) fired.delete(k);
+  const after = decideScheduleAction({ schedules: [sched], now: day, hasFired: (k) => fired.has(k) });
+  assert("E24 a block that had already started today does not start again by itself — but after the switch-on cleared its mark it starts at once", before === null && after?.kind === "start");
+  const ctx = rd("lib/schedule-engine-context.tsx");
+  assert("E25 the switch's own handler clears today's marks when it is turned ON (not when turned off, not at load)", /if \(v\) \{[^}]*todaysFiredKeys\(Object\.keys\(localStorage\), new Date\(\)\)/.test(ctx));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

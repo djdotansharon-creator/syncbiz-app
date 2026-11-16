@@ -1,5 +1,6 @@
 "use client";
 
+import { todaysFiredKeys } from "@/lib/schedule-actions";
 import {
   createContext,
   useCallback,
@@ -48,6 +49,14 @@ export function ScheduleEngineProvider({ children }: { children: ReactNode }) {
 
   const setEngineEnabled = useCallback((v: boolean) => {
     localStorage.setItem(STORAGE_KEY, String(v));
+    if (v) {
+      // switched ON: the block that should be playing now starts at once — even one that had already started earlier today (its "started today" mark is cleared)
+      try {
+        for (const k of todaysFiredKeys(Object.keys(localStorage), new Date())) localStorage.removeItem(k);
+      } catch {
+        /* storage not available: the block simply starts at the next one */
+      }
+    }
     setEngineState(v);
     window.dispatchEvent(new Event("syncbiz-schedule-engine"));
   }, []);

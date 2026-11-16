@@ -53,6 +53,17 @@ function hasStarted(s: Schedule, now: Date): boolean {
   return isScheduleInActiveWindow(s, now);
 }
 
+/**
+ * Which of the stored keys are TODAY's "this block already started / stopped" marks (the start keys `syncbiz-schedule-auto-<id>-<date>-<time>` and the end keys `syncbiz-schedule-end-...`).
+ * Turning the schedule switch ON clears them (owner 2026-11-16: "when I turn it on it must start working right away"): the block that should be playing now starts at once, even when it had
+ * already started earlier today. The opt-out list (`syncbiz-schedule-auto-off-ids`) and other days' marks are not touched.
+ */
+export function todaysFiredKeys(keys: string[], now: Date): string[] {
+  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const re = new RegExp(`^syncbiz-schedule-(auto|end)-.+-${ymd}-`);
+  return keys.filter((k) => re.test(k));
+}
+
 /** one stop per block per day for an END (the start key already says "it started today") */
 export function scheduleEndFireStorageKey(schedule: Schedule, now: Date): string {
   const y = now.getFullYear();
