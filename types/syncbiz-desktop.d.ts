@@ -148,7 +148,7 @@ type ImportLocalM3uPlaylistIpcResult =
   | { status: "error"; message: string };
 
 type SyncBizDesktopBridgePreload = {
-  getConfig: () => Promise<{ deviceId: string; branchId?: string; wsToken?: string; desktopTokenExpiresAtIso?: string }>;
+  getConfig: () => Promise<{ deviceId: string; branchId?: string; desktopTokenExpiresAtIso?: string; hasWsToken?: boolean }>;
   /** Auth-only handoff: hand MAIN a bound desktop_access token (token + expiry ONLY). Optional — legacy shells lack it. */
   applyDesktopAuth?: (payload: { token: string; expiresAtIso?: string }) => Promise<{ ok: boolean; error?: string }>;
   /** Station activation (B1): MAIN config patch — used ONLY to set branchId after a redeemed activation code (MAIN drops deviceId). */

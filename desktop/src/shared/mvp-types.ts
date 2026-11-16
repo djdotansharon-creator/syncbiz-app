@@ -510,8 +510,15 @@ export type DesktopRuntimeConfig = {
   additionalMusicFolders?: string[];
 };
 
+/**
+ * Renderer-safe view of the runtime config. SECURITY (C5/C6b, 2026-11-13): the signed station bearer token
+ * (`wsToken`) is NEVER exposed to the (remotely-hosted, XSS-able) renderer — it must not be readable via
+ * getConfig / saveConfig / signIn. `hasWsToken` lets the UI show auth state without the secret itself.
+ */
+export type RendererRuntimeConfig = Omit<DesktopRuntimeConfig, "wsToken"> & { hasWsToken: boolean };
+
 export type DesktopSignInResult =
-  | { ok: true; config: DesktopRuntimeConfig }
+  | { ok: true; config: RendererRuntimeConfig }
   | { ok: false; error: string };
 
 /** One row from GET /api/sources/unified (branch scope), for desktop UI only. */

@@ -30,7 +30,9 @@ const OUT_DIR = path.join(ROOT, "resources", "mpv");
 const OUT_FILE = path.join(OUT_DIR, "mpv.exe");
 const SEVENZIP = path.join(ROOT, "resources", "7zr.exe");
 
-const ASSET_PATTERN = /^mpv-x86_64-v3-\d+-git-[a-f0-9]+\.7z$/;
+const { sha256File, loadPin, hexEq } = require("./mpv-integrity.cjs");
+const PIN = loadPin().win_x64; // C4: owner-vetted { releaseTag, assetPattern, exeSha256 }
+const ASSET_PATTERN = new RegExp(PIN.assetPattern);
 const GITHUB_OWNER = "shinchiro";
 const GITHUB_REPO = "mpv-winbuild-cmake";
 
@@ -93,9 +95,14 @@ async function main() {
   const force = process.argv.includes("--force");
 
   if (!force && fs.existsSync(OUT_FILE)) {
-    console.log(`[fetch-mpv] mpv.exe already present at ${OUT_FILE} — skipping download.`);
-    console.log("[fetch-mpv] Pass --force to re-download.");
-    return;
+    // C4: skip ONLY when the existing bundled mpv already matches the pin; otherwise re-fetch the pinned build so
+    // the installer never ships an unverified / drifted mpv.
+    const existing = sha256File(OUT_FILE);
+    if (hexEq(existing, PIN.exeSha256)) {
+      console.log(`[fetch-mpv] mpv.exe already present and matches the pin (${PIN.releaseTag}) — skipping.`);
+      return;
+    }
+    console.log(`[fetch-mpv] existing mpv.exe (${existing}) != pin (${PIN.exeSha256}) — re-fetching the pinned build.`);
   }
 
   if (!fs.existsSync(SEVENZIP)) {
@@ -106,13 +113,26 @@ async function main() {
   }
 
   // ── fetch latest release ──────────────────────────────────────────────────
-  console.log(`[fetch-mpv] Fetching latest release from ${GITHUB_OWNER}/${GITHUB_REPO}…`);
-  const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+  console.log(`[fetch-mpv] Fetching PINNED release ${PIN.releaseTag} from ${GITHUB_OWNER}/${GITHUB_REPO}…`);
+  const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tags/${encodeURIComponent(PIN.releaseTag)}`;
   let release;
   try {
     release = JSON.parse(await httpsGet(apiUrl));
   } catch (err) {
-    throw new Error(`GitHub API request failed: ${err.message}\nCheck network / proxy / GITHUB_TOKEN.`);
+    // C4 durability: shinchiro PRUNES old nightlies, so the pinned tag can 404 over time. That must NEVER break the
+    // build when we already hold the owner-vetted binary locally. If resources/mpv/mpv.exe is present AND matches the
+    // pin, use it as-is (no download). Only abort when we have NEITHER the upstream release NOR a vetted local copy.
+    if (fs.existsSync(OUT_FILE) && hexEq(sha256File(OUT_FILE), PIN.exeSha256)) {
+      console.log(
+        `[fetch-mpv] upstream release ${PIN.releaseTag} unavailable (${err.message}) — ` +
+          `using the vetted local mpv.exe that already matches the pin (${PIN.exeSha256}).`,
+      );
+      return;
+    }
+    throw new Error(
+      `Pinned mpv release ${PIN.releaseTag} is unavailable (${err.message}) and no vetted local copy is present at ${OUT_FILE}.\n` +
+        `Restore the vetted mpv.exe (sha256 ${PIN.exeSha256}) from backup, or update desktop/mpv-pin.json to a current build.`,
+    );
   }
 
   const version = release.tag_name || release.name || "unknown";
@@ -166,8 +186,20 @@ async function main() {
     );
   }
 
+  // C4: verify the extracted mpv.exe against the owner-vetted pin. A mismatch means the upstream asset changed or
+  // was tampered with → ABORT the build (never bundle/sign an unverified player binary).
+  const actualSha = sha256File(OUT_FILE);
+  if (!hexEq(actualSha, PIN.exeSha256)) {
+    try { fs.unlinkSync(OUT_FILE); } catch { /* ignore */ }
+    throw new Error(
+      `mpv.exe sha256 mismatch vs pin (${PIN.releaseTag}):\n` +
+        `  expected ${PIN.exeSha256}\n  got      ${actualSha}\n` +
+        "Refusing to bundle an unverified mpv. If this is an INTENTIONAL mpv upgrade, update desktop/mpv-pin.json.",
+    );
+  }
+
   const sizeMB = (fs.statSync(OUT_FILE).size / 1024 / 1024).toFixed(1);
-  console.log(`[fetch-mpv] ✓ mpv.exe ready at ${OUT_FILE} (${sizeMB} MB, release ${version})`);
+  console.log(`[fetch-mpv] ✓ mpv.exe verified against pin ${PIN.releaseTag} (${sizeMB} MB, release ${version})`);
 }
 
 main().catch((err) => {

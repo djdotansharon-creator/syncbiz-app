@@ -19,6 +19,7 @@ import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
 import { withStationMediaToken } from "./media-token-provider";
 import { resolveOfflineUrl } from "./offline/offline-runtime";
 import { redactMediaToken } from "../shared/redact-media-token";
+import { resolveRemoteMediaTarget } from "../shared/remote-media-url-policy";
 import { fileLog } from "./file-logger";
 
 const PIPELINE = "[SyncBiz:desktop-mpv:bridge]";
@@ -775,6 +776,19 @@ export class MpvManager {
   private loadInternal(url: string, attemptId: number, startPaused: boolean): void {
     const u = url.trim();
     if (!u) return;
+    // C1 (A2): the engine choke point — the LAST gate before MPV `loadfile`. EVERY load target (music deck A/B,
+    // interrupt, prepared standby, auto-advance NEXT, PLAY-resume) passes through here, so a forbidden remote
+    // target can never reach loadfile no matter which code path or cloud payload produced it (structural, not
+    // per-caller). Checked on the ORIGINAL `u` BEFORE resolveOfflineUrl(): Offline legitimately rewrites a PUBLIC
+    // /api/media URL to an internal loopback vault URL downstream, and that trusted output is intentionally not
+    // re-checked. Fail-safe + fail-forward: a rejected target simply does not load — the current track keeps
+    // playing and a crossfade standby times out so the orchestrator stays on the audible track. No st mutation
+    // here, so playback truth is never falsified by a rejected command.
+    if (!resolveRemoteMediaTarget(u)) {
+      fileLog("WARN", "MPV_LOAD_REJECTED_C1", { attemptId, startPaused });
+      console.warn(PIPELINE, "loadfile rejected by C1 remote-media policy", { pipe: this.pipePath, attemptId });
+      return;
+    }
     // Record the NEW attempt as PENDING only. It becomes event-facing (st.attemptId) on `start-file`
     // of this load — NOT now — so late events of the previous attempt (the transient
     // end-file(reason=replace), or a stale time-pos still in the pipe) keep the OLD attemptId and are
