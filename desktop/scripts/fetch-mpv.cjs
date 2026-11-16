@@ -119,7 +119,20 @@ async function main() {
   try {
     release = JSON.parse(await httpsGet(apiUrl));
   } catch (err) {
-    throw new Error(`GitHub API request failed: ${err.message}\nCheck network / proxy / GITHUB_TOKEN.`);
+    // C4 durability: shinchiro PRUNES old nightlies, so the pinned tag can 404 over time. That must NEVER break the
+    // build when we already hold the owner-vetted binary locally. If resources/mpv/mpv.exe is present AND matches the
+    // pin, use it as-is (no download). Only abort when we have NEITHER the upstream release NOR a vetted local copy.
+    if (fs.existsSync(OUT_FILE) && hexEq(sha256File(OUT_FILE), PIN.exeSha256)) {
+      console.log(
+        `[fetch-mpv] upstream release ${PIN.releaseTag} unavailable (${err.message}) — ` +
+          `using the vetted local mpv.exe that already matches the pin (${PIN.exeSha256}).`,
+      );
+      return;
+    }
+    throw new Error(
+      `Pinned mpv release ${PIN.releaseTag} is unavailable (${err.message}) and no vetted local copy is present at ${OUT_FILE}.\n` +
+        `Restore the vetted mpv.exe (sha256 ${PIN.exeSha256}) from backup, or update desktop/mpv-pin.json to a current build.`,
+    );
   }
 
   const version = release.tag_name || release.name || "unknown";

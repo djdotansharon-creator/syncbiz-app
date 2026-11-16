@@ -7,7 +7,7 @@
  * used for the duplicated C1/C2 URL policy.
  */
 export const MPV_WIN_PIN = {
-  releaseTag: "20260421",
+  releaseTag: "20261111",
   assetPattern: "^mpv-x86_64-v3-\\d+-git-[a-f0-9]+\\.7z$",
-  exeSha256: "df5c50556c10450101eecd76c5c77a1ae256eaaec83b496596bb3495d459a23c",
+  exeSha256: "db6a1659fcf3dc0dcb77256b905c0db181518eb36b94313e08d8f815fcc4d932",
 } as const;

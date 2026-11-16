@@ -1,8 +1,8 @@
 {
-  "_comment": "C4 (2026-11-14): pinned mpv build for integrity. shinchiro/mpv-winbuild-cmake. exeSha256 = sha256 of the EXTRACTED mpv.exe. OWNER-VETTED: update releaseTag + exeSha256 together on any intentional mpv upgrade. Used by both the build (scripts/fetch-mpv.cjs) and the runtime fallback verify.",
+  "_comment": "C4: pinned mpv build for integrity. shinchiro/mpv-winbuild-cmake. exeSha256 = sha256 of the EXTRACTED mpv.exe. OWNER-VETTED: update releaseTag + exeSha256 together on any intentional mpv upgrade. Used by both the build (scripts/fetch-mpv.cjs) and the runtime fallback verify. 2026-11-16 (owner-approved): standardized the fleet on build 20261111 (git bcde6b93cc), downloaded from shinchiro over TLS + hash-locked; supersedes the deleted 20260421 pin.",
   "win_x64": {
-    "releaseTag": "20260421",
+    "releaseTag": "20261111",
     "assetPattern": "^mpv-x86_64-v3-\\d+-git-[a-f0-9]+\\.7z$",
-    "exeSha256": "df5c50556c10450101eecd76c5c77a1ae256eaaec83b496596bb3495d459a23c"
+    "exeSha256": "db6a1659fcf3dc0dcb77256b905c0db181518eb36b94313e08d8f815fcc4d932"
   }
 }
