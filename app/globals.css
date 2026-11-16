@@ -8216,5 +8216,8 @@ html[data-sb-display="white"] .sb-player-drop svg { filter: none; }
 /* ══ 2026-11-16 (owner: "the way back from Schedules is laggy, the way in is smooth") coming back to the library: its list (about 2000 elements) used to be laid out and painted on every frame of the
    player's unfold — measured 2.6x the paint / raster of the way in. Now it waits (not laid out, not painted: content-visibility) until the player is open, then fades in. Set by components/player-auto-compact.tsx. ══ */
 html[data-sb-arriving] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { content-visibility: hidden; visibility: hidden; opacity: 0; transition: none !important; animation: none !important; } /* no animation while waiting: a child that has its own entrance animation plays it when it comes back */
-html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { transition: opacity 460ms ease !important; } /* a transition, not an animation: an animation here would swap the elements' own entrance animation and replay it */
-@media (prefers-reduced-motion: reduce) { html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { transition: none !important; } }
+html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line) { transition: opacity 460ms ease !important; }
+/* the side lists (playlists / queue) come back the same way: a grey, half-grown panel with a few squeezed covers showed while the columns slid out — now they wait too and fade in once there */
+html[data-sb-arriving] .workspace-rail-grid > aside { content-visibility: hidden; visibility: hidden; opacity: 0; transition: none !important; }
+html[data-sb-arrived] .workspace-rail-grid > aside { transition: opacity 460ms ease !important; } /* a transition, not an animation: an animation here would swap the elements' own entrance animation and replay it */
+@media (prefers-reduced-motion: reduce) { html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line), html[data-sb-arrived] .workspace-rail-grid > aside { transition: none !important; } }

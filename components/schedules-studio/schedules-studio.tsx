@@ -166,7 +166,7 @@ function playlistSeconds(p: Playlist): number | null {
 
 /** how many minutes a block holds the music it plays: its own length rounded UP to a whole minute (+20 s so a start delay never clips the last seconds); Infinity when the length is not known */
 function fitMinutes(dur: number | null | undefined): number {
-  return dur && dur > 0 ? Math.max(5, Math.ceil((dur + 20) / 60)) : Infinity;
+  return dur && dur > 0 ? Math.max(1, Math.ceil((dur + 20) / 60)) : Infinity; // a song of under three minutes is three minutes long, not five (owner 2026-11-16: "I can't shorten them")
 }
 
 /** the picture a fog block shows: a YouTube thumbnail in its true 16:9 shape (hqdefault / sddefault carry black bars above and below) */
@@ -387,15 +387,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // Over a block the axis also lights the stretch the block fills, with its start, end and length. Written straight into the DOM: a re-render of the whole studio per mouse move would lag.
   // The readout is ONE thing on the ruler at a time, as plain numbers (no frame): the time under the pointer; over a block — or while one is carried — the block's start and end in yellow.
   // Hour labels that sit under a number are hidden (the same time was written twice, one on top of the other).
+  const carryLive = useRef(false); // a block is being carried: it writes the two times on the ruler itself
   const repaintH = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!dvEl) return;
-    let lastEv: PointerEvent | null = null;
+    let at: { x: number; y: number } | null = null; // where the pointer last was — the readout is judged from there, so it follows what is UNDER it even when the content moves (zoom, scroll) and the pointer does not
     const hide = () => {
+      at = null;
       dvEl.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xpill").forEach((n) => { n.hidden = true; });
       dvEl.querySelectorAll<HTMLElement>(".ss-htick.is-covered").forEach((t) => t.classList.remove("is-covered"));
     };
-    const paint = (e: PointerEvent) => {
+    const paint = (px: number, py: number) => {
+      if (carryLive.current) return; // a carried block writes its own two times, following it smoothly
       const ax = dvEl.querySelector<HTMLElement>(".ss-haxis");
       const cur = ax?.querySelector<HTMLElement>(".ss-xcur");
       const ps = ax?.querySelector<HTMLElement>(".ss-xpill--s");
@@ -404,12 +407,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const r = ax.getBoundingClientRect();
       if (r.width < 10) return;
       const { a, b } = zoomSrc.current;
-      let ratio = (e.clientX - r.left) / r.width;
+      let ratio = (px - r.left) / r.width;
       if (isRtl()) ratio = 1 - ratio;
       const carried = dvEl.querySelector<HTMLElement>(".ss-block.is-dragging:not(.is-ghost)");
       if (!carried && (ratio < 0 || ratio > 1)) return hide();
       const m = Math.min(DAY_MINUTES - 1, Math.max(0, Math.round(a + ratio * (b - a))));
-      const blk = carried ?? (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const blk = carried ?? document.elementFromPoint(px, py)?.closest<HTMLElement>(".ss-block");
       const shown: number[] = [];
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
         const s0 = Number(blk.dataset.start);
@@ -438,11 +441,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       });
     };
     const onMove = (e: PointerEvent) => {
-      lastEv = e;
-      paint(e);
+      at = { x: e.clientX, y: e.clientY };
+      paint(e.clientX, e.clientY);
     };
     repaintH.current = () => {
-      if (lastEv) paint(lastEv);
+      if (at) paint(at.x, at.y);
     };
     dvEl.addEventListener("pointermove", onMove);
     dvEl.addEventListener("pointerleave", hide);
@@ -549,12 +552,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !columnsView) return;
-    let lastEv: PointerEvent | null = null;
+    let at: { x: number; y: number } | null = null;
     const hide = () => {
+      at = null;
       el.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xpill").forEach((n) => { n.hidden = true; });
       el.querySelectorAll<HTMLElement>(".ss-gutter .ss-hour.is-covered").forEach((t) => t.classList.remove("is-covered"));
     };
-    const paint = (e: PointerEvent) => {
+    const paint = (px: number, py: number) => {
+      if (carryLive.current) return;
       const g = el.querySelector<HTMLElement>(".ss-gutter");
       const cur = g?.querySelector<HTMLElement>(".ss-xcur");
       const ps = g?.querySelector<HTMLElement>(".ss-xpill--s");
@@ -562,10 +567,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const body = el.querySelector<HTMLElement>(".ss-body");
       if (!g || !cur || !ps || !pe || !body) return;
       const h = hourRef.current;
-      const m = Math.round(FIRST_H * 60 + ((e.clientY - body.getBoundingClientRect().top) * 60) / h);
+      const m = Math.round(FIRST_H * 60 + ((py - body.getBoundingClientRect().top) * 60) / h);
       const carried = el.querySelector<HTMLElement>(".ss-block.is-dragging:not(.is-ghost)");
       if (!carried && (m < FIRST_H * 60 || m > LAST_H * 60)) return hide();
-      const blk = carried ?? (e.target as Element | null)?.closest?.<HTMLElement>(".ss-block");
+      const blk = carried ?? document.elementFromPoint(px, py)?.closest<HTMLElement>(".ss-block");
       const shown: number[] = [];
       if (blk?.dataset.start && blk.dataset.end && !blk.classList.contains("is-ghost")) {
         const s0 = Number(blk.dataset.start);
@@ -593,26 +598,32 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       });
     };
     const onMove = (e: PointerEvent) => {
-      lastEv = e;
-      paint(e);
+      at = { x: e.clientX, y: e.clientY };
+      paint(e.clientX, e.clientY);
     };
     repaintV.current = () => {
-      if (lastEv) paint(lastEv);
+      if (at) paint(at.x, at.y);
     };
+    el.addEventListener("scroll", repaintV.current, { passive: true }); // the columns scroll under a still pointer
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerleave", hide);
+    const onScroll = repaintV.current;
     return () => {
       repaintV.current = null;
+      el.removeEventListener("scroll", onScroll);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerleave", hide);
     };
   }, [columnsView, FIRST_H, LAST_H]);
-  // while a block is carried or trimmed its two times follow it (written after the block was redrawn on its new minute)
+  // The readout follows what is under the pointer even when the pointer does not move: after a trim, after the hours are zoomed / slid / scrolled, after the blocks change — otherwise two yellow times
+  // stayed on the ruler for a block that had gone from under the pointer until the mouse was moved (owner 2026-11-16)
   useEffect(() => {
-    if (!drag) return;
-    repaintH.current?.();
-    repaintV.current?.();
-  }, [drag]);
+    const id = requestAnimationFrame(() => {
+      repaintH.current?.();
+      repaintV.current?.();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [drag, winA, winB, hourH, FIRST_H, LAST_H, view, items]);
   const onGutterPointerDown = (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -1387,6 +1398,53 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   // a block: click = open its card, drag = move it in time
+  // The two times of a CARRIED block, on the ruler: their numbers change on the snapped minute, their place follows the block exactly (never step to step) — written straight into the DOM
+  const paintCarried = (o: Orient, raw: number, snapped: number, len: number) => {
+    const startText = formatMinutes(snapped);
+    const endText = formatMinutes(Math.min(DAY_MINUTES - 1, snapped + len));
+    if (o === "h") {
+      const ax = dvEl?.querySelector<HTMLElement>(".ss-haxis");
+      const cur = ax?.querySelector<HTMLElement>(".ss-xcur");
+      const ps = ax?.querySelector<HTMLElement>(".ss-xpill--s");
+      const pe = ax?.querySelector<HTMLElement>(".ss-xpill--e");
+      if (!ax || !cur || !ps || !pe) return;
+      const { a, b } = zoomSrc.current;
+      const rel = (m: number) => Math.min(1.02, Math.max(-0.02, (m - a) / (b - a)));
+      cur.hidden = true;
+      ps.hidden = false;
+      pe.hidden = false;
+      ps.style.insetInlineStart = `${rel(raw) * 100}%`;
+      pe.style.insetInlineStart = `${rel(raw + len) * 100}%`;
+      if (ps.textContent !== startText) ps.textContent = startText;
+      if (pe.textContent !== endText) pe.textContent = endText;
+      ax.querySelectorAll<HTMLElement>(".ss-htick:not(.is-leaving)").forEach((t) => {
+        const tm = Number(t.dataset.m);
+        const covered = Math.abs(((tm - raw) / (b - a)) * axisW) < 40 || Math.abs(((tm - raw - len) / (b - a)) * axisW) < 40;
+        if (covered !== t.classList.contains("is-covered")) t.classList.toggle("is-covered", covered);
+      });
+    } else {
+      const g = scrollRef.current?.querySelector<HTMLElement>(".ss-gutter");
+      const cur = g?.querySelector<HTMLElement>(".ss-xcur");
+      const ps = g?.querySelector<HTMLElement>(".ss-xpill--s");
+      const pe = g?.querySelector<HTMLElement>(".ss-xpill--e");
+      if (!g || !cur || !ps || !pe) return;
+      const h = hourRef.current;
+      const y = (m: number) => ((Math.min(LAST_H * 60, Math.max(FIRST_H * 60, m)) - FIRST_H * 60) * h) / 60;
+      cur.hidden = true;
+      ps.hidden = false;
+      pe.hidden = false;
+      ps.style.top = `${y(raw)}px`;
+      pe.style.top = `${y(raw + len)}px`;
+      if (ps.textContent !== startText) ps.textContent = startText;
+      if (pe.textContent !== endText) pe.textContent = endText;
+      g.querySelectorAll<HTMLElement>(".ss-hour:not(.is-leaving)").forEach((t) => {
+        const tm = Number(t.dataset.m);
+        const covered = Math.abs(((tm - raw) * h) / 60) < 15 || Math.abs(((tm - raw - len) * h) / 60) < 15;
+        if (covered !== t.classList.contains("is-covered")) t.classList.toggle("is-covered", covered);
+      });
+    }
+  };
+
   const onBlockPointerDown = (e: React.PointerEvent<HTMLDivElement>, sc: Scene, orient: Orient) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
     const el = e.currentTarget;
@@ -1406,21 +1464,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const fixedLen = !openEnd && (own0 !== null || musicMinutes(sc.schedule) !== null);
     // the length the block has ON SCREEN when it is picked up — a block cut short by the one that follows it (a quiet "Closing" after it, say) is carried exactly that long: the moment it is lifted it
     // must not grow back to its full length (owner 2026-11-16: "it just widens from the side and doesn't move")
-    const L = Math.max(5, Math.min(sc.end, END_MAX) - sc.start);
+    const L = Math.max(1, Math.min(sc.end, END_MAX) - sc.start);
     const startY = e.clientY;
-    // the carried block follows the pointer EXACTLY (not step to step of the snap): it is drawn on its snapped minute and shifted by the rest, through two CSS variables written straight
-    // into the DOM — no re-render per mouse move (owner 2026-11-16: "it jumps"; and nothing may slow the page down)
-    const rootEl = el.closest<HTMLElement>(".ss");
-    const setLift = (x: number, y: number) => {
-      rootEl?.style.setProperty("--ss-tx", `${x}px`);
-      rootEl?.style.setProperty("--ss-ty", `${y}px`);
-    };
-    const clearLift = () => {
-      rootEl?.style.removeProperty("--ss-tx");
-      rootEl?.style.removeProperty("--ss-ty");
-    };
-    clearLift();
+    // The carried block follows the pointer EXACTLY: its layout stays where it was picked up and it is moved by a `translate` written straight into the DOM — no re-render per mouse move, so
+    // nothing stutters however fine the minutes are (owner 2026-11-16: "it is not smooth enough, it feels unnatural"). The snapped minute it will land on is shown in the two yellow numbers and,
+    // when a neighbour steps aside, by that neighbour and the dashed slot (those do re-render, but only when they change).
+    let carried: HTMLElement = el;
+    const live = () => (carried.isConnected ? carried : (carried = document.querySelector<HTMLElement>(".ss-block.is-dragging:not(.is-ghost)") ?? carried));
+    el.style.translate = "";
     let drawn = "";
+    let rawNow = startMin; // where the pointer holds the block, unsnapped
+    let dyNow = 0;
     const rowOf = (x: Schedule) => (x.branchId ?? "default").trim() || "default";
     const neighbours = fixedLen
       ? everyScene.filter((x) => x.day === sc.day && baseId(x.schedule.id) !== baseId(sc.schedule.id) && !x.paused && !x.shadowed && !x.quiet && rowOf(x.schedule) === rowOf(sc.schedule) && (x.endSet || musicMinutes(x.schedule) !== null))
@@ -1446,6 +1500,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const lo = Math.min(FIRST_H * 60, startMin);
       const hi = Math.max(startMin, Math.min(LAST_H * 60, END_MAX) - keep);
       const rawStart = Math.min(Math.max(startMin + d / perMin, lo), hi);
+      rawNow = rawStart;
       last = Math.min(Math.max(snapMinutes(startMin + d / perMin, dragStep), lo), hi);
       if (inWeek) {
         const dayEl = document.elementsFromPoint(ev.clientX, ev.clientY).find((n): n is HTMLElement => n instanceof HTMLElement && n.dataset.day !== undefined && (n.classList.contains("ss-col") || n.classList.contains("ss-hrow")));
@@ -1482,15 +1537,22 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       }
       // the block is lifted: it follows the pointer a little up or down too (only a horizontal block floats; the week's column keeps up / down for the hours)
       const dy = orient === "h" && overDay === sc.day ? Math.max(-LIFT_MAX, Math.min(LIFT_MAX, ev.clientY - startY)) : 0;
-      const fine = (rawStart - last) * perMin; // the rest of the pointer's way between two snapped minutes, in px (sign = reading direction)
-      // React hears of it only when something it draws changes (the snapped minute, the neighbour that steps aside, the day under the pointer) — and at once (flushSync), so the new
-      // snapped place and the new shift reach the screen in the same frame (never a frame with one of them only)
-      const key = `${last}|${overDay}|${pv?.id ?? ""}:${pv?.start ?? ""}|${slot?.start ?? ""}`;
+      dyNow = dy;
+      // React hears of it only when something it draws changes (the neighbour that steps aside, the day under the pointer): over its own day the block's layout does not move at all. Over another day the
+      // see-through copy needs the snapped minute, so then it does (at once, flushSync, together with the shift).
+      const layoutStart = overDay !== sc.day ? last : startMin;
+      const key = `${overDay}|${pv?.id ?? ""}:${pv?.start ?? ""}|${slot?.start ?? ""}${overDay !== sc.day ? `|${last}` : ""}`;
+      if (!carryLive.current) {
+        carryLive.current = true;
+        dvEl?.querySelectorAll<HTMLElement>(".ss-xcur").forEach((n) => { n.hidden = true; });
+      }
       if (key !== drawn) {
         drawn = key;
-        flushSync(() => setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last, end: minutesToTimeLocal(Math.min(END_MAX, last + L)), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) }));
+        flushSync(() => setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: layoutStart, end: minutesToTimeLocal(Math.min(END_MAX, layoutStart + L)), ...(inWeek && overDay !== sc.day ? { overDay } : {}), ...(pv ? { preview: pv, slot } : {}) }));
       }
-      setLift(orient === "h" ? fine : 0, orient === "h" ? dy : fine);
+      const off = (rawStart - layoutStart) * perMin; // the pointer's way from the block's layout place, in px (sign = reading direction)
+      live().style.translate = orient === "h" ? `${off}px ${dy}px` : `0px ${off}px`;
+      paintCarried(orient, rawStart, last, L);
       if (canSwap && !fixedLen && overDay === sc.day) {
         const over = document
           .elementsFromPoint(ev.clientX, ev.clientY)
@@ -1505,9 +1567,30 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
-      clearLift(); // the block settles into its place (the CSS spring on `translate`)
+      // The block settles into its place: it is left where the pointer let go of it (the translate is made relative to its NEW place) and then springs there (the CSS transition on `translate`).
+      // Two frames later, so the new place and the removed "carried" look have been drawn first.
+      const settle = (landedStart: number | null) => {
+        const c = live();
+        if (landedStart === null) {
+          c.style.translate = "";
+        } else {
+          const px = (rawNow - landedStart) * perMin;
+          c.style.translate = orient === "h" ? `${px}px ${dyNow}px` : `0px ${px}px`;
+          void c.getBoundingClientRect(); // computed NOW (the carried look has no transition): otherwise the spring would start from the old offset, measured from the old place
+          requestAnimationFrame(() => requestAnimationFrame(() => { c.style.translate = ""; }));
+        }
+      };
+      const endReadout = () => {
+        carryLive.current = false;
+        dvEl?.querySelectorAll<HTMLElement>(".ss-xcur, .ss-xpill").forEach((n) => { n.hidden = true; });
+        scrollRef.current?.querySelectorAll<HTMLElement>(".ss-gutter .ss-xcur, .ss-gutter .ss-xpill").forEach((n) => { n.hidden = true; });
+        dvEl?.querySelectorAll<HTMLElement>(".ss-htick.is-covered").forEach((t) => t.classList.remove("is-covered"));
+        scrollRef.current?.querySelectorAll<HTMLElement>(".ss-gutter .ss-hour.is-covered").forEach((t) => t.classList.remove("is-covered"));
+      };
       if (cancelled) {
         // the system took the pointer away (a touch scroll, a gesture): the block goes back, nothing is saved
+        if (moved) settle(startMin);
+        endReadout();
         releaseCursor?.();
         setDrag(null);
         setSwapWith(null);
@@ -1523,11 +1606,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         setEditor({ kind: "edit", id: sc.schedule.id, rect: { x: r.left, y: r.top, w: r.width, h: r.height }, day: sc.day });
         return;
       }
+      endReadout();
       releaseCursor?.();
       setDrag(null);
       setSwapWith(null);
       markPopupClose(); // (same: the click that ends a drag opens nothing)
       if (swapTarget && overDay === sc.day) {
+        settle(swapPlace?.a ?? last);
         void swapBlocks(sc, swapTarget, swapPlace); // past the middle of a neighbour: it has already stepped aside — the block lands where it is held (or, with others in the way, the two trade places)
         return;
       }
@@ -1540,6 +1625,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         landed = Math.min(Math.max(landed, 0), END_MAX - L);
       }
       // the block keeps what was drawn: when its stored end is not that length (no end of its own, or cut short on screen by the next block) the end is written, so it does not change size when it lands
+      settle(overDay !== sc.day ? null : landed);
       const endEdit = own0 !== null && own0 - startMin === L ? undefined : landed + L >= END_MAX ? null : landed + L;
       if (landed !== startMin || overDay !== sc.day) void editOccurrence(items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule, sc.day, { start: landed, ...(endEdit !== undefined ? { end: endEdit } : {}), ...(overDay !== sc.day ? { toDay: overDay } : {}) });
     };
@@ -1628,24 +1714,25 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const musicEnd = Number.isFinite(maxLen) ? Math.min(naturalEnd, begin + maxLen) : naturalEnd;
     const from = side === "end" ? ownEnd ?? musicEnd : begin;
     let last: number | null = side === "end" ? ownEnd : begin;
+    const minLen = dragStep; // the shortest a block can be cut to: the step the hours snap to (5 minutes, one minute once the hours are zoomed in far enough to aim at a minute)
     const move = (ev: PointerEvent) => {
       const d = (orient === "v" ? ev.clientY : ev.clientX) - startPt;
       const m = snapMinutes(from + d / perMin, dragStep);
       if (side === "end") {
         // a strip never stretches a block past the last hour shown (Active hours = the business's own hours)
         const capEnd = Math.min(END_MAX, LAST_H * 60);
-        if (Number.isFinite(maxLen)) last = Math.min(Math.max(begin + 5, m), begin + maxLen, capEnd);
-        else if (live) last = LAST_H * 60 >= END_MAX ? (m >= END_MAX ? null : Math.max(begin + 5, m)) : Math.min(Math.max(begin + 5, m), capEnd);
+        if (Number.isFinite(maxLen)) last = Math.min(Math.max(begin + minLen, m), begin + maxLen, capEnd);
+        else if (live) last = LAST_H * 60 >= END_MAX ? (m >= END_MAX ? null : Math.max(begin + minLen, m)) : Math.min(Math.max(begin + minLen, m), capEnd);
         else {
           // the music's length is not known: the strip only CUTS — it never takes the block past where it ends now (the card's "Ends at" sets any time exactly)
           const cut = Math.min(m, from);
-          last = ownEnd === null && cut >= from ? null : Math.max(begin + 5, cut);
+          last = ownEnd === null && cut >= from ? null : Math.max(begin + minLen, cut);
         }
         setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: begin, end: last === null ? "23:59:00" : minutesToTimeLocal(last) });
       } else {
         const endNow = ownEnd ?? musicEnd;
         const lo = Number.isFinite(maxLen) ? Math.max(FIRST_H * 60, endNow - maxLen) : live ? FIRST_H * 60 : begin; // unknown length: only cut, never earlier than it starts now (a live station stretches freely)
-        last = Math.min(Math.max(lo, m), endNow - 5);
+        last = Math.min(Math.max(lo, m), endNow - minLen);
         setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last });
       }
     };
@@ -2451,8 +2538,8 @@ function ScenePopover({
     onPatch(next);
   };
   const stepStart = (delta: number) => patchStart(Math.min(DAY_MINUTES - 1, Math.max(0, startMin + delta)));
-  const setEnd = (m: number) => onPatch({ endTimeLocal: minutesToTimeLocal(Math.min(END_MAX, startMin + maxLen, Math.max(startMin + 5, m))) });
-  const canEnd = startMin + 5 <= END_MAX;
+  const setEnd = (m: number) => onPatch({ endTimeLocal: minutesToTimeLocal(Math.min(END_MAX, startMin + maxLen, Math.max(startMin + 1, m))) });
+  const canEnd = startMin + 1 <= END_MAX;
   const weekdayOfDate = (ymd: string) => new Date(`${ymd}T12:00:00`).getDay();
   const repeatLabel = !oneOff && days.length === 1 ? tr("Repeats every {day}", { day: dayName(days[0]!, "long") }) : tr("Repeats weekly");
 
@@ -2830,6 +2917,23 @@ function DisplayMenu({
 
 // ───────────────────────────── the date + its arrows + its calendar: one pane that grows downward ─────────────────────────────
 
+/** a text that rolls: when it changes the old one leaves upward (or downward) and the new one comes in from the other side — direction 1 = forward / later, -1 = back / earlier */
+function RollText({ text, dir }: { text: string; dir: 1 | -1 }) {
+  const [v, setV] = useState({ cur: text, prev: null as string | null, n: 0 });
+  if (v.cur !== text) setV({ cur: text, prev: v.cur, n: v.n + 1 }); // (React: adjusting state while rendering, when a prop changed)
+  useEffect(() => {
+    if (v.prev === null) return;
+    const id = window.setTimeout(() => setV((x) => (x.prev === null ? x : { ...x, prev: null })), 360);
+    return () => window.clearTimeout(id);
+  }, [v.n, v.prev]);
+  return (
+    <span className="ss-roll" data-dir={dir}>
+      {v.prev !== null ? <span key={`o${v.n}`} className="ss-roll-out" aria-hidden><bdi>{v.prev}</bdi></span> : null}
+      <span key={`i${v.n}`} className={v.prev !== null ? "ss-roll-in" : undefined}><bdi>{v.cur}</bdi></span>
+    </span>
+  );
+}
+
 /**
  * Closed: the date between two plain arrows (day / week back and forward). A click on the date grows the same pane downward into one month — the date becomes the month's name and the
  * arrows step months — and it folds back up on a pick, a click outside or Esc. Nothing opens on hover. The pane is the same width as the date row plus a little, centred on it.
@@ -2850,6 +2954,9 @@ function DateNav({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(false); // the month stays drawn while the pane folds up
+  const [dir, setDir] = useState<1 | -1>(1); // which way the text rolls: later = up, earlier = down
+  const [textW, setTextW] = useState(0); // the width of the date, kept by its place while the pane is open — the arrows stay where they are and the month's name rolls in between them
+  const ghostText = useRef<HTMLSpanElement | null>(null);
   const [cursor, setCursor] = useState(() => ({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 }));
 
   const foldTimer = useRef<number | null>(null);
@@ -2857,13 +2964,16 @@ function DateNav({
     if (foldTimer.current) window.clearTimeout(foldTimer.current);
     foldTimer.current = null;
     setCursor({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 });
+    setTextW(Math.ceil(ghostText.current?.getBoundingClientRect().width ?? 0));
+    setDir(1);
     setShown(true);
     setOpen(true);
   };
   const closePane = useCallback(() => {
     setOpen(false);
+    setDir(-1);
     if (foldTimer.current) window.clearTimeout(foldTimer.current);
-    foldTimer.current = window.setTimeout(() => setShown(false), 380); // the month is taken out once the pane has folded up
+    foldTimer.current = window.setTimeout(() => { setShown(false); setTextW(0); }, 380); // the month is taken out once the pane has folded up
   }, []);
   useEffect(() => () => { if (foldTimer.current) window.clearTimeout(foldTimer.current); }, []);
 
@@ -2891,7 +3001,8 @@ function DateNav({
   const rows = new Date(cursor.y, cursor.m, 1 - first.getDay() + 35).getMonth() === cursor.m ? 6 : 5;
   const cells = Array.from({ length: rows * 7 }, (_, i) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i));
   const monthTitle = first.toLocaleDateString(loc, { month: "long", year: "numeric" });
-  const stepMonth = (n: number) => setCursor((c) => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const stepMonth = (n: number) => { setDir(n > 0 ? 1 : -1); setCursor((c) => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; }); };
+  const stepDay = (n: number) => { setDir(n > 0 ? 1 : -1); onStep(n); };
   const weekday = (d: number) => new Date(2023, 0, 1 + d).toLocaleDateString(loc, { weekday: "narrow" }); // 1 Jan 2023 was a Sunday
 
   return (
@@ -2899,16 +3010,18 @@ function DateNav({
       {/* an invisible copy of the closed row holds the room in the toolbar (the pane itself floats) */}
       <span className="ss-dn-ghost" aria-hidden>
         <span className="ss-dn-sp" />
-        <span className="ss-range ss-daypick"><bdi>{label}</bdi></span>
+        <span className="ss-range ss-daypick" ref={ghostText}><bdi>{label}</bdi></span>
         <span className="ss-dn-sp" />
       </span>
       <div className={`ss-datenav${open ? " is-open" : ""}`}>
         <div className="ss-dn-row">
-          <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(-1) : onStep(-1))} aria-label={open ? tr("Previous month") : prevLabel}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-          <button type="button" className="ss-range ss-daypick" aria-haspopup="dialog" aria-expanded={open} aria-live="polite" onClick={toggle}>
-            <bdi>{open ? monthTitle : label}</bdi>
-          </button>
-          <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(1) : onStep(1))} aria-label={open ? tr("Next month") : nextLabel}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+          <div className="ss-dn-group">
+            <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(-1) : stepDay(-1))} aria-label={open ? tr("Previous month") : prevLabel}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
+            <button type="button" className="ss-range ss-daypick" aria-haspopup="dialog" aria-expanded={open} aria-live="polite" onClick={toggle} style={open && textW ? { minWidth: textW } : undefined}>
+              <RollText text={open ? monthTitle : label} dir={dir} />
+            </button>
+            <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(1) : stepDay(1))} aria-label={open ? tr("Next month") : nextLabel}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+          </div>
         </div>
         <div className="ss-dn-cal" aria-hidden={!open}>
           <div className="ss-dn-cal-in">
@@ -2918,7 +3031,7 @@ function DateNav({
                 {cells.map((c) => {
                   const key = dateKey(c);
                   return (
-                    <button key={key} type="button" tabIndex={open ? 0 : -1} className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => { onPick(key); closePane(); }}>
+                    <button key={key} type="button" tabIndex={open ? 0 : -1} className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => { setDir(key >= focusKey ? 1 : -1); onPick(key); closePane(); }}>
                       {c.getDate()}
                     </button>
                   );
