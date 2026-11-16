@@ -243,8 +243,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
-  const [dp, setDp] = useState<(Rect & { closing?: boolean }) | null>(null);
-  const dpTimer = useRef<number | null>(null);
   // jingles (owner 2026-11-12): the Jingles screen keeps its own schedule in this browser (per branch); the studio only SHOWS it — a small bell on the timeline at the jingle's time
   const stationBranch = useStationBranchId() ?? stationBranchIdNow() ?? "default";
   const [jingles, setJingles] = useState<JingleLike[]>([]);
@@ -370,7 +368,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         e.preventDefault();
         let ratio = (e.clientX - r.left) / r.width;
         if (rtl) ratio = 1 - ratio;
-        const factor = Math.exp(e.deltaY * (pinch && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0024));
+        // a plain wheel works the other way round (owner 2026-11-16: scroll DOWN stretches the hours, UP squeezes them — like the week's columns); a pinch keeps its own meaning (spread = closer)
+        const factor = Math.exp((pinch ? 1 : -1) * e.deltaY * (pinch && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0024));
         applyZoom((w) => zoomWindow(w, factor, ratio));
       } else if (zoomed && (e.shiftKey || sideways)) {
         e.preventDefault();
@@ -694,21 +693,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       try { localStorage.setItem(DISPLAY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
-  };
-  // the calendar opens on a click on the date (never on hover) and folds back up when closed; opening during the fold-up simply opens it again
-  const dpOpenAt = (el: HTMLElement) => {
-    if (dpTimer.current) window.clearTimeout(dpTimer.current);
-    dpTimer.current = null;
-    const r = el.getBoundingClientRect();
-    setDp({ x: r.left, y: r.top, w: r.width, h: r.height });
-  };
-  const closeDp = () => {
-    if (dpTimer.current) window.clearTimeout(dpTimer.current);
-    setDp((d) => (d && !d.closing ? { ...d, closing: true } : d));
-    dpTimer.current = window.setTimeout(() => {
-      setDp(null);
-      dpTimer.current = null;
-    }, 220);
   };
   const toggleJingles = () => {
     setShowJingles((v) => {
@@ -1804,22 +1788,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
         <div className="ss-toolbar">
           <div className="ss-nav">
-            {/* the date at the very edge; two plain arrows on its sides that show only while the pointer is over the date or where they are (owner 2026-11-16) */}
-            <div className="ss-datenav">
-              <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? -1 : -7)} aria-label={view === "day" ? tr("Previous day") : tr("Previous week")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-              {/* the date is the one way into the calendar: a click opens it (no hover, no arrow, no frame) */}
-              <button
-                type="button"
-                className="ss-range ss-daypick"
-                aria-haspopup="dialog"
-                aria-expanded={!!dp && !dp.closing}
-                aria-live="polite"
-                onClick={(e) => { if (dp && !dp.closing) closeDp(); else dpOpenAt(e.currentTarget); }}
-              >
-                <bdi>{rangeLabel}</bdi>
-              </button>
-              <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? 1 : 7)} aria-label={view === "day" ? tr("Next day") : tr("Next week")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
-            </div>
+            {/* the date, its two arrows and the calendar are ONE piece: the calendar is the same pane grown downward (owner 2026-11-16) */}
+            <DateNav
+              label={rangeLabel}
+              prevLabel={view === "day" ? tr("Previous day") : tr("Previous week")}
+              nextLabel={view === "day" ? tr("Next day") : tr("Next week")}
+              onStep={(n) => shiftFocus(view === "day" ? n : n * 7)}
+              focusKey={focusKey}
+              todayKey={todayKey}
+              loc={loc}
+              onPick={(ymd) => setFocus(new Date(`${ymd}T12:00:00`))}
+            />
             {/* "Today" is there only when the day (week) on screen is not today */}
             {focus !== null && !isTodayInView ? <button type="button" className="ss-pill ss-today" onClick={() => setFocus(null)}>{tr("Today")}</button> : null}
           </div>
@@ -2030,17 +2009,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         />
       ) : null}
 
-      {dp ? (
-        <DayPicker
-          rect={dp}
-          closing={!!dp.closing}
-          focusKey={focusKey}
-          todayKey={todayKey}
-          loc={loc}
-          onPick={(ymd) => { setFocus(new Date(`${ymd}T12:00:00`)); closeDp(); }}
-          onClose={closeDp}
-        />
-      ) : null}
 
       {dmenu ? <DisplayMenu rect={dmenu} display={display} onChange={chooseDisplay} onClose={() => setDmenu(null)} /> : null}
 
@@ -2835,49 +2803,53 @@ function DisplayMenu({
   );
 }
 
-// ───────────────────────────── the calendar (opens from the date): one month, straight away ─────────────────────────────
+// ───────────────────────────── the date + its arrows + its calendar: one pane that grows downward ─────────────────────────────
 
-function DayPicker({
-  rect, closing, focusKey, todayKey, loc, onPick, onClose,
+/**
+ * Closed: the date between two plain arrows (day / week back and forward). A click on the date grows the same pane downward into one month — the date becomes the month's name and the
+ * arrows step months — and it folds back up on a pick, a click outside or Esc. Nothing opens on hover. The pane is the same width as the date row plus a little, centred on it.
+ */
+function DateNav({
+  label, prevLabel, nextLabel, onStep, focusKey, todayKey, loc, onPick,
 }: {
-  rect: Rect;
-  closing: boolean;
+  label: string;
+  prevLabel: string;
+  nextLabel: string;
+  onStep: (n: number) => void;
   focusKey: string;
   todayKey: string;
   loc: string;
   onPick: (ymd: string) => void;
-  onClose: () => void;
 }) {
   const tr = useTr();
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(false); // the month stays drawn while the pane folds up
   const [cursor, setCursor] = useState(() => ({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 }));
-  const rtl = isRtl();
-  const W = 308;
 
-  // under the date, its edge flush with the edge of the date (and so with the title above it; the date's own padding is 10px short of that edge) — never closer than 8px to the window
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const h = el.offsetHeight;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const left = Math.min(Math.max(8, rtl ? rect.x + rect.w + 10 - W : rect.x - 10), vw - W - 8);
-    let top = rect.y + rect.h + 6;
-    if (top + h > vh - 8) top = Math.max(8, rect.y - h - 6);
-    const id = requestAnimationFrame(() => setPos({ top, left }));
-    return () => cancelAnimationFrame(id);
-  }, [rect, cursor, rtl]);
+  const foldTimer = useRef<number | null>(null);
+  const openPane = () => {
+    if (foldTimer.current) window.clearTimeout(foldTimer.current);
+    foldTimer.current = null;
+    setCursor({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 });
+    setShown(true);
+    setOpen(true);
+  };
+  const closePane = useCallback(() => {
+    setOpen(false);
+    if (foldTimer.current) window.clearTimeout(foldTimer.current);
+    foldTimer.current = window.setTimeout(() => setShown(false), 380); // the month is taken out once the pane has folded up
+  }, []);
+  useEffect(() => () => { if (foldTimer.current) window.clearTimeout(foldTimer.current); }, []);
 
   useEffect(() => {
+    if (!open) return;
     const onDown = (e: PointerEvent) => {
-      const n = e.target as Node | null;
-      if (n && ref.current?.contains(n)) return;
-      if (n instanceof Element && n.closest(".ss-daypick")) return; // the date toggles it itself
-      onClose();
+      if (rootRef.current?.contains(e.target as Node)) return;
+      closePane();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closePane();
     };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("keydown", onKey);
@@ -2885,44 +2857,53 @@ function DayPicker({
       document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
+  }, [open, closePane]);
 
+  const toggle = () => (open ? closePane() : openPane());
   // the month grid: weeks start on Sunday; five rows are enough when the sixth would be a whole week of the next month
   const first = new Date(cursor.y, cursor.m, 1);
   const gridStart = new Date(cursor.y, cursor.m, 1 - first.getDay());
   const rows = new Date(cursor.y, cursor.m, 1 - first.getDay() + 35).getMonth() === cursor.m ? 6 : 5;
   const cells = Array.from({ length: rows * 7 }, (_, i) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i));
   const monthTitle = first.toLocaleDateString(loc, { month: "long", year: "numeric" });
-  const step = (n: number) => setCursor((c) => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const stepMonth = (n: number) => setCursor((c) => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
   const weekday = (d: number) => new Date(2023, 0, 1 + d).toLocaleDateString(loc, { weekday: "narrow" }); // 1 Jan 2023 was a Sunday
 
-  return createPortal(
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label={tr("Choose a day")}
-      className="ss-menu ss-dp"
-      data-leaving={closing ? "1" : undefined}
-      style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: W, visibility: pos ? "visible" : "hidden" }}
-    >
-      <div className="ss-dp-mhead">
-        <button type="button" className="ss-dp-nav" onClick={() => step(-1)} aria-label={tr("Previous month")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-        <span className="ss-dp-mtitle" aria-live="polite"><bdi>{monthTitle}</bdi></span>
-        <button type="button" className="ss-dp-nav" onClick={() => step(1)} aria-label={tr("Next month")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+  return (
+    <div className="ss-datenav-slot" ref={rootRef}>
+      {/* an invisible copy of the closed row holds the room in the toolbar (the pane itself floats) */}
+      <span className="ss-dn-ghost" aria-hidden>
+        <span className="ss-dn-sp" />
+        <span className="ss-range ss-daypick"><bdi>{label}</bdi></span>
+        <span className="ss-dn-sp" />
+      </span>
+      <div className={`ss-datenav${open ? " is-open" : ""}`}>
+        <div className="ss-dn-row">
+          <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(-1) : onStep(-1))} aria-label={open ? tr("Previous month") : prevLabel}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
+          <button type="button" className="ss-range ss-daypick" aria-haspopup="dialog" aria-expanded={open} aria-live="polite" onClick={toggle}>
+            <bdi>{open ? monthTitle : label}</bdi>
+          </button>
+          <button type="button" className="ss-dn-arrow" onClick={() => (open ? stepMonth(1) : onStep(1))} aria-label={open ? tr("Next month") : nextLabel}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+        </div>
+        <div className="ss-dn-cal" aria-hidden={!open}>
+          <div className="ss-dn-cal-in">
+            {shown || open ? (
+              <div className="ss-dp-grid" role="group" aria-label={tr("Choose a day")}>
+                {WEEK_DAYS.map((d) => <span key={d} className="ss-dp-wd">{weekday(d)}</span>)}
+                {cells.map((c) => {
+                  const key = dateKey(c);
+                  return (
+                    <button key={key} type="button" tabIndex={open ? 0 : -1} className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => { onPick(key); closePane(); }}>
+                      {c.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
-      <div className="ss-dp-grid">
-        {WEEK_DAYS.map((d) => <span key={d} className="ss-dp-wd">{weekday(d)}</span>)}
-        {cells.map((c) => {
-          const key = dateKey(c);
-          return (
-            <button key={key} type="button" className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => onPick(key)}>
-              {c.getDate()}
-            </button>
-          );
-        })}
-      </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 
