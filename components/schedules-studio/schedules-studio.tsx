@@ -90,6 +90,7 @@ const HISTORY_GROUP_MS = 900; // changes this close together are ONE undo step
 const HISTORY_MAX = 40;
 const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
 const LIFT_MAX = 96; // how far (px) a carried block may float up or down with the pointer
+const PROVISIONAL_MIN = 15; // how long a song / playlist whose length is not known yet is drawn, until the lookup answers
 const CLOSING_NAME = "Closing"; // the quiet block the Day-hours dialog keeps for each closing time
 
 type RadioRow = { id: string; name: string; branchId?: string | null };
@@ -531,7 +532,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const pinch = e.ctrlKey || e.metaKey; // a trackpad pinch arrives as ctrl + wheel
       if (!pinch && !onHours) return;
       e.preventDefault();
-      zoomHours(Math.exp(-e.deltaY * (pinch && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0024)), e.clientY);
+      // a plain wheel works the other way round (owner 2026-11-16: scroll UP shrinks the hours, DOWN stretches them); a pinch keeps its own meaning (spread = closer)
+      zoomHours(Math.exp((pinch ? -1 : 1) * e.deltaY * (pinch && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0024)), e.clientY);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -977,8 +979,13 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         recurrence: "weekly",
         daysOfWeek: [day],
         startTimeLocal: minutesToTimeLocal(min),
-        // a dropped song / playlist is exactly as long as its music (owner 2026-11-12) — when its length is not known, or it runs past the day, it stays "until the next block"
-        ...(item.targetType !== "SILENCE" && Number.isFinite(fitMinutes(item.dur)) && min + fitMinutes(item.dur) <= END_MAX ? { endTimeLocal: minutesToTimeLocal(min + fitMinutes(item.dur)) } : {}),
+        // a dropped song / playlist is exactly as long as its music (owner 2026-11-12) — when its length is not known yet it is drawn PROVISIONAL_MIN minutes until the lookup answers (it used to run to
+        // the end of the day for those seconds: a giant block that shrank later, owner 2026-11-16); when it runs past the day it stays "until the next block"
+        ...(item.targetType !== "SILENCE" && Number.isFinite(fitMinutes(item.dur)) && min + fitMinutes(item.dur) <= END_MAX
+          ? { endTimeLocal: minutesToTimeLocal(min + fitMinutes(item.dur)) }
+          : (item.targetType === "PLAYLIST" || item.targetType === "SOURCE") && !Number.isFinite(fitMinutes(item.dur)) && min + PROVISIONAL_MIN <= END_MAX
+            ? { endTimeLocal: minutesToTimeLocal(min + PROVISIONAL_MIN) }
+            : {}),
         enabled: true,
         priority: 1,
       });
@@ -1001,7 +1008,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         const cur = itemsRef.current.find((x) => x.id === created.id);
         const start = startMinutes(created);
         const end = start + fitMinutes(sec);
-        if (cur && explicitEndMinutes(cur) === null && end <= END_MAX) await update(created.id, { endTimeLocal: minutesToTimeLocal(end) });
+        // only a block still at the provisional length (or with no end) takes the music's length — an end the person set in the meantime is theirs
+        const e0 = cur ? explicitEndMinutes(cur) : null;
+        if (cur && (e0 === null || e0 === start + PROVISIONAL_MIN)) {
+          if (end <= END_MAX) await update(created.id, { endTimeLocal: minutesToTimeLocal(end) });
+          else if (e0 !== null) await update(created.id, { endTimeLocal: "23:59:00" }); // longer than what is left of the day: "until the next block"
+        }
       } catch {
         /* its length cannot be looked up here */
       }
@@ -1315,6 +1327,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // ── the pointer on a track (a day column in the week, a branch row in the day) ──
   const trackMove = (e: React.PointerEvent<HTMLDivElement>, key: string, ymd: string, orient: Orient) => {
     setHoverDate(ymd);
+    // the week has no dashed guide that follows the pointer from 15 minutes to 15 minutes (owner 2026-11-16); the day's rows keep theirs. (A song dragged in from the list still shows where it will land.)
+    if (key[0] !== "r") {
+      if (hover) setHover(null);
+      return;
+    }
     if (e.target !== e.currentTarget || drag) {
       if (hover) setHover(null);
       return;
