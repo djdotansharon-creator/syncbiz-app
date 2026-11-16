@@ -1722,10 +1722,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     );
   };
 
-  const addNow = () => {
-    const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), Math.max(FIRST_H * 60, LAST_H * 60 - 120));
-    setEditor({ kind: "new", day: view === "day" ? focusDay : clock.getDay(), min: m, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 } });
-  };
   const onDayHeadClick = (d: number) => {
     const ymd = weekDates[d]!;
     if (clip) void pasteOn(ymd);
@@ -1748,37 +1744,45 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
               <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
             </button>
             <button type="button" className="ss-btn ss-btn--ghost" onClick={() => setHoursOpen(true)}>{tr("Business hours")}</button>
-            <button type="button" className="ss-btn" onClick={addNow}>
-              <span aria-hidden className="ss-plus">+</span> {tr("Add music")}
-            </button>
-            <button type="button" className="ss-iconbtn ss-panel-toggle" onClick={togglePanel} aria-pressed={panelOpen} title={panelOpen ? tr("Close the music list") : tr("Open the music list")} aria-label={panelOpen ? tr("Close the music list") : tr("Open the music list")}>
-              <span className="ss-chev" aria-hidden />
-            </button>
+            {/* the circle at the very end of the header: a plus on a white disc (a black disc on the white display); standing on it names it; pressing it opens the music list (the list with the
+                search, at the side) and the plus turns in place into an X — pressing again closes it (owner 2026-11-16; this one button replaced "+ Add music" and the arrow) */}
+            <div className="ss-add">
+              <button type="button" className="ss-add-btn" onClick={togglePanel} aria-expanded={panelOpen} aria-label={panelOpen ? tr("Close the music list") : tr("Add music")}>
+                <span className="ss-add-label" aria-hidden>{panelOpen ? tr("Close the music list") : tr("Add music")}</span>
+                <span className="ss-add-ico" aria-hidden>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                </span>
+              </button>
+            </div>
           </div>
         </header>
 
         <div className="ss-toolbar">
           <div className="ss-nav">
-            <button type="button" className="ss-iconbtn ss-iconbtn--sm" onClick={() => shiftFocus(view === "day" ? -1 : -7)} aria-label={view === "day" ? tr("Previous day") : tr("Previous week")} title={view === "day" ? tr("Previous day") : tr("Previous week")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-            <button type="button" className="ss-iconbtn ss-iconbtn--sm" onClick={() => shiftFocus(view === "day" ? 1 : 7)} aria-label={view === "day" ? tr("Next day") : tr("Next week")} title={view === "day" ? tr("Next day") : tr("Next week")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
-            <button type="button" className="ss-pill" onClick={() => setFocus(null)} disabled={focus === null || isTodayInView}>{tr("Today")}</button>
-            {view === "day" ? (
-              <button
-                type="button"
-                className={`ss-range ss-daypick${dp ? " is-open" : ""}`}
-                aria-haspopup="dialog"
-                aria-expanded={!!dp}
-                aria-live="polite"
-                onPointerEnter={(e) => { dpCancel(); const el = e.currentTarget; dpTimer.current = window.setTimeout(() => dpOpenAt(el), 140); }}
-                onPointerLeave={() => dpSoonClose()}
-                onClick={(e) => { dpCancel(); if (dp) setDp(null); else dpOpenAt(e.currentTarget); }}
-              >
-                <bdi>{rangeLabel}</bdi>
-                <span className="ss-daypick-chev" aria-hidden />
-              </button>
-            ) : (
-              <span className="ss-range" aria-live="polite">{rangeLabel}</span>
-            )}
+            {/* the date at the very edge; two plain arrows on its sides that show only while the pointer is over the date or where they are (owner 2026-11-16) */}
+            <div className="ss-datenav">
+              <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? -1 : -7)} aria-label={view === "day" ? tr("Previous day") : tr("Previous week")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
+              {view === "day" ? (
+                <button
+                  type="button"
+                  className={`ss-range ss-daypick${dp ? " is-open" : ""}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={!!dp}
+                  aria-live="polite"
+                  onPointerEnter={(e) => { dpCancel(); const el = e.currentTarget; dpTimer.current = window.setTimeout(() => dpOpenAt(el), 140); }}
+                  onPointerLeave={() => dpSoonClose()}
+                  onClick={(e) => { dpCancel(); if (dp) setDp(null); else dpOpenAt(e.currentTarget); }}
+                >
+                  <bdi>{rangeLabel}</bdi>
+                  <span className="ss-daypick-chev" aria-hidden />
+                </button>
+              ) : (
+                <span className="ss-range" aria-live="polite">{rangeLabel}</span>
+              )}
+              <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? 1 : 7)} aria-label={view === "day" ? tr("Next day") : tr("Next week")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+            </div>
+            {/* "Today" is there only when the day (week) on screen is not today */}
+            {focus !== null && !isTodayInView ? <button type="button" className="ss-pill ss-today" onClick={() => setFocus(null)}>{tr("Today")}</button> : null}
           </div>
           <div className="ss-toolbar-end">
             {branchIds.length > 1 ? (
