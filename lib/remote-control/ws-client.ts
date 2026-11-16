@@ -716,6 +716,27 @@ export function useRemoteOwner() {
   const ackWaitersRef = useRef(new Map<string, (r: { delivered: boolean; reason?: string }) => void>());
   statusRef.current = status;
 
+  // ZERO-TOUCH auto-reconnect (the same single-timer backoff the device hook uses): a server restart / network loss / server-side close brings the
+  // owner socket back on its own. Before this it came back only on focus / visibility — events a phone left open on the Branches screen never gets
+  // (found 2026-11-16 testing the phone app: after the WS server restarted the live list stayed empty for good).
+  const reconnectSchedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null);
+  /** the last token request answered 401 (signed out) — nothing to retry until the person signs in again */
+  const tokenUnauthorizedRef = useRef(false);
+  useEffect(() => {
+    const scheduler = createReconnectScheduler({
+      onFire: () => {
+        const cur = wsRef.current;
+        if (cur && (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING)) return;
+        setReconnectTrigger((k) => k + 1);
+      },
+    });
+    reconnectSchedulerRef.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      if (reconnectSchedulerRef.current === scheduler) reconnectSchedulerRef.current = null;
+    };
+  }, []);
+
   const tryReconnect = () => {
     const ws = wsRef.current;
     const staleOrClosed = ws && (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING);
@@ -751,6 +772,7 @@ export function useRemoteOwner() {
         .then((r) => {
           if (cancelled) return;
           if (r.status === 401) {
+            tokenUnauthorizedRef.current = true;
             setWsToken(null);
             if (process.env.NODE_ENV === "development") console.info("[SyncBiz WS client] token refresh failure (401)");
             return;
@@ -766,6 +788,9 @@ export function useRemoteOwner() {
           if (cancelled) return;
           const token = data?.token ?? null;
           setWsToken(token);
+          if (token) tokenUnauthorizedRef.current = false;
+          // no token and not because we are signed out (a network blip / a 5xx): ask again with backoff
+          else if (!tokenUnauthorizedRef.current) reconnectSchedulerRef.current?.scheduleRetry();
           if (process.env.NODE_ENV === "development") {
             console.info(token ? "[SyncBiz WS client] token refresh success" : "[SyncBiz WS client] token refresh failure (no token)", { role: "owner" });
           }
@@ -773,6 +798,7 @@ export function useRemoteOwner() {
         .catch(() => {
           if (cancelled) return;
           setWsToken(null);
+          reconnectSchedulerRef.current?.scheduleRetry();
           if (process.env.NODE_ENV === "development") console.info("[SyncBiz WS client] token refresh failure (network)", { role: "owner" });
         });
     };
@@ -791,6 +817,7 @@ export function useRemoteOwner() {
       return;
     }
 
+    let intentionalClose = false;
     const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
@@ -815,6 +842,7 @@ export function useRemoteOwner() {
         if (data.type === "REGISTERED" || data.type === "BRANCH_LIST") {
           setStatus("connected");
           lastAuthFailureAtRef.current = 0;
+          reconnectSchedulerRef.current?.connected(); // accepted by the server → the backoff starts over
         }
         if (data.type === "ERROR") {
           const msg = (data as { message?: string }).message ?? "";
@@ -849,6 +877,7 @@ export function useRemoteOwner() {
       setStatus("disconnected");
       setBranches([]);
       setRemoteStateByDeviceId({});
+      if (!intentionalClose) reconnectSchedulerRef.current?.scheduleRetry(); // server restart / network loss: back on its own (backoff, forever)
       if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
         console.info("[SyncBiz WS client] disconnected owner", ev.code ? { code: ev.code } : {});
       }
@@ -856,6 +885,7 @@ export function useRemoteOwner() {
     ws.onerror = () => setStatus("error");
 
     return () => {
+      intentionalClose = true;
       ws.close();
       wsRef.current = null;
     };
@@ -895,10 +925,12 @@ export function useRemoteOwner() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
     window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onFocus); // the network came back → retry at once (the backoff covers the rest)
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onFocus);
     };
   }, []);
 
@@ -946,7 +978,8 @@ export function useRemoteOwner() {
   const sendCommandTo = (
     targetBranchId: string,
     command: RemoteCommand,
-    payload?: { volume?: number },
+    // (widened 2026-11-16, type only — the body already forwards the payload verbatim: the phone app sends PLAY_SOURCE / SEEK / SET_* to a chosen branch)
+    payload?: { url?: string; source?: unknown; position?: number; volume?: number; value?: boolean; trackIndex?: number; mode?: "playlist" | "track" | "off" },
   ) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== 1 || !targetBranchId) return false;

@@ -109,7 +109,12 @@ assert("C backoff resets only after the server accepted us (REGISTERED / SET_DEV
 assert("online is an immediate retry trigger; focus/visibility/pageshow kept",
   /window\.addEventListener\("online", onOnline\);/.test(hook) && /window\.removeEventListener\("online", onOnline\);/.test(hook) &&
   /window\.addEventListener\("focus", onFocus\);/.test(hook) && /document\.addEventListener\("visibilitychange", onVisible\);/.test(hook));
-assert("controller / owner hooks untouched by this change", !/reconnectSchedulerRef|createReconnectScheduler\(/.test(ws.slice(hookEnd)));
+// 2026-11-16 (phone app): the OWNER hook (the phone's / Control Room's multi-branch socket) got the same zero-touch backoff — an open phone never gets focus / visibility events,
+// so after a server restart its live list stayed empty for good. The CONTROLLER hook is still untouched. (scripts/verify-mobile-app.ts M8 / M9 guard the owner side.)
+const ctlStart = ws.indexOf("export function useRemoteController(");
+const ownStart = ws.indexOf("export function useRemoteOwner(");
+assert("controller hook untouched by this change", ctlStart > 0 && ownStart > ctlStart && !/reconnectSchedulerRef|createReconnectScheduler\(/.test(ws.slice(ctlStart, ownStart)));
+assert("owner hook reconnects on its own (single-timer backoff; a signed-out 401 is not retried)", /createReconnectScheduler\(\{/.test(ws.slice(ownStart)) && /if \(!intentionalClose\) reconnectSchedulerRef\.current\?\.scheduleRetry\(\)/.test(ws.slice(ownStart)) && /tokenUnauthorizedRef\.current = true;/.test(ws.slice(ownStart)));
 
 // ── H: REGISTER payload (embedded renderer = CONTROL-only). Station B1 (2026-10-11, owner-approved): the branch is
 // the station branch identity (lib/station-branch.ts) — "default" for every never-activated station (the Lenovo) and

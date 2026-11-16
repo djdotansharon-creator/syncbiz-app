@@ -25,7 +25,8 @@ assert("V1 the dock marks its iframe as shown in onReady, where it styles it", /
 assert("V2 the hide-until-styled rule for the browser decks is unchanged", css.includes(".sb-deck-video-bg iframe:not([data-sb-shown]) { opacity: 0 !important; }"));
 assert("V3 the station (CONTROL mirror) video still lives in the .sb-deck-video-bg slot via DesktopVideoDock",
   // 2026-11-09: the condition gained the per-device Artwork ⇄ Video gate (scripts/verify-artwork-mode-station-video.ts); the slot is the same
-  /isControlMirror && mirrorVid && \(ms\?\.status === "playing" \|\| ms\?\.status === "paused"\) &&[\s\S]{0,500}?\(!isDesktopMode \|\| desktopBgMode === "video"\) \? \(\n\s*<div\n\s*className="sb-deck-video-bg[\s\S]{0,200}<DesktopVideoDock/.test(player));
+  /isControlMirror && mirrorVid && \(ms\?\.status === "playing" \|\| ms\?\.status === "paused"\) &&[\s\S]{0,500}?\(!isDesktopMode \|\| desktopBgMode === "video"\) &&[\s\S]{0,260}?!pathname\?\.startsWith\("\/mobile"\) \? \(\n\s*<div\n\s*className="sb-deck-video-bg[\s\S]{0,200}<DesktopVideoDock/.test(player));
+// (2026-11-16: the same condition gained `&& !pathname?.startsWith("/mobile")` — no muted clip on the phone app's routes; the slot is unchanged)
 assert("V4 the dock still mutes itself on ready (audio never comes from it)", /e\.target\.mute\?\.\(\);\n\s*e\.target\.setVolume\?\.\(0\);/.test(onReady));
 
 console.log(`\n${pass} passed, ${fail} failed`);

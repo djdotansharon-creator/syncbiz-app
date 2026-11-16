@@ -5932,7 +5932,9 @@ export function AudioPlayer() {
         /* 2026-11-09 (owner: branches like Shufersal need no video): on the desktop app the per-device Artwork ⇄ Video button
            decides — "Artwork" mounts NO YouTube clip at all (before, only the MPV-video path above obeyed it and the clip kept
            streaming behind the picture). A plain browser has no such button → unchanged. Display-only; audio is never touched. */
-        (!isDesktopMode || desktopBgMode === "video") ? (
+        (!isDesktopMode || desktopBgMode === "video") &&
+        /* 2026-11-16 (phone app): /mobile is a remote with no deck on screen — never stream a muted clip behind nothing (data, battery, decode). Display-only; audio untouched. */
+        !pathname?.startsWith("/mobile") ? (
         <div
           className="sb-deck-video-bg pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
           aria-hidden
