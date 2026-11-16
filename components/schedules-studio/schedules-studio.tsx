@@ -90,7 +90,8 @@ const HISTORY_GROUP_MS = 900; // changes this close together are ONE undo step
 const HISTORY_MAX = 40;
 const END_MAX = 23 * 60 + 55; // the latest "ends at" a person can set (23:59 is the stored "until the next block")
 const LIFT_MAX = 96; // how far (px) a carried block may float up or down with the pointer
-const PROVISIONAL_MIN = 15; // how long a song / playlist whose length is not known yet is drawn, until the lookup answers
+const PROVISIONAL_MIN = 5; // the shortest block: all a song / playlist whose length cannot be had is drawn until an answer comes
+const LOOKUP_WAIT_MS = 3000; // how long a dropped song waits for its length before it is drawn anyway
 const CLOSING_NAME = "Closing"; // the quiet block the Day-hours dialog keeps for each closing time
 
 type RadioRow = { id: string; name: string; branchId?: string | null };
@@ -153,10 +154,12 @@ const isMultiDayWeekly = (s: Schedule) => s.recurrence !== "one_off" && (s.daysO
 const isRtl = () => typeof document !== "undefined" && document.documentElement.getAttribute("dir") === "rtl";
 const isTypingTarget = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
-/** the total length of a playlist (a one-song playlist = the song) from the durations its tracks carry; null when none is known */
+/** the total length of a playlist (a one-song playlist = the song) from the durations its tracks carry — only when EVERY song's length is known: a sum of the few that are is not the playlist's length
+ *  (it would draw an 8-song playlist as 2 songs long). Otherwise the stored total, or null. */
 function playlistSeconds(p: Playlist): number | null {
-  const sum = (p.tracks ?? []).reduce((a, t) => a + (typeof t.durationSeconds === "number" && t.durationSeconds > 0 ? t.durationSeconds : 0), 0);
-  if (sum > 0) return sum;
+  const tracks = p.tracks ?? [];
+  const known = (t: { durationSeconds?: number | null }) => typeof t.durationSeconds === "number" && t.durationSeconds > 0;
+  if (tracks.length > 0 && tracks.every(known)) return tracks.reduce((a, t) => a + (t.durationSeconds as number), 0);
   return typeof p.durationSeconds === "number" && p.durationSeconds > 0 ? p.durationSeconds : null;
 }
 
@@ -240,7 +243,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
-  const [dp, setDp] = useState<Rect | null>(null);
+  const [dp, setDp] = useState<(Rect & { closing?: boolean }) | null>(null);
   const dpTimer = useRef<number | null>(null);
   // jingles (owner 2026-11-12): the Jingles screen keeps its own schedule in this browser (per branch); the studio only SHOWS it — a small bell on the timeline at the jingle's time
   const stationBranch = useStationBranchId() ?? stationBranchIdNow() ?? "default";
@@ -271,7 +274,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const hourH = zoomedH !== null ? Math.max(zoomedH, fitH) : fitH;
   // lengths of playlists that had none stored, looked up when one is placed (owner 2026-11-15: a song comes into the day with its own length)
   const [learned, setLearned] = useState<Record<string, number>>({});
-  const askedLength = useRef<Set<string>>(new Set());
+  // one length lookup per playlist at a time, shared by everyone who asks (a drag that has only just begun, the drop, a paste)
+  const lengthLookups = useRef<Map<string, Promise<number | null>>>(new Map());
+  // a song dropped on the day whose length is still being looked up: a dashed spot holds its place until the block can be drawn at its true length
+  const [pending, setPending] = useState<{ day: number; min: number; branchId?: string } | null>(null);
   const HOUR_H = hourH;
   // zooming + panning the hours (owner 2026-11-12): null = the whole range; otherwise the part of the day shown. It drives the horizontal views (the week's rows, the day's rows).
   const [zoomWin, setZoomWin] = useState<TimeWindow | null>(null);
@@ -689,20 +695,20 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       return next;
     });
   };
-  const dpCancel = () => {
+  // the calendar opens on a click on the date (never on hover) and folds back up when closed; opening during the fold-up simply opens it again
+  const dpOpenAt = (el: HTMLElement) => {
     if (dpTimer.current) window.clearTimeout(dpTimer.current);
     dpTimer.current = null;
-  };
-  const dpOpenAt = (el: HTMLElement) => {
     const r = el.getBoundingClientRect();
     setDp({ x: r.left, y: r.top, w: r.width, h: r.height });
   };
-  // leaving the day and its card closes the card after a moment — unless the calendar is open (it closes on a pick, outside click or Esc)
-  const dpSoonClose = () => {
-    dpCancel();
+  const closeDp = () => {
+    if (dpTimer.current) window.clearTimeout(dpTimer.current);
+    setDp((d) => (d && !d.closing ? { ...d, closing: true } : d));
     dpTimer.current = window.setTimeout(() => {
-      if (!document.querySelector(".ss-dp[data-month='1']")) setDp(null);
-    }, 320);
+      setDp(null);
+      dpTimer.current = null;
+    }, 220);
   };
   const toggleJingles = () => {
     setShowJingles((v) => {
@@ -967,8 +973,45 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     [showToast, tr, remember, touch],
   );
 
+  // The length of a playlist that has none stored is asked for (YouTube) — once, shared: the drag already asks when it begins, the drop waits for the answer (owner 2026-11-16: a new song
+  // must not be drawn at a guessed length, "the minutes can be loaded when I drop it, before it is shown"). Where it cannot be looked up here (a local file, no YouTube) the answer is null.
+  const lookupLength = useCallback((item: LibItem): Promise<number | null> => {
+    if (item.dur && item.dur > 0) return Promise.resolve(item.dur);
+    if (item.targetType !== "PLAYLIST") return Promise.resolve(null);
+    const known = lengthLookups.current.get(item.targetId);
+    if (known) return known;
+    const p = (async (): Promise<number | null> => {
+      try {
+        const res = await api<{ durationSeconds?: number | null }>("POST", `/api/playlists/${encodeURIComponent(item.targetId)}/refresh-duration`);
+        const sec = res?.durationSeconds;
+        if (typeof sec === "number" && sec > 0) {
+          setLearned((prev) => ({ ...prev, [item.targetId]: sec }));
+          return sec;
+        }
+      } catch {
+        /* its length cannot be looked up here */
+      }
+      return null;
+    })();
+    lengthLookups.current.set(item.targetId, p);
+    // an empty answer may be asked again later (a network blip) — not in a loop
+    void p.then((v) => {
+      if (v === null) window.setTimeout(() => lengthLookups.current.delete(item.targetId), 30_000);
+    });
+    return p;
+  }, []);
+
   const create = useCallback(
     async (item: LibItem, day: number, min: number, branchId?: string) => {
+      let dur = item.dur;
+      if (item.targetType === "PLAYLIST" && !(dur && dur > 0)) {
+        // the length first, THEN the block: a dashed spot holds the place for the moment it takes (never longer than LOOKUP_WAIT_MS)
+        const mine = { day, min, branchId };
+        setPending(mine);
+        const sec = await Promise.race([lookupLength(item), new Promise<null>((r) => window.setTimeout(() => r(null), LOOKUP_WAIT_MS))]);
+        setPending((p) => (p === mine ? null : p));
+        if (sec) dur = sec;
+      }
       const created = await createFromBody({
         name: item.targetType === "SILENCE" ? "Quiet" : item.name,
         // a quiet block belongs to the branch whose row / filter it was added in
@@ -979,46 +1022,41 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         recurrence: "weekly",
         daysOfWeek: [day],
         startTimeLocal: minutesToTimeLocal(min),
-        // a dropped song / playlist is exactly as long as its music (owner 2026-11-12) — when its length is not known yet it is drawn PROVISIONAL_MIN minutes until the lookup answers (it used to run to
-        // the end of the day for those seconds: a giant block that shrank later, owner 2026-11-16); when it runs past the day it stays "until the next block"
-        ...(item.targetType !== "SILENCE" && Number.isFinite(fitMinutes(item.dur)) && min + fitMinutes(item.dur) <= END_MAX
-          ? { endTimeLocal: minutesToTimeLocal(min + fitMinutes(item.dur)) }
-          : (item.targetType === "PLAYLIST" || item.targetType === "SOURCE") && !Number.isFinite(fitMinutes(item.dur)) && min + PROVISIONAL_MIN <= END_MAX
+        // a dropped song / playlist is exactly as long as its music (owner 2026-11-12). Only when the length really cannot be had (a local file, no answer in time) it is drawn the shortest block
+        // (PROVISIONAL_MIN) until an answer comes; when it runs past the day it stays "until the next block"
+        ...(item.targetType !== "SILENCE" && Number.isFinite(fitMinutes(dur)) && min + fitMinutes(dur) <= END_MAX
+          ? { endTimeLocal: minutesToTimeLocal(min + fitMinutes(dur)) }
+          : (item.targetType === "PLAYLIST" || item.targetType === "SOURCE") && !Number.isFinite(fitMinutes(dur)) && min + PROVISIONAL_MIN <= END_MAX
             ? { endTimeLocal: minutesToTimeLocal(min + PROVISIONAL_MIN) }
             : {}),
         enabled: true,
         priority: 1,
       });
-      if (created) void learnRef.current(item, created);
+      if (created && !(dur && dur > 0)) void learnRef.current(item, created); // a late answer still gives the block its true length
       return created;
     },
-    [createFromBody, quietBranch],
+    [createFromBody, quietBranch, lookupLength],
   );
-  // a playlist whose length is not stored yet is asked for it once, when it is placed; when the answer comes the block takes the music's own length (no end = "until the next block"
-  // is exactly what the owner does not want). Where the length cannot be looked up (no YouTube access here, a local file) the block simply stays as it is.
+  // a block drawn at the provisional length takes the music's own length when the answer comes (an end the person set in the meantime is theirs)
   const learnLength = useCallback(
     async (item: LibItem, created: Schedule) => {
-      if (item.targetType !== "PLAYLIST" || item.dur || askedLength.current.has(item.targetId)) return;
-      askedLength.current.add(item.targetId);
+      if (item.targetType !== "PLAYLIST" || item.dur) return;
+      const sec = await lookupLength(item);
+      if (!sec) return;
       try {
-        const res = await api<{ durationSeconds?: number | null }>("POST", `/api/playlists/${encodeURIComponent(item.targetId)}/refresh-duration`);
-        const sec = res?.durationSeconds;
-        if (typeof sec !== "number" || sec <= 0) return;
-        setLearned((prev) => ({ ...prev, [item.targetId]: sec }));
         const cur = itemsRef.current.find((x) => x.id === created.id);
         const start = startMinutes(created);
         const end = start + fitMinutes(sec);
-        // only a block still at the provisional length (or with no end) takes the music's length — an end the person set in the meantime is theirs
         const e0 = cur ? explicitEndMinutes(cur) : null;
         if (cur && (e0 === null || e0 === start + PROVISIONAL_MIN)) {
           if (end <= END_MAX) await update(created.id, { endTimeLocal: minutesToTimeLocal(end) });
           else if (e0 !== null) await update(created.id, { endTimeLocal: "23:59:00" }); // longer than what is left of the day: "until the next block"
         }
       } catch {
-        /* its length cannot be looked up here */
+        /* nothing to change */
       }
     },
-    [update],
+    [update, lookupLength],
   );
   const learnRef = useRef(learnLength);
   useEffect(() => {
@@ -1531,15 +1569,22 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   // the empty slot a carried block will land in once a neighbour has stepped aside for it: a dashed outline exactly its size
   const slotFor = (day: number, orient: Orient, rowId?: string) => {
-    if (!drag?.slot || drag.day !== day || drag.overDay !== undefined) return null;
-    if (rowId !== undefined && drag.slot.row !== rowId) return null;
-    const { start, len } = drag.slot;
+    let box: { start: number; len: number } | null = null;
+    let waiting = false;
+    if (pending && pending.day === day && (rowId === undefined || pending.branchId === undefined || pending.branchId === rowId)) {
+      box = { start: pending.min, len: PROVISIONAL_MIN };
+      waiting = true;
+    } else if (drag?.slot && drag.day === day && drag.overDay === undefined && (rowId === undefined || drag.slot.row === rowId)) {
+      box = drag.slot;
+    }
+    if (!box) return null;
+    const { start, len } = box;
     const end = start + len;
     const style: CSSProperties =
       orient === "v"
         ? { top: topOf(start), height: Math.max(26, ((Math.min(end, LAST_H * 60) - Math.max(start, FIRST_H * 60)) * HOUR_H) / 60 - 3) }
         : { insetInlineStart: `${pct(start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(start))}% - 4px)` };
-    return <div className={`ss-slot ss-slot--${orient}`} style={style} aria-hidden />;
+    return <div className={`ss-slot ss-slot--${orient}${waiting ? " is-pending" : ""}`} style={style} aria-hidden />;
   };
   // while a block is carried over ANOTHER day of the week, a see-through copy shows where it will land
   const ghostFor = (d: number, orient: Orient) => {
@@ -1762,23 +1807,17 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             {/* the date at the very edge; two plain arrows on its sides that show only while the pointer is over the date or where they are (owner 2026-11-16) */}
             <div className="ss-datenav">
               <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? -1 : -7)} aria-label={view === "day" ? tr("Previous day") : tr("Previous week")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-              {view === "day" ? (
-                <button
-                  type="button"
-                  className={`ss-range ss-daypick${dp ? " is-open" : ""}`}
-                  aria-haspopup="dialog"
-                  aria-expanded={!!dp}
-                  aria-live="polite"
-                  onPointerEnter={(e) => { dpCancel(); const el = e.currentTarget; dpTimer.current = window.setTimeout(() => dpOpenAt(el), 140); }}
-                  onPointerLeave={() => dpSoonClose()}
-                  onClick={(e) => { dpCancel(); if (dp) setDp(null); else dpOpenAt(e.currentTarget); }}
-                >
-                  <bdi>{rangeLabel}</bdi>
-                  <span className="ss-daypick-chev" aria-hidden />
-                </button>
-              ) : (
-                <span className="ss-range" aria-live="polite">{rangeLabel}</span>
-              )}
+              {/* the date is the one way into the calendar: a click opens it (no hover, no arrow, no frame) */}
+              <button
+                type="button"
+                className="ss-range ss-daypick"
+                aria-haspopup="dialog"
+                aria-expanded={!!dp && !dp.closing}
+                aria-live="polite"
+                onClick={(e) => { if (dp && !dp.closing) closeDp(); else dpOpenAt(e.currentTarget); }}
+              >
+                <bdi>{rangeLabel}</bdi>
+              </button>
               <button type="button" className="ss-dn-arrow" onClick={() => shiftFocus(view === "day" ? 1 : 7)} aria-label={view === "day" ? tr("Next day") : tr("Next week")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
             </div>
             {/* "Today" is there only when the day (week) on screen is not today */}
@@ -1966,7 +2005,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       </div>
 
       <aside className="ss-panel" aria-hidden={!panelOpen} inert={!panelOpen}>
-        <LibraryPanel lib={lib} quiet={quietItem} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), Math.max(FIRST_H * 60, LAST_H * 60 - 120)); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
+        <LibraryPanel lib={lib} quiet={quietItem} onWarm={(it) => void lookupLength(it)} onAddNext={(it) => { const m = Math.min(snapMinutes(Math.max(nowMin + 15, FIRST_H * 60 + 60)), Math.max(FIRST_H * 60, LAST_H * 60 - 120)); const day = view === "day" ? focusDay : clock.getDay(); void create(it, day, m).then((c) => c && setEditor({ kind: "edit", id: c.id, rect: { x: window.innerWidth / 2 - 40, y: 150, w: 0, h: 0 }, day })); }} />
       </aside>
 
       {menu && items.find((x) => x.id === menu.id) ? (
@@ -1991,18 +2030,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         />
       ) : null}
 
-      {dp && view === "day" ? (
+      {dp ? (
         <DayPicker
           rect={dp}
+          closing={!!dp.closing}
           focusKey={focusKey}
           todayKey={todayKey}
-          weekDates={weekDates}
           loc={loc}
-          dayName={dayName}
-          onEnter={dpCancel}
-          onLeave={dpSoonClose}
-          onPick={(ymd) => { setFocus(new Date(`${ymd}T12:00:00`)); setDp(null); }}
-          onClose={() => setDp(null)}
+          onPick={(ymd) => { setFocus(new Date(`${ymd}T12:00:00`)); closeDp(); }}
+          onClose={closeDp}
         />
       ) : null}
 
@@ -2125,7 +2161,7 @@ function FilterBar({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: st
   );
 }
 
-function LibraryPanel({ lib, quiet, onAddNext }: { lib: LibItem[]; quiet: LibItem; onAddNext: (it: LibItem) => void }) {
+function LibraryPanel({ lib, quiet, onAddNext, onWarm }: { lib: LibItem[]; quiet: LibItem; onAddNext: (it: LibItem) => void; onWarm: (it: LibItem) => void }) {
   const tr = useTr();
   const f = useFilteredLib(lib);
   return (
@@ -2158,6 +2194,7 @@ function LibraryPanel({ lib, quiet, onAddNext }: { lib: LibItem[]; quiet: LibIte
             onDragStart={(e) => {
               e.dataTransfer.setData("application/x-ss-lib", it.key);
               e.dataTransfer.effectAllowed = "copy";
+              onWarm(it); // its length is asked for as the drag begins, so it is usually known by the drop
             }}
           >
             <Cover item={it} />
@@ -2798,49 +2835,45 @@ function DisplayMenu({
   );
 }
 
-// ───────────────────────────── the day picker (Day view): the week's days, or any date ─────────────────────────────
+// ───────────────────────────── the calendar (opens from the date): one month, straight away ─────────────────────────────
 
 function DayPicker({
-  rect, focusKey, todayKey, weekDates, loc, dayName, onEnter, onLeave, onPick, onClose,
+  rect, closing, focusKey, todayKey, loc, onPick, onClose,
 }: {
   rect: Rect;
+  closing: boolean;
   focusKey: string;
   todayKey: string;
-  weekDates: string[];
   loc: string;
-  dayName: (d: number, style?: "short" | "long") => string;
-  onEnter: () => void;
-  onLeave: () => void;
   onPick: (ymd: string) => void;
   onClose: () => void;
 }) {
   const tr = useTr();
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const [month, setMonth] = useState(false);
   const [cursor, setCursor] = useState(() => ({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 }));
   const rtl = isRtl();
-  const W = 336;
+  const W = 308;
 
+  // under the date, its edge flush with the edge of the date (and so with the title above it; the date's own padding is 10px short of that edge) — never closer than 8px to the window
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const h = el.offsetHeight;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    let left = rtl ? rect.x + rect.w - W : rect.x;
-    left = Math.min(Math.max(8, left), vw - W - 8);
-    let top = rect.y + rect.h + 4;
-    if (top + h > vh - 8) top = Math.max(8, rect.y - h - 4);
+    const left = Math.min(Math.max(8, rtl ? rect.x + rect.w + 10 - W : rect.x - 10), vw - W - 8);
+    let top = rect.y + rect.h + 6;
+    if (top + h > vh - 8) top = Math.max(8, rect.y - h - 6);
     const id = requestAnimationFrame(() => setPos({ top, left }));
     return () => cancelAnimationFrame(id);
-  }, [rect, rtl, month]);
+  }, [rect, cursor, rtl]);
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       const n = e.target as Node | null;
       if (n && ref.current?.contains(n)) return;
-      if (n instanceof Element && n.closest(".ss-daypick")) return; // the day button toggles it itself
+      if (n instanceof Element && n.closest(".ss-daypick")) return; // the date toggles it itself
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -2854,14 +2887,14 @@ function DayPicker({
     };
   }, [onClose]);
 
-  // the month grid: weeks start on Sunday, six rows
+  // the month grid: weeks start on Sunday; five rows are enough when the sixth would be a whole week of the next month
   const first = new Date(cursor.y, cursor.m, 1);
   const gridStart = new Date(cursor.y, cursor.m, 1 - first.getDay());
-  // five rows are enough when the sixth would be a whole week of the next month
   const rows = new Date(cursor.y, cursor.m, 1 - first.getDay() + 35).getMonth() === cursor.m ? 6 : 5;
   const cells = Array.from({ length: rows * 7 }, (_, i) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i));
   const monthTitle = first.toLocaleDateString(loc, { month: "long", year: "numeric" });
   const step = (n: number) => setCursor((c) => { const d = new Date(c.y, c.m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const weekday = (d: number) => new Date(2023, 0, 1 + d).toLocaleDateString(loc, { weekday: "narrow" }); // 1 Jan 2023 was a Sunday
 
   return createPortal(
     <div
@@ -2869,46 +2902,25 @@ function DayPicker({
       role="dialog"
       aria-label={tr("Choose a day")}
       className="ss-menu ss-dp"
-      data-month={month ? "1" : undefined}
+      data-leaving={closing ? "1" : undefined}
       style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: W, visibility: pos ? "visible" : "hidden" }}
-      onPointerEnter={onEnter}
-      onPointerLeave={onLeave}
     >
-      <div className="ss-dp-week" role="group" aria-label={tr("Choose a day")}>
-        {WEEK_DAYS.map((d) => {
-          const key = weekDates[d]!;
+      <div className="ss-dp-mhead">
+        <button type="button" className="ss-dp-nav" onClick={() => step(-1)} aria-label={tr("Previous month")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
+        <span className="ss-dp-mtitle" aria-live="polite"><bdi>{monthTitle}</bdi></span>
+        <button type="button" className="ss-dp-nav" onClick={() => step(1)} aria-label={tr("Next month")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
+      </div>
+      <div className="ss-dp-grid">
+        {WEEK_DAYS.map((d) => <span key={d} className="ss-dp-wd">{weekday(d)}</span>)}
+        {cells.map((c) => {
+          const key = dateKey(c);
           return (
-            <button key={d} type="button" className={`ss-dp-day${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => onPick(key)}>
-              <span className="ss-dp-dn">{dayName(d).replace(/^יום\s*/, "")}</span>
-              <span className="ss-dp-dd">{Number(key.slice(8))}</span>
+            <button key={key} type="button" className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => onPick(key)}>
+              {c.getDate()}
             </button>
           );
         })}
       </div>
-      {month ? (
-        <div className="ss-dp-month">
-          <div className="ss-dp-mhead">
-            <span className="ss-dp-mtitle"><bdi>{monthTitle}</bdi></span>
-            <span className="ss-dp-navs">
-              <button type="button" className="ss-dp-nav" onClick={() => step(-1)} aria-label={tr("Previous month")}><span className="ss-arrow ss-arrow--prev" aria-hidden /></button>
-              <button type="button" className="ss-dp-nav" onClick={() => step(1)} aria-label={tr("Next month")}><span className="ss-arrow ss-arrow--next" aria-hidden /></button>
-            </span>
-          </div>
-          <div className="ss-dp-grid">
-            {WEEK_DAYS.map((d) => <span key={d} className="ss-dp-wd">{dayName(d).replace(/^יום\s*/, "").slice(0, 3)}</span>)}
-            {cells.map((c) => {
-              const key = dateKey(c);
-              return (
-                <button key={key} type="button" className={`ss-dp-cell${c.getMonth() !== cursor.m ? " is-out" : ""}${key === focusKey ? " is-on" : ""}${key === todayKey ? " is-today" : ""}`} aria-pressed={key === focusKey} onClick={() => onPick(key)}>
-                  {c.getDate()}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <button type="button" className="ss-dp-more" onClick={() => { setCursor({ y: Number(focusKey.slice(0, 4)), m: Number(focusKey.slice(5, 7)) - 1 }); setMonth(true); }}><span>{tr("Pick a date")}</span><span className="ss-dp-more-chev" aria-hidden /></button>
-      )}
     </div>,
     document.body,
   );
