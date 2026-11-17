@@ -292,6 +292,27 @@
 .vm-act-kv { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; font-size: 15px; color: var(--vm-text2); }
 .vm-act-kv b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: end; font-weight: 500; color: var(--vm-text); }
 
+/* PEOPLE (2026-11-18): a check box / radio in a sheet, a plain note inside a group, a question before something that cannot be undone, the join code */
+.vm-tick { flex: none; width: 24px; height: 24px; border-radius: 7px; background: rgba(255, 255, 255, 0.16); display: inline-flex; align-items: center; justify-content: center; color: #111114; transition: background 140ms ease; }
+.vm-tick--round { border-radius: 999px; }
+.vm-tick[data-on] { background: var(--vm-text); }
+.vm-tick svg { font-size: 16px; }
+.vm-note { margin: 0; padding: 16px; font-size: 15px; line-height: 1.45; color: var(--vm-text2); }
+.vm-err { margin: 14px 24px 0; font-size: 14px; line-height: 1.4; color: var(--vm-danger); text-align: center; }
+.vm-ask { padding: 6px 18px 12px; display: flex; flex-direction: column; gap: 10px; }
+.vm-ask h2 { margin: 4px 6px 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-align: center; }
+.vm-ask p { margin: 0 6px 6px; font-size: 15px; line-height: 1.45; color: var(--vm-text2); text-align: center; }
+.vm-ask-btn { display: flex; align-items: center; justify-content: center; text-align: center; width: 100%; min-height: 52px; border-radius: 16px; background: rgba(255, 255, 255, 0.1); color: var(--vm-text); font-size: 17px; font-weight: 600; transition: transform 160ms var(--vm-ease), opacity 140ms ease; }
+.vm-ask-btn:active { transform: scale(0.98); }
+.vm-ask-btn[data-main] { background: var(--vm-text); color: #111114; }
+.vm-ask-btn[data-danger] { color: var(--vm-danger); }
+.vm-ask-btn[disabled] { opacity: 0.4; pointer-events: none; }
+.vm-act > .vm-ask-btn { margin-top: 12px; }
+.vm-ask-inline { margin: 22px 14px 0; display: flex; flex-direction: column; gap: 10px; }
+.vm-code { margin: 6px 20px 0; display: flex; flex-direction: column; gap: 10px; }
+.vm-code-qr { display: flex; justify-content: center; margin-bottom: 4px; }
+.vm-code-text { margin: 6px 0 0; text-align: center; font-size: 30px; font-weight: 700; letter-spacing: 0.14em; font-variant-numeric: tabular-nums; }
+
 /* TODAY'S PLAN: the day as a calm list — time, what plays, until when; the block that is on now is lifted, the next one is marked, quiet times are quieter */
 .vm-plan { margin-top: 18px; display: flex; flex-direction: column; gap: 4px; }
 .vm-plan-row { display: flex; align-items: center; gap: 12px; margin-inline: 8px; padding: 10px 12px; min-height: 64px; border-radius: 18px; transition: background 200ms ease, box-shadow 260ms var(--vm-ease), transform 260ms var(--vm-ease), opacity 200ms ease; }

@@ -1,14 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
 import { MobileSearchBar } from "@/components/mobile-search-bar";
 import { MobileShazamImport } from "@/components/mobile/mobile-shazam-import";
 import { MobileListenIdentify } from "@/components/mobile/mobile-listen-identify";
 import { useMobileSources } from "@/lib/mobile-sources-context";
-import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
-import { VmPage, VmTarget, useVmUi } from "@/components/vm/vm-ui";
-import type { UnifiedSource } from "@/lib/source-types";
+import { useVmSongRoute } from "@/lib/use-vm-song-route";
+import { VmPage, VmTarget } from "@/components/vm/vm-ui";
 
 /**
  * SEARCH — find a song or a playlist (the business's own library first, then YouTube) and send it to the branch that is open.
@@ -16,27 +14,8 @@ import type { UnifiedSource } from "@/lib/source-types";
  */
 export default function MobileSearchPage() {
   const { sources, contentScope, reload } = useMobileSources();
-  const f = useMobileFleet();
   const tr = useTr();
-  const ui = useVmUi();
-
-  const route = useMemo(
-    () => ({
-      play: (u: UnifiedSource) => {
-        if (!f.selected) return ui.openPicker();
-        if (!f.canControl) return ui.toast(tr("{name} is offline", { name: f.selected.name }));
-        f.playSource(u);
-        ui.toast(tr("Playing on {name}", { name: f.selected.name }));
-      },
-      queue: (u: UnifiedSource) => {
-        if (!f.selected) return ui.openPicker();
-        if (!f.canControl) return ui.toast(tr("{name} is offline", { name: f.selected.name }));
-        f.queueNext(u);
-        ui.toast(tr("Will play next on {name}", { name: f.selected.name }));
-      },
-    }),
-    [f, ui, tr],
-  );
+  const route = useVmSongRoute();
 
   return (
     <VmPage title={tr("Search")}>

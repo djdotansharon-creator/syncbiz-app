@@ -1,13 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLocale } from "@/lib/locale-context";
 import { useTr } from "@/lib/i18n/use-tr";
+import { usePeopleAccess } from "@/lib/mobile-people";
 import { VmPage } from "@/components/vm/vm-ui";
 import { VmCover } from "@/components/vm/vm-parts";
-import { IconGlobe, IconSignOut } from "@/components/vm/vm-icons";
+import { IconChevronForward, IconGlobe, IconPeople, IconSignOut } from "@/components/vm/vm-icons";
 
-/** ACCOUNT — who is signed in, the language, and signing out. (Business setup — branches, people, players — stays on the computer's Control Room.) */
+/** ACCOUNT — who is signed in, the language, People (for an administrator only — the server decides who is one), and signing out. (Business setup — new branches, players, what a role allows — stays on the computer's Control Room.) */
 type Me = { email?: string | null; name?: string | null; accountName?: string | null };
 
 export default function MobileAccountPage() {
@@ -15,6 +17,7 @@ export default function MobileAccountPage() {
   const { locale, setLocale } = useLocale();
   const [me, setMe] = useState<Me | null>(null);
   const [busy, setBusy] = useState(false);
+  const canPeople = usePeopleAccess();
 
   useEffect(() => {
     let off = false;
@@ -46,6 +49,19 @@ export default function MobileAccountPage() {
           </span>
         </div>
       </div>
+
+      {canPeople ? (
+        <div className="vm-group">
+          <Link href="/mobile/people" className="vm-line">
+            <IconPeople />
+            <span className="vm-line-text">
+              {tr("People")}
+              <small>{tr("Add people, answer requests, change roles and branches")}</small>
+            </span>
+            <IconChevronForward className="vm-chev vm-flip" />
+          </Link>
+        </div>
+      ) : null}
 
       <div className="vm-group">
         <button

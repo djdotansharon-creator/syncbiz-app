@@ -288,9 +288,9 @@ function Dock({ onOpenNowPlaying }: { onOpenNowPlaying: () => void }) {
 /* ───────────────────────────── the shell ───────────────────────────── */
 
 /** screens that still use the older form components (Tailwind slate / sky): their fields and cards are re-skinned to the phone app's look by CSS (`[data-legacy]`) */
-const LEGACY_ROUTE = /^\/mobile\/(jingles|scheduling|announcer|search|shazam-share)(\/|$)/;
+const LEGACY_ROUTE = /^\/mobile\/(jingles|scheduling|announcer|search|identify|shazam-share)(\/|$)/;
 /** …and of those, the ones that lose their frames too (the Announcer keeps its record ring: that ring IS the button) */
-const FLAT_ROUTE = /^\/mobile\/(jingles|search|shazam-share)(\/|$)/;
+const FLAT_ROUTE = /^\/mobile\/(jingles|search|identify|shazam-share)(\/|$)/;
 
 /** the Now Playing sheet: its background is the colour of the song that plays */
 function NowPlayingSheet({ open, onClose, onPickBranch }: { open: boolean; onClose: () => void; onPickBranch: () => void }) {
