@@ -12,6 +12,7 @@ import {
 import { decideScheduleAction, todaysFiredKeys } from "@/lib/schedule-actions";
 import { SCHEDULE_SWITCH_EVENT } from "@/lib/schedule-switch-client";
 import { clearScheduleDriven } from "@/lib/schedule-driven";
+import { clearQuietStopTries, noteQuietStopTry, quietStopFinished, waitForQuiet } from "@/lib/schedule-quiet-stop";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import type { Schedule, Source } from "@/lib/types";
 
@@ -45,7 +46,7 @@ function readCachedSchedules(branch: string): { schedules: Schedule[]; enabled: 
 export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { isRestoring } = usePlayback();
-  const { stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady } = useSchedulePlaybackHandlers();
+  const { stop, stopScheduled, isAudible, setQueue, playSource, setLastMessage, route, bankStreamReady } = useSchedulePlaybackHandlers();
   // 2026-11-15 (owner: "the schedule I set for one player affects all the others"): a window runs ONLY the schedules of the branch it plays for / controls. On the desktop the branch is
   // MAIN's (null until the bridge answers — then nothing starts and the next poll retries); a browser / phone has "default" unless a branch was chosen in Control Room.
   const stationBranch = useStationBranchId();
@@ -55,9 +56,9 @@ export function ScheduleAutoPlayer() {
   // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
   // (TEST logs: up to 8 requests/s per app). The latest handlers now live in a ref read at fire time; the polling
   // effect depends only on the engine switch + restore state → exactly one request per POLL_MS.
-  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), setQueue, playSource, setLastMessage, route, bankStreamReady });
+  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), isAudible: undefined as undefined | (() => boolean), setQueue, playSource, setLastMessage, route, bankStreamReady });
   useEffect(() => {
-    handlersRef.current = { router, stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady };
+    handlersRef.current = { router, stop, stopScheduled, isAudible, setQueue, playSource, setLastMessage, route, bankStreamReady };
   });
 
   useEffect(() => {
@@ -132,7 +133,16 @@ export function ScheduleAutoPlayer() {
             return; // retried next poll
           }
           clearScheduleDriven(); // a quiet block: the schedule's music is over, nothing is lined up after it
+          // The stop is a COMMAND (on a station playing a URL session it goes to MAIN through the cloud socket, and a command that leaves while the socket is closed is lost without a word).
+          // It counts as done — and the block is marked for today — only when the music has really gone quiet; otherwise the next poll repeats it (lib/schedule-quiet-stop.ts).
+          const tryNo = noteQuietStopTry(action.fireKeys[0] ?? action.schedule.id);
+          const quiet = await waitForQuiet(() => handlersRef.current.isAudible?.() === true, { cancelled: () => cancelled });
+          if (cancelled) return;
+          const finished = quietStopFinished(quiet, tryNo);
+          console.info(`[VONO schedule] quiet block "${action.schedule.name ?? action.schedule.id}" — stop sent (try ${tryNo}); ${quiet ? "the music is quiet" : finished ? "still playing — giving up so it never fights a person" : "still playing — will repeat at the next poll"}`);
+          if (!finished) return;
           for (const k of action.fireKeys) {
+            clearQuietStopTries(k);
             try {
               localStorage.setItem(k, "1");
             } catch {
