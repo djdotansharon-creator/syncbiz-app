@@ -147,7 +147,9 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
       const len = musicMinutes(floating);
       if (len !== null && len > 0) end = start + len;
     }
-    scenes.push({ schedule: floating, day, start, end: Math.min(DAY_MINUTES, Math.max(start + 5, end)), endSet: own !== null, quiet, paused: false, shadowed: false });
+    // never shorter than a minute (owner 2026-11-17): it used to be 5 minutes, so while a song's block was being CUT below 5 minutes it stayed drawn at 5 and only jumped to its true length after the
+    // mouse was let go — "it does not move with my mouse, the reaction comes late". The strips cut down to a minute (once the hours are zoomed far enough to aim at one), so the drawing follows.
+    scenes.push({ schedule: floating, day, start, end: Math.min(DAY_MINUTES, Math.max(start + 1, end)), endSet: own !== null, quiet, paused: false, shadowed: false });
   }
   return scenes.sort((a, b) => a.start - b.start);
 }
