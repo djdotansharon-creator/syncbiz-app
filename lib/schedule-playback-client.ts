@@ -21,6 +21,11 @@ export type SchedulePlaybackHandlers = {
   setLastMessage: (msg: string | null) => void;
   /** 2026-11-11 — stop the music for a scheduled END / quiet block: the Stop button's own path (`device.stopOrSend`: MAIN's STOP on a station / controller, the local stop otherwise). Omitted = `stop`. */
   stopScheduled?: () => void;
+  /** 2026-11-17 — is music playing right now (the station's own status, else this window's)? The engine uses it to see that a quiet block's stop really worked (lib/schedule-quiet-stop.ts). Omitted = no signal. */
+  isAudible?: () => boolean;
+  /** 2026-11-17 — a block's own volume (lib/schedule-volume.ts): the volume now, and the way to change it (the Player's own path: MAIN's SET_VOLUME on a station / controller, else the local one). Omitted = the engine leaves the volume alone. */
+  getVolume?: () => number | null;
+  setVolume?: (value: number) => void;
   /** 2026-11-04 — where a schedule starts (lib/schedule-station-route.ts). Omitted = "default" (existing behavior). */
   route?: ScheduleRoute;
   /** 2026-11-12 — a music BANK streams through the media token the MASTER holds (a CONTROL just routes the token-free source to it). False = not ready yet: the block waits and the next poll retries. Omitted = ready. */

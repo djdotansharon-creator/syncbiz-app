@@ -1,5 +1,6 @@
 "use client";
 
+import { guardVolume } from "@/lib/schedule-volume";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
@@ -5190,7 +5191,9 @@ export function AudioPlayer() {
             else if (currentSource) playSource(currentSource);
             else console.warn("[SyncBiz Audit] PLAY blocked: no currentSource");
           });
-  const onVolumeChange = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
+  // a block's own volume (owner 2026-11-17): raising the volume above the schedule's setting asks first (lib/schedule-volume.ts); anything else goes straight through, as before
+  const applyVolume = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
+  const onVolumeChange = (v: number) => { guardVolume(v, applyVolume); };
 
   const canSeek =
     currentSource &&
@@ -5932,7 +5935,9 @@ export function AudioPlayer() {
         /* 2026-11-09 (owner: branches like Shufersal need no video): on the desktop app the per-device Artwork ⇄ Video button
            decides — "Artwork" mounts NO YouTube clip at all (before, only the MPV-video path above obeyed it and the clip kept
            streaming behind the picture). A plain browser has no such button → unchanged. Display-only; audio is never touched. */
-        (!isDesktopMode || desktopBgMode === "video") ? (
+        (!isDesktopMode || desktopBgMode === "video") &&
+        /* 2026-11-16 (phone app): /mobile is a remote with no deck on screen — never stream a muted clip behind nothing (data, battery, decode). Display-only; audio untouched. */
+        !pathname?.startsWith("/mobile") ? (
         <div
           className="sb-deck-video-bg pointer-events-none absolute -z-[1] inset-y-[5px] right-[9px] left-[42%] overflow-hidden rounded-r-[14px]"
           aria-hidden

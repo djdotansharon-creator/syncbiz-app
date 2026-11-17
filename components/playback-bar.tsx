@@ -1,5 +1,6 @@
 "use client";
 
+import { guardVolume } from "@/lib/schedule-volume";
 import { PlaybackDockSurface } from "@/components/player-surface/playback-dock-surface";
 import "@/components/player-surface/playback-dock-surface.css";
 import { buildBrowserPlaybackDockProps } from "@/lib/player-surface/map-browser-playback-dock";
@@ -40,7 +41,7 @@ export function PlaybackBar() {
           title: titleText,
           subtitle: statusSubtext,
           volume: ms?.volume ?? 80,
-          onVolumeChange: deviceCtx!.setVolumeOrSend,
+          onVolumeChange: (v: number) => { guardVolume(v, deviceCtx!.setVolumeOrSend); }, // a block's own volume: a raise above it asks first
           hasSource,
           hasPrevNext,
           play: deviceCtx!.playOrSend,
@@ -104,7 +105,7 @@ export function PlaybackBar() {
         title: titleText,
         subtitle: statusSubtext,
         volume,
-        onVolumeChange: setVolume,
+        onVolumeChange: (v: number) => { guardVolume(v, setVolume); },
         hasSource,
         hasPrevNext,
         play,

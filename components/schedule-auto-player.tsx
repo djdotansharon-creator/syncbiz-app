@@ -9,9 +9,11 @@ import {
   getScheduleAutoOptOutIds,
   SCHEDULE_AUTO_PREFS_EVENT,
 } from "@/lib/schedule-auto-preferences";
-import { decideScheduleAction, todaysFiredKeys } from "@/lib/schedule-actions";
+import { decideScheduleAction, playingBlockAt, todaysFiredKeys } from "@/lib/schedule-actions";
+import { applyBlockVolume, setScheduleVolumeLock } from "@/lib/schedule-volume";
 import { SCHEDULE_SWITCH_EVENT } from "@/lib/schedule-switch-client";
 import { clearScheduleDriven } from "@/lib/schedule-driven";
+import { clearQuietStopTries, noteQuietStopTry, quietStopFinished, waitForQuiet } from "@/lib/schedule-quiet-stop";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import type { Schedule, Source } from "@/lib/types";
 
@@ -45,7 +47,7 @@ function readCachedSchedules(branch: string): { schedules: Schedule[]; enabled: 
 export function ScheduleAutoPlayer() {
   const router = useRouter();
   const { isRestoring } = usePlayback();
-  const { stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady } = useSchedulePlaybackHandlers();
+  const { stop, stopScheduled, isAudible, getVolume, setVolume, setQueue, playSource, setLastMessage, route, bankStreamReady } = useSchedulePlaybackHandlers();
   // 2026-11-15 (owner: "the schedule I set for one player affects all the others"): a window runs ONLY the schedules of the branch it plays for / controls. On the desktop the branch is
   // MAIN's (null until the bridge answers — then nothing starts and the next poll retries); a browser / phone has "default" unless a branch was chosen in Control Room.
   const stationBranch = useStationBranchId();
@@ -55,9 +57,9 @@ export function ScheduleAutoPlayer() {
   // They were effect deps, so the effect — and its immediate tick() → GET /api/schedules — re-ran on every update
   // (TEST logs: up to 8 requests/s per app). The latest handlers now live in a ref read at fire time; the polling
   // effect depends only on the engine switch + restore state → exactly one request per POLL_MS.
-  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), setQueue, playSource, setLastMessage, route, bankStreamReady });
+  const handlersRef = useRef({ router, stop, stopScheduled: undefined as undefined | (() => void), isAudible: undefined as undefined | (() => boolean), getVolume: undefined as undefined | (() => number | null), setVolume: undefined as undefined | ((v: number) => void), setQueue, playSource, setLastMessage, route, bankStreamReady });
   useEffect(() => {
-    handlersRef.current = { router, stop, stopScheduled, setQueue, playSource, setLastMessage, route, bankStreamReady };
+    handlersRef.current = { router, stop, stopScheduled, isAudible, getVolume, setVolume, setQueue, playSource, setLastMessage, route, bankStreamReady };
   });
 
   useEffect(() => {
@@ -109,8 +111,14 @@ export function ScheduleAutoPlayer() {
           }
         }
         wasEnabled.current = enabled;
-        if (!enabled) return; // the branch's schedule is off: nothing starts, nothing stops
-        if (!Array.isArray(schedules) || schedules.length === 0) return;
+        if (!enabled) {
+          setScheduleVolumeLock(null); // the schedule is off: no block's volume is in force
+          return; // the branch's schedule is off: nothing starts, nothing stops
+        }
+        if (!Array.isArray(schedules) || schedules.length === 0) {
+          setScheduleVolumeLock(null);
+          return;
+        }
 
         const now = new Date();
         const skipIds = getScheduleAutoOptOutIds();
@@ -121,7 +129,15 @@ export function ScheduleAutoPlayer() {
             return false;
           }
         };
+        // a block's own VOLUME (owner 2026-11-17): the block in force tells the volume guard what the setting is (a raise above it is asked about), and after a restart inside the block the setting is put back
+        const inForce = playingBlockAt(schedules, now, skipIds);
+        const blockVolume = inForce && typeof inForce.volume === "number" ? inForce.volume : null;
+        setScheduleVolumeLock(inForce && blockVolume !== null ? { blockId: inForce.id, name: inForce.name ?? "", volume: blockVolume } : null);
         const action = decideScheduleAction({ schedules, now, skipIds, hasFired, reassertSilence: firstLook });
+        if (firstLook && blockVolume !== null && handlersRef.current.getVolume?.() !== blockVolume) {
+          const set = applyBlockVolume(handlersRef.current, blockVolume);
+          if (set !== null) console.info(`[VONO schedule] restart inside "${inForce?.name ?? inForce?.id}" — its volume ${set}% put back`);
+        }
         firstLook = false;
         if (!action) return;
         if (action.kind === "stop") {
@@ -132,7 +148,16 @@ export function ScheduleAutoPlayer() {
             return; // retried next poll
           }
           clearScheduleDriven(); // a quiet block: the schedule's music is over, nothing is lined up after it
+          // The stop is a COMMAND (on a station playing a URL session it goes to MAIN through the cloud socket, and a command that leaves while the socket is closed is lost without a word).
+          // It counts as done — and the block is marked for today — only when the music has really gone quiet; otherwise the next poll repeats it (lib/schedule-quiet-stop.ts).
+          const tryNo = noteQuietStopTry(action.fireKeys[0] ?? action.schedule.id);
+          const quiet = await waitForQuiet(() => handlersRef.current.isAudible?.() === true, { cancelled: () => cancelled });
+          if (cancelled) return;
+          const finished = quietStopFinished(quiet, tryNo);
+          console.info(`[VONO schedule] quiet block "${action.schedule.name ?? action.schedule.id}" — stop sent (try ${tryNo}); ${quiet ? "the music is quiet" : finished ? "still playing — giving up so it never fights a person" : "still playing — will repeat at the next poll"}`);
+          if (!finished) return;
           for (const k of action.fireKeys) {
+            clearQuietStopTries(k);
             try {
               localStorage.setItem(k, "1");
             } catch {
@@ -142,6 +167,11 @@ export function ScheduleAutoPlayer() {
           return;
         }
         const winner = action.schedule;
+        // the block's own volume (or the volume the player had before a schedule changed it) is set BEFORE the music starts, so a quieter block never begins at the old, louder level
+        {
+          const set = applyBlockVolume(handlersRef.current, typeof winner.volume === "number" ? winner.volume : null);
+          if (set !== null) console.info(`[VONO schedule] "${winner.name ?? winner.id}" starts — volume ${set}%`);
+        }
 
         let list: Source[] = [];
         try {

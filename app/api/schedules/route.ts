@@ -7,6 +7,7 @@ import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import { schedulesForBranch } from "@/lib/schedule-branch-scope";
 import { getScheduleSwitch } from "@/lib/branch-schedule-switch";
+import { normalizeScheduleVolume } from "@/lib/schedule-volume-value";
 import { getCanonicalLegacyBranchId } from "@/lib/branch-resolver";
 import { prisma } from "@/lib/prisma";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
@@ -120,6 +121,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
+  const volume = normalizeScheduleVolume((data as { volume?: unknown }).volume);
+  if (volume === "invalid") return NextResponse.json({ error: "volume must be a whole number from 0 to 100" }, { status: 400 });
+
   const endRaw = data.endTimeLocal;
   const endTimeLocal =
     typeof endRaw === "string" && endRaw.trim().length > 0 ? normalizeScheduleTimeLocal(endRaw) : "23:59";
@@ -142,6 +146,7 @@ export async function POST(req: NextRequest) {
     timezone: data.timezone,
     requestedStartPosition: data.requestedStartPosition,
     requestedEndPosition: data.requestedEndPosition,
+    volume: volume ?? undefined,
     createdBy: uid ?? undefined,
     accountId: resolveAccountScope(user.tenantId),
   });

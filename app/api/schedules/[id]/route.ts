@@ -5,6 +5,7 @@ import { db } from "@/lib/store";
 import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from "@/lib/auth-helpers";
 import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
+import { normalizeScheduleVolume } from "@/lib/schedule-volume-value";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
 function resolveAccountScope(userTenantId: string): string {
@@ -98,7 +99,11 @@ export async function PATCH(
     }
   }
 
+  const volume = normalizeScheduleVolume((data as { volume?: unknown }).volume);
+  if (volume === "invalid") return NextResponse.json({ error: "volume must be a whole number from 0 to 100" }, { status: 400 });
+
   const updates: Partial<Schedule> = {};
+  if (volume !== undefined) updates.volume = volume; // null clears it
   if (data.name !== undefined) updates.name = data.name;
   if (data.branchId !== undefined) updates.branchId = data.branchId;
   if (data.targetType !== undefined) updates.targetType = data.targetType;

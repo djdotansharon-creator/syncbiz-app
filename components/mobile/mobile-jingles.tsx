@@ -6,7 +6,7 @@ import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "@/components/jingles-cont
 import { fetchCloudPads, padsFromCloud, savePadToCloud } from "@/components/jingles-control/cloud-pads";
 import type { SamplerPadItem, JingleBellStyle } from "@/components/jingles-control/types";
 import { useVoiceRecorder } from "@/components/mobile/use-voice-recorder";
-import { useDevicePlayer } from "@/lib/device-player-context";
+import { useMobileFleet } from "@/lib/mobile-fleet";
 
 /**
  * Mobile Jingles — one area for BOTH ways to make an announcement:
@@ -88,7 +88,7 @@ export function MobileJingles() {
   const padsRef = useRef<HTMLElement | null>(null);
 
   const recorder = useVoiceRecorder();
-  const deviceCtx = useDevicePlayer();
+  const fleet = useMobileFleet(); // the phone app: a pad plays on the branch that is OPEN (not on the branch the account is signed in to)
 
   const refreshPads = useCallback(async () => {
     try {
@@ -246,17 +246,20 @@ export function MobileJingles() {
       }
       // Normal tap: play the pad on the branch MASTER via the EXISTING remote command. Not on the phone.
       if (pad.url && pad.url.trim()) {
-        if (deviceCtx?.sendCommandToMaster) {
-          deviceCtx.sendCommandToMaster("PLAY_INTERRUPT", { url: pad.url });
-          setPadMsg(`Sent “${pad.label}” to the branch player ▶`);
+        if (!fleet.selected) {
+          setPadMsg("Pick a branch first.");
+        } else if (!fleet.canControl) {
+          setPadMsg(`${fleet.selected.name} is offline.`);
+        } else if (fleet.interrupt(pad.url)) {
+          setPadMsg(`Sent “${pad.label}” to ${fleet.selected.name} ▶`);
         } else {
-          setPadMsg("Connect to a branch player to play pads.");
+          setPadMsg("Couldn't reach the branch player.");
         }
       } else {
         setPadMsg("This pad is empty. Save a jingle, then tap a pad to assign it.");
       }
     },
-    [assignMode, result, derivedTitle, refreshPads, deviceCtx, bellStyle],
+    [assignMode, result, derivedTitle, refreshPads, fleet, bellStyle],
   );
 
   const recPhase = recorder.phase;

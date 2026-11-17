@@ -45,7 +45,10 @@ function pickMimeType(): string {
  * Entirely inside SyncBiz — no leaving the app. Works in the PWA on Android AND
  * iOS. Hidden until AUDD_API_TOKEN is configured.
  */
-export function MobileListenIdentify() {
+/** the phone app (2026-11-16) sends the song to the branch it has OPEN (not to the branch the account happens to be signed in to): `route` replaces the legacy ladder below */
+export type MobileSongRoute = { play: (u: UnifiedSource) => void; queue: (u: UnifiedSource) => void };
+
+export function MobileListenIdentify({ route }: { route?: MobileSongRoute | null } = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("listening");
@@ -125,11 +128,12 @@ export function MobileListenIdentify() {
   /** Add-to-queue ladder — CONTROLLER forwards to MASTER, player queues locally. */
   const queueSource = useCallback(
     (u: UnifiedSource) => {
-      if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
+      if (route) route.queue(u);
+      else if (deviceCtx?.queueNextOrSend) deviceCtx.queueNextOrSend(u);
       else if (isController && station.isCrossDevice) station.sendQueueNext(u);
       else playback.addPlayNextSources([u]);
     },
-    [deviceCtx, isController, station, playback],
+    [route, deviceCtx, isController, station, playback],
   );
 
   /** Resolve the recognized song to YouTube and AUTO-ADD it to the queue. */
@@ -294,11 +298,12 @@ export function MobileListenIdentify() {
   const playNow = useCallback(
     () =>
       withExtra((u) => {
-        if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(u);
+        if (route) route.play(u);
+        else if (deviceCtx?.playSourceOrSend) deviceCtx.playSourceOrSend(u);
         else if (isController && station.isCrossDevice) station.sendPlaySource(u);
         else playback.playSource(u);
       }, "Playing now"),
-    [withExtra, deviceCtx, isController, station, playback],
+    [route, withExtra, deviceCtx, isController, station, playback],
   );
   const addToLibrary = useCallback(
     () => withExtra((u) => mobileSources.addSource(u), "Added to your library"),
