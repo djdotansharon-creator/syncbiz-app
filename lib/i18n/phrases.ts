@@ -1043,6 +1043,16 @@ export const HE_PHRASES: Record<string, string> = {
   "Your library is empty": "הספרייה ריקה",
   "{name} is offline": "{name} לא מחובר",
   "{playing} playing · {online} of {total} online": "מנגנים: {playing} · מחוברים: {online} מתוך {total}",
+  // ── Phone app round 2 (2026-11-17) ──
+  "Couldn't load the plan": "לא הצלחנו לטעון את התוכנית",
+  "Length": "אורך",
+  "Link copied": "הקישור הועתק",
+  "Local file": "קובץ מקומי",
+  "Nothing is planned for today": "אין תוכנית להיום",
+  "Source": "מקור",
+  "Stream": "שידור",
+  "The plan is edited on the computer.": "את התוכנית עורכים במחשב.",
+  "Until {time}": "עד {time}",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };

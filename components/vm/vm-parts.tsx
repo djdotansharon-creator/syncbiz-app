@@ -15,11 +15,16 @@ export function fmtTime(sec: number | null | undefined): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
 }
 
-/** a stable colour pair from a name — the tile a branch / playlist wears when it has no picture */
-function tileFor(name: string): { background: string; initials: string } {
+/** a stable hue (0–359) from a name — the colour a branch / playlist / song wears when it has no picture (the tile, and the Now Playing background) */
+export function nameHue(name: string): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  const a = h % 360;
+  return h % 360;
+}
+
+/** a stable colour pair from a name — the tile a branch / playlist wears when it has no picture */
+function tileFor(name: string): { background: string; initials: string } {
+  const a = nameHue(name);
   const b = (a + 38) % 360;
   const words = name.trim().split(/\s+/).filter(Boolean);
   const initials = (words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? "").slice(0, 2)).toUpperCase();

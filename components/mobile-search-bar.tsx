@@ -13,6 +13,7 @@ import { useTranslations } from "@/lib/locale-context";
 import type { UnifiedSource, RadioStream } from "@/lib/source-types";
 import type { Playlist } from "@/lib/playlist-types";
 import type { ApiContentScope } from "@/lib/content-scope-filters";
+import { VmSearchView } from "@/components/vm/vm-search-view";
 
 type Props = {
   sources: UnifiedSource[];
@@ -36,6 +37,10 @@ type Props = {
    * Desktop callers leave this undefined/false to keep the existing behavior.
    */
   hideRadio?: boolean;
+  /** "vm" = the phone app's own drawing of the field and the results (components/vm/vm-search-view.tsx); the search itself is the same */
+  variant?: "vm";
+  /** "Play next" for a found song (the phone app's menu) */
+  onQueue?: (source: UnifiedSource) => void;
 };
 
 export function MobileSearchBar({
@@ -49,6 +54,8 @@ export function MobileSearchBar({
   editReturnTo,
   unifiedContentScope = "branch",
   hideRadio = false,
+  variant,
+  onQueue,
 }: Props) {
   const { t } = useTranslations();
   const [query, setQuery] = useState("");
@@ -276,6 +283,44 @@ export function MobileSearchBar({
     [query, onAdd, onSendToPlayer, unifiedContentScope]
   );
 
+  const handleQueueYoutube = useCallback(
+    async (r: YouTubeSearchResult) => {
+      const genre = inferGenre(r.title, query);
+      const playable =
+        r.type === "youtube" ? await resolveYouTubePlayableUrlForSearch(r.url) : r.url;
+      const created = await createPlaylistFromUrl(
+        playable,
+        {
+          title: r.title,
+          genre,
+          cover: r.cover,
+          type: r.type,
+          viewCount: r.viewCount,
+          durationSeconds: r.durationSeconds,
+        },
+        unifiedContentScope === "owner_personal"
+          ? { playlistOwnershipScope: "owner_personal" }
+          : undefined
+      );
+      if (created) {
+        savePlaylistToLocal(created);
+        const u: UnifiedSource = {
+          id: `pl-${created.id}`,
+          title: created.name,
+          genre: created.genre || "Mixed",
+          cover: created.thumbnail || null,
+          type: "youtube",
+          url: created.url,
+          origin: "playlist",
+          playlist: created,
+        };
+        onAdd(u);
+        onQueue?.(u);
+      }
+    },
+    [query, onAdd, onQueue, unifiedContentScope]
+  );
+
   const handleAddRadio = useCallback(
     async (r: RadioSearchResult) => {
       if (unifiedContentScope === "owner_personal") return;
@@ -355,6 +400,27 @@ export function MobileSearchBar({
   const handleCopyUrl = useCallback((url: string) => {
     navigator.clipboard?.writeText(url);
   }, []);
+
+  if (variant === "vm") {
+    return (
+      <VmSearchView
+        query={query}
+        onQuery={(q) => {
+          setQuery(q);
+          setShowResults(true);
+        }}
+        placeholder={placeholder}
+        hasQuery={hasQuery}
+        searching={searching}
+        internal={internalResults}
+        youtube={youtubeResults}
+        onPlayYoutube={(r) => void handlePlayYoutube(r)}
+        onQueueYoutube={(r) => void handleQueueYoutube(r)}
+        onAddYoutube={(r) => void handleAddYoutube(r)}
+        onCopy={handleCopyUrl}
+      />
+    );
+  }
 
   return (
     <div className="relative" ref={panelRef}>

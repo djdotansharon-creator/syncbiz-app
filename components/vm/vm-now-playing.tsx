@@ -5,6 +5,7 @@ import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconRepeatOne, IconShuffle, IconVolumeHigh, IconVolumeLow, IconWifiOff } from "@/components/vm/vm-icons";
 import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/components/vm/vm-parts";
+import { useNowTone } from "@/components/vm/vm-tone";
 
 /**
  * NOW PLAYING for the SELECTED branch — one component for the full-height sheet (opened from the mini-player) and for a branch's own screen.
@@ -13,6 +14,7 @@ import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/
 export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => void; /** the branch's own screen already says which branch this is */ hideWho?: boolean }) {
   const f = useMobileFleet();
   const tr = useTr();
+  const tone = useNowTone();
   const b = f.selected;
   const shown = f.display.shown;
   const playing = shown?.status === "playing";
@@ -54,7 +56,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
   const idle = !shown || shown.status === "idle" || shown.status === "stopped";
 
   return (
-    <div className="vm-np">
+    <div className="vm-np" data-tone="" style={tone}>
       {hideWho ? null : (
         <button type="button" className="vm-np-who" onClick={onPickBranch} disabled={!onPickBranch} aria-label={tr("Choose branch")}>
           <span className="vm-dot" data-s={b.status} />

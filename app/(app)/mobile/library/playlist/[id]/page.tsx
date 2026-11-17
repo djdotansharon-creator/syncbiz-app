@@ -9,12 +9,13 @@ import { useTr } from "@/lib/i18n/use-tr";
 import { getPlaylistTracks, type PlaylistTrack } from "@/lib/playlist-types";
 import type { SourceProviderType, UnifiedSource } from "@/lib/source-types";
 import { VmPage, VmTarget, useVmUi } from "@/components/vm/vm-ui";
-import { VmCover, VmEq } from "@/components/vm/vm-parts";
-import { IconChevronBack, IconLibrary, IconPause, IconPlay, IconPlus } from "@/components/vm/vm-icons";
-import { sourceCover } from "@/components/vm/vm-source-row";
+import { VmCover, VmEq, fmtTime } from "@/components/vm/vm-parts";
+import { useOpenActions } from "@/components/vm/vm-actions";
+import { IconChevronBack, IconLibrary, IconMore, IconPause, IconPlay, IconPlus, IconUpNext } from "@/components/vm/vm-icons";
+import { sourceCover, useSendSource } from "@/components/vm/vm-source-row";
 
 /**
- * ONE PLAYLIST — its songs, with "Play all" and a play / play-next button per song, sent to the branch that is open.
+ * ONE PLAYLIST — its songs, with "Play all"; a song plays when it is tapped, its ⋯ has play now / play next / details (owner 2026-11-17), sent to the branch that is open.
  * A single song is sent as its own one-URL source whose id carries the playlist id (so "what is playing" lights the right row).
  */
 export default function MobilePlaylistPage() {
@@ -24,6 +25,8 @@ export default function MobilePlaylistPage() {
   const f = useMobileFleet();
   const tr = useTr();
   const ui = useVmUi();
+  const send = useSendSource();
+  const openActions = useOpenActions();
 
   const source = useMemo(() => sources.find((s) => s.id === id) ?? null, [sources, id]);
   const playlist = source?.playlist ?? null;
@@ -32,11 +35,6 @@ export default function MobilePlaylistPage() {
   const shown = f.display.shown;
   const playlistActive = !!source && !!shown && shown.status === "playing" && (shown.currentSource?.id === source.id || shown.currentSource?.id?.startsWith(`${source.id}:`) === true);
 
-  const guard = (): boolean => {
-    if (!f.selected) { ui.openPicker(); return false; }
-    if (!f.canControl) { ui.toast(tr("{name} is offline", { name: f.selected.name })); return false; }
-    return true;
-  };
   const synth = (t: PlaylistTrack): UnifiedSource => ({
     id: `${playlist!.id}:track:${t.id}`,
     title: t.name,
@@ -77,40 +75,52 @@ export default function MobilePlaylistPage() {
                 type="button"
                 className="vm-pill"
                 disabled={!tracks.length}
-                onClick={() => {
-                  if (!guard()) return;
-                  if (playlistActive) f.pause();
-                  else { f.playSource(source); ui.toast(tr("Playing on {name}", { name: f.selected!.name })); }
-                }}
+                onClick={() => (playlistActive ? send.pause() : send.playNow(source))}
               >
                 {playlistActive ? <IconPause /> : <IconPlay />}
                 {playlistActive ? tr("Pause") : tr("Play all")}
               </button>
-              <button type="button" className="vm-pill" data-quiet disabled={!tracks.length} onClick={() => { if (guard()) { f.queueNext(source); ui.toast(tr("Will play next on {name}", { name: f.selected!.name })); } }}>
+              <button type="button" className="vm-pill" data-quiet disabled={!tracks.length} onClick={() => send.playNext(source)}>
                 <IconPlus />
                 {tr("Play next")}
               </button>
             </div>
           </div>
           <VmTarget />
-          <div style={{ padding: "6px 14px 0" }}>
+          <div style={{ paddingTop: 6 }}>
             {tracks.map((t, i) => {
               const sid = `${playlist!.id}:track:${t.id}`;
               const active = !!shown && shown.status === "playing" && shown.currentSource?.id === sid;
+              const cover = t.cover || playlist!.thumbnail || null;
+              const menu = () =>
+                openActions({
+                  cover,
+                  title: t.name,
+                  sub: source.title,
+                  actions: [
+                    active
+                      ? { key: "pause", icon: <IconPause />, label: tr("Pause"), run: send.pause }
+                      : { key: "now", icon: <IconPlay />, label: tr("Play now"), run: () => send.playNow(synth(t)) },
+                    { key: "next", icon: <IconUpNext />, label: tr("Play next"), run: () => send.playNext(synth(t)) },
+                  ],
+                  details: [
+                    { label: tr("Type"), value: tr("Song") },
+                    ...(typeof t.durationSeconds === "number" && t.durationSeconds > 0 ? [{ label: tr("Length"), value: fmtTime(t.durationSeconds) }] : []),
+                  ],
+                });
               return (
-                <div key={t.id} className="vm-row" data-active={active ? "" : undefined}>
-                  <VmCover src={t.cover || playlist!.thumbnail || null} name={t.name} size={46} radius={11} />
-                  <div className="vm-row-text">
-                    <div className="vm-row-title vm-bdi" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {active ? <VmEq /> : <span style={{ color: "var(--vm-text3)", fontSize: 13, minWidth: 18 }}>{i + 1}</span>}
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
-                    </div>
-                  </div>
-                  <button type="button" className="vm-add" aria-label={tr("Play next")} onClick={() => { if (guard()) { f.queueNext(synth(t)); ui.toast(tr("Will play next on {name}", { name: f.selected!.name })); } }}>
-                    <IconPlus />
+                <div key={t.id} className="vm-src" data-active={active ? "" : undefined}>
+                  <button type="button" className="vm-src-main" onClick={() => (active ? ui.openNowPlaying() : send.playNow(synth(t)))}>
+                    <VmCover src={cover} name={t.name} size={46} radius={11} />
+                    <span className="vm-src-text">
+                      <span className="vm-src-title vm-bdi" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {active ? <VmEq /> : <span style={{ color: "var(--vm-text3)", fontSize: 13, minWidth: 18 }}>{i + 1}</span>}
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+                      </span>
+                    </span>
                   </button>
-                  <button type="button" className="vm-add" aria-label={tr("Play now")} style={{ background: "var(--vm-text)", color: "#111114" }} onClick={() => { if (!guard()) return; if (active) f.pause(); else { f.playSource(synth(t)); ui.toast(tr("Playing on {name}", { name: f.selected!.name })); } }}>
-                    {active ? <IconPause /> : <IconPlay />}
+                  <button type="button" className="vm-more" onClick={menu} aria-label={tr("More")}>
+                    <IconMore />
                   </button>
                 </div>
               );

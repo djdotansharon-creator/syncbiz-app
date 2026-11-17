@@ -3,13 +3,14 @@
 import "@/app/mobile-app.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PwaRegister } from "@/components/pwa-register";
 import { useMobileFleet, type FleetBranch } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { useMobileRole } from "@/lib/mobile-role-context";
 import { VmNowPlaying } from "@/components/vm/vm-now-playing";
 import { VmCover, VmEq, VmMarquee, branchLine } from "@/components/vm/vm-parts";
+import { useNowTone } from "@/components/vm/vm-tone";
 import { IconCheck, IconLibrary, IconNext, IconPause, IconPerson, IconPlay, IconSearch, IconStore, IconSwap } from "@/components/vm/vm-icons";
 
 /* ───────────────────────────── the phone app's own UI state ───────────────────────────── */
@@ -18,6 +19,9 @@ type VmUi = {
   openNowPlaying: () => void;
   openPicker: () => void;
   toast: (message: string) => void;
+  /** a short bottom sheet over everything (a song's menu): the shell shows `node` under `label` until `closeSheet` */
+  openSheet: (label: string, node: ReactNode) => void;
+  closeSheet: () => void;
 };
 const VmUiContext = createContext<VmUi | null>(null);
 export function useVmUi(): VmUi {
@@ -64,7 +68,7 @@ export function VmPage({ title, subtitle, lead, end, barTitle, children }: { tit
 
 /* ───────────────────────────── a bottom sheet that can be pulled down ───────────────────────────── */
 
-export function VmSheet({ open, onClose, label, height, above, children }: { open: boolean; onClose: () => void; label: string; height?: string; above?: boolean; children: ReactNode }) {
+export function VmSheet({ open, onClose, label, height, above, tone, children }: { open: boolean; onClose: () => void; label: string; height?: string; above?: boolean; /** the Now Playing sheet: drawn in the song's colours (`style` carries the colour variables) */ tone?: CSSProperties; children: ReactNode }) {
   // the content is mounted while the sheet is open and for the 0.5 s it takes to slide away (an idle sheet costs nothing: the player's clock ticks 4× a second)
   const [slidingAway, setSlidingAway] = useState(false);
   const [dy, setDy] = useState(0);
@@ -91,7 +95,7 @@ export function VmSheet({ open, onClose, label, height, above, children }: { ope
     <>
       <div className="vm-sheet-back" data-open={open ? "" : undefined} data-above={above ? "" : undefined} onClick={onClose} />
       <div
-        className="vm-sheet"
+        className={`vm-sheet${tone ? " vm-sheet--np" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={label}
@@ -99,7 +103,8 @@ export function VmSheet({ open, onClose, label, height, above, children }: { ope
         data-open={open ? "" : undefined}
         data-above={above ? "" : undefined}
         data-drag={dragging ? "" : undefined}
-        style={{ ["--vm-drag" as string]: `${dy}px`, ...(height ? { ["--vm-sheet-h" as string]: height } : {}) }}
+        data-auto={height === "auto" ? "" : undefined}
+        style={{ ["--vm-drag" as string]: `${dy}px`, ...(height ? { ["--vm-sheet-h" as string]: height } : {}), ...tone }}
       >
         <div
           className="vm-grab"
@@ -207,6 +212,7 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const f = useMobileFleet();
   const tr = useTr();
   const b = f.selected;
+  const tone = useNowTone();
   if (!b) return null;
   const s = f.display.shown;
   const playing = s?.status === "playing";
@@ -217,6 +223,8 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   return (
     <div
       className="vm-mini"
+      data-tone=""
+      style={tone}
       role="button"
       tabIndex={0}
       aria-label={tr("Open the player")}
@@ -281,13 +289,28 @@ function Dock({ onOpenNowPlaying }: { onOpenNowPlaying: () => void }) {
 
 /** screens that still use the older form components (Tailwind slate / sky): their fields and cards are re-skinned to the phone app's look by CSS (`[data-legacy]`) */
 const LEGACY_ROUTE = /^\/mobile\/(jingles|scheduling|announcer|search|shazam-share)(\/|$)/;
+/** …and of those, the ones that lose their frames too (the Announcer keeps its record ring: that ring IS the button) */
+const FLAT_ROUTE = /^\/mobile\/(jingles|search|shazam-share)(\/|$)/;
+
+/** the Now Playing sheet: its background is the colour of the song that plays */
+function NowPlayingSheet({ open, onClose, onPickBranch }: { open: boolean; onClose: () => void; onPickBranch: () => void }) {
+  const tr = useTr();
+  const tone = useNowTone();
+  return (
+    <VmSheet open={open} onClose={onClose} label={tr("Now playing")} tone={tone}>
+      <VmNowPlaying onPickBranch={onPickBranch} />
+    </VmSheet>
+  );
+}
 
 export function VmShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "";
-  const tr = useTr();
   const [np, setNp] = useState(false);
   const [picker, setPicker] = useState(false);
   const [msg, setMsg] = useState<{ id: number; text: string } | null>(null);
+  // a song's menu (and any short sheet): the node stays until the next one opens, so the sheet can slide away with its content still in it
+  const [sheet, setSheet] = useState<{ label: string; node: ReactNode } | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // owner 2026-11-16: no local player on the phone for now — an old "Player" choice saved on this phone is put back to Controller
@@ -310,24 +333,31 @@ export function VmShell({ children }: { children: ReactNode }) {
       openNowPlaying: () => setNp(true),
       openPicker: () => setPicker(true),
       toast: (text: string) => setMsg({ id: Date.now(), text }),
+      openSheet: (label: string, node: ReactNode) => {
+        setSheet({ label, node });
+        setSheetOpen(true);
+      },
+      closeSheet: () => setSheetOpen(false),
     }),
     [],
   );
   const closeNp = useCallback(() => setNp(false), []);
   const closePicker = useCallback(() => setPicker(false), []);
+  const closeSheet = useCallback(() => setSheetOpen(false), []);
 
   return (
     <VmUiContext.Provider value={ui}>
       <div className="vm">
         <PwaRegister />
-        <div className="vm-scroll" id="vm-scroll" ref={scrollRef} data-legacy={LEGACY_ROUTE.test(pathname) ? "" : undefined}>
+        <div className="vm-scroll" id="vm-scroll" ref={scrollRef} data-legacy={LEGACY_ROUTE.test(pathname) ? "" : undefined} data-flat={FLAT_ROUTE.test(pathname) ? "" : undefined}>
           {children}
         </div>
         <Dock onOpenNowPlaying={ui.openNowPlaying} />
-        <VmSheet open={np} onClose={closeNp} label={tr("Now playing")}>
-          <VmNowPlaying onPickBranch={ui.openPicker} />
-        </VmSheet>
+        <NowPlayingSheet open={np} onClose={closeNp} onPickBranch={ui.openPicker} />
         <BranchPicker open={picker} onClose={closePicker} />
+        <VmSheet open={sheetOpen} onClose={closeSheet} label={sheet?.label ?? ""} height="auto" above>
+          {sheet?.node}
+        </VmSheet>
         {msg ? (
           <div className="vm-toast" key={msg.id} role="status">
             <span>{msg.text}</span>

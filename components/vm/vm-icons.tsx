@@ -188,3 +188,17 @@ export const IconSignOut = (p: SVGProps<SVGSVGElement>) => (
     <path d="M15 8l4 4-4 4M19 12H9.5" />
   </Svg>
 );
+/** the three dots of a row's menu (frameless; the hit area is the button around it) */
+export const IconMore = (p: SVGProps<SVGSVGElement>) => (
+  <Svg solid {...p}>
+    <circle cx="5.5" cy="12" r="1.9" />
+    <circle cx="12" cy="12" r="1.9" />
+    <circle cx="18.5" cy="12" r="1.9" />
+  </Svg>
+);
+export const IconLink = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
+  </Svg>
+);

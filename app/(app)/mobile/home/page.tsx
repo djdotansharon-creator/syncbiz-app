@@ -28,11 +28,16 @@ function BranchCard({ b, onToggle }: { b: FleetBranch; onToggle: (id: string) =>
             {playing ? <VmEq /> : null}
             {line.live ? <span style={{ minWidth: 0, flex: 1 }}><VmMarquee text={line.text} /></span> : <span className="vm-bdi" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{line.text}</span>}
           </span>
-          <span className="vm-card-meta">
-            <span className="vm-dot" data-s={b.status} />
-            <span>{statusWord(b.status, tr)}</span>
-            {b.city ? <span className="vm-bdi">· {b.city}</span> : null}
-          </span>
+          {/* a branch that plays already says so with its live bars: no second "Playing" and no green dot under them (owner 2026-11-17) */}
+          {playing ? (
+            b.city ? <span className="vm-card-meta"><span className="vm-bdi">{b.city}</span></span> : null
+          ) : (
+            <span className="vm-card-meta">
+              <span className="vm-dot" data-s={b.status} />
+              <span>{statusWord(b.status, tr)}</span>
+              {b.city ? <span className="vm-bdi">· {b.city}</span> : null}
+            </span>
+          )}
         </span>
       </Link>
       {b.online ? (

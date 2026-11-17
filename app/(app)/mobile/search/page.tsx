@@ -47,6 +47,8 @@ export default function MobileSearchPage() {
           onAdd={() => reload()}
           onPlay={route.play}
           onSendToPlayer={route.play}
+          onQueue={route.queue}
+          variant="vm"
           placeholder={tr("Search songs and playlists…")}
           isControllerMode
           editReturnTo="/mobile/search"

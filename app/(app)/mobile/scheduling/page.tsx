@@ -1,219 +1,156 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { MobilePageHeader } from "@/components/mobile/mobile-page-header";
-import { MobileSectionHeader } from "@/components/mobile/mobile-section-header";
+import { useEffect, useMemo, useState } from "react";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useMobileFleet } from "@/lib/mobile-fleet";
-import type { Schedule, ScheduleTargetType } from "@/lib/types";
+import { useLocale } from "@/lib/locale-context";
+import { useTr } from "@/lib/i18n/use-tr";
+import { buildDayScenes, formatMinutes, nowAndNext, weekDatesFor, DAY_MINUTES, type Scene } from "@/lib/schedules-timeline";
+import type { Schedule } from "@/lib/types";
+import { VmPage } from "@/components/vm/vm-ui";
+import { VmCover } from "@/components/vm/vm-parts";
+import { VmScheduleSwitchLine } from "@/components/vm/vm-schedule-switch";
+import { IconChevronBack, IconUpNext } from "@/components/vm/vm-icons";
+import { playlistSeconds, sourceCover } from "@/components/vm/vm-source-row";
 
 /**
- * Mobile Scheduling — READ ONLY for this first version.
- *
- * Scope (per product decision):
- *   - list upcoming schedules with time / day / target / status
- *   - show an "Edit on desktop" CTA — all create/update flows stay on desktop
- *
- * We rely on the existing `/api/schedules` GET endpoint. Edit flows are
- * intentionally NOT wired up here; there is no form, no delete, no toggle.
+ * TODAY'S PLAN (owner 2026-11-17: "did you fix the schedule display?" — before it was only recoloured). The day of the OPEN branch as a calm list, no frames: what starts when and until when,
+ * the block that is on now lifted off the screen, the next one marked, quiet times (closing) in a quieter hand. The branch's schedule switch sits on top. Read only: the plan is made on
+ * the computer (Schedules). The scenes are the Schedules Studio's own (`buildDayScenes`), so the phone and the computer never disagree about what plays when.
  */
 export default function MobileSchedulingPage() {
   const { sources } = useMobileSources();
-  // the schedule of the branch that is OPEN (a schedule belongs to one branch's player)
   const fleet = useMobileFleet();
+  const tr = useTr();
+  const { locale } = useLocale();
+  // the schedule of the branch that is OPEN (a schedule belongs to one branch's player)
   const branchId = fleet.selected?.id ?? null;
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("loading");
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const t0 = setTimeout(tick, 0);
+    const id = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     if (!fleet.loaded) return;
     let alive = true;
-    fetch(branchId ? `/api/schedules?branchId=${encodeURIComponent(branchId)}` : "/api/schedules", { cache: "no-store" })
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = (await r.json()) as Schedule[];
-        if (!alive) return;
-        setSchedules(Array.isArray(data) ? data : []);
-        setStatus("ready");
-      })
-      .catch((err) => {
-        if (!alive) return;
-        setError(err instanceof Error ? err.message : "Failed to load schedules");
-        setStatus("error");
-      });
+    const read = () =>
+      fetch(branchId ? `/api/schedules?branchId=${encodeURIComponent(branchId)}` : "/api/schedules", { cache: "no-store" })
+        .then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const data = (await r.json()) as Schedule[];
+          if (!alive) return;
+          setSchedules(Array.isArray(data) ? data : []);
+          setStatus("ready");
+        })
+        .catch(() => {
+          if (alive) setStatus((s) => (s === "ready" ? s : "error"));
+        });
+    void read();
+    const onVisible = () => document.visibilityState === "visible" && void read(); // the plan may have been changed on the computer meanwhile
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive = false;
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [branchId, fleet.loaded]);
 
-  const sorted = useMemo(() => {
-    const list = schedules ?? [];
-    return [...list].sort((a, b) => {
-      // Enabled first, then by start time, then alphabetical by name.
-      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
-      const ta = a.startTimeLocal || "99:99";
-      const tb = b.startTimeLocal || "99:99";
-      if (ta !== tb) return ta < tb ? -1 : 1;
-      return (a.name || "").localeCompare(b.name || "");
-    });
-  }, [schedules]);
+  const lookup = useMemo(() => {
+    const find = (s: Schedule) =>
+      sources.find((u) => {
+        if (s.targetType === "PLAYLIST") return u.origin === "playlist" && (u.playlist?.id === s.targetId || u.id === s.targetId);
+        if (s.targetType === "SOURCE") return u.origin === "source" && (u.source?.id === s.targetId || u.id === s.targetId);
+        if (s.targetType === "RADIO") return u.origin === "radio" && u.id === s.targetId;
+        return false;
+      });
+    return find;
+  }, [sources]);
 
-  const nameForTarget = (s: Schedule): string => {
-    const match = sources.find((u) => {
-      if (s.targetType === "PLAYLIST") return u.origin === "playlist" && (u.playlist?.id === s.targetId || u.id === s.targetId);
-      if (s.targetType === "SOURCE") return u.origin === "source" && (u.source?.id === s.targetId || u.id === s.targetId);
-      if (s.targetType === "RADIO") return u.origin === "radio" && u.id === s.targetId;
-      return false;
-    });
-    return match?.title ?? shortenId(s.targetId);
+  const dayKey = now ? `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}` : "";
+  const scenes: Scene[] = useMemo(() => {
+    if (!schedules || !now) return [];
+    // how long a block's own music lasts: a block with no end of its own is drawn only that long (the same rule as the computer's timeline)
+    const musicMinutes = (s: Schedule): number | null => {
+      const u = lookup(s);
+      const sec = u?.origin === "playlist" ? playlistSeconds(u.playlist) : null;
+      return sec && sec > 0 ? Math.max(1, Math.ceil((sec + 20) / 60)) : null;
+    };
+    return buildDayScenes(schedules, now.getDay(), weekDatesFor(now), musicMinutes).filter((s) => !s.paused && !s.shadowed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedules, dayKey, lookup]);
+
+  const nowMin = now ? now.getHours() * 60 + now.getMinutes() : 0;
+  const { now: playingNow, next } = useMemo(() => nowAndNext(scenes, nowMin), [scenes, nowMin]);
+
+  const dateLabel = now ? now.toLocaleDateString(locale === "he" ? "he-IL" : "en-GB", { weekday: "long", day: "numeric", month: "long" }) : "";
+  const back = (
+    <Link href={branchId ? `/mobile/branch/${encodeURIComponent(branchId)}` : "/mobile/home"} className="vm-icobtn vm-back" aria-label={tr("Branches")}>
+      <IconChevronBack />
+      <span className="vm-bdi" style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fleet.selected?.name ?? tr("Branches")}</span>
+    </Link>
+  );
+
+  const nameOf = (sc: Scene): string => {
+    const own = sc.schedule.name?.trim();
+    if (sc.quiet) return own || tr("Quiet");
+    return lookup(sc.schedule)?.title || own || tr("Playlist");
   };
 
   return (
-    <>
-      <MobilePageHeader title="Scheduling" />
+    <VmPage title={tr("Today's plan")} subtitle={dateLabel} lead={back}>
+      <div className="vm-group" style={{ marginTop: 14 }}>
+        <VmScheduleSwitchLine branchId={branchId} />
+      </div>
 
-      <div className="px-4 py-3 pb-8">
-        {fleet.selected ? (
-          <p className="mb-3 text-sm text-slate-300">
-            {fleet.selected.name}
-          </p>
-        ) : null}
-        <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100/90">
-          Scheduling is read-only on mobile. Open SyncBiz on desktop to add,
-          edit or remove a schedule.
+      {status === "loading" ? (
+        <div className="vm-list" style={{ marginTop: 18 }} aria-busy>
+          <div className="vm-skel" style={{ height: 64 }} />
+          <div className="vm-skel" style={{ height: 64 }} />
+          <div className="vm-skel" style={{ height: 64 }} />
         </div>
-
-        {status === "loading" ? (
-          <div className="py-10 text-center text-sm text-slate-500">Loading schedules…</div>
-        ) : status === "error" ? (
-          <div className="py-10 text-center text-sm text-rose-400">{error}</div>
-        ) : sorted.length === 0 ? (
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 px-4 py-8 text-center text-sm text-slate-400">
-            <p className="mb-1">No schedules yet.</p>
-            <p className="text-xs text-slate-500">Create one from the desktop app.</p>
-          </div>
-        ) : (
-          <section>
-            <MobileSectionHeader
-              title="Your schedules"
-              subtitle={`${sorted.length} item${sorted.length === 1 ? "" : "s"}`}
-              action={
-                <Link
-                  href="/schedules"
-                  className="shrink-0 rounded-full border border-slate-700/60 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-slate-500 hover:text-white"
-                >
-                  Edit on desktop
-                </Link>
-              }
-            />
-            <ul className="flex flex-col gap-2">
-              {sorted.map((s) => (
-                <ScheduleRow key={s.id} schedule={s} targetName={nameForTarget(s)} />
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
-    </>
-  );
-}
-
-function ScheduleRow({ schedule, targetName }: { schedule: Schedule; targetName: string }) {
-  const when = describeWhen(schedule);
-  const target = describeTarget(schedule.targetType, targetName);
-  return (
-    <li className="rounded-xl border border-slate-800/70 bg-slate-900/40 px-3 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-slate-100">
-            {schedule.name?.trim() || targetName}
-          </p>
-          <p className="mt-0.5 truncate text-xs text-slate-400">{target}</p>
+      ) : status === "error" ? (
+        <div className="vm-empty">
+          <h2>{tr("Couldn't load the plan")}</h2>
+          <button type="button" className="vm-pill" onClick={() => window.location.reload()}>{tr("Try again")}</button>
         </div>
-        <StatusPill enabled={schedule.enabled} />
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
-        <span className="inline-flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-800/60 px-2 py-0.5">
-          <Clock /> {when.time}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-800/60 px-2 py-0.5">
-          <Cal /> {when.days}
-        </span>
-        {schedule.timezone && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-700/60 bg-slate-800/60 px-2 py-0.5">
-            {schedule.timezone}
-          </span>
-        )}
-      </div>
-    </li>
-  );
-}
+      ) : scenes.length === 0 ? (
+        <div className="vm-empty">
+          <IconUpNext />
+          <h2>{tr("Nothing is planned for today")}</h2>
+        </div>
+      ) : (
+        <div className="vm-plan">
+          {scenes.map((sc) => {
+            const isNow = playingNow === sc;
+            const isNext = next === sc;
+            const past = sc.end <= nowMin && !isNow;
+            const until = sc.end >= DAY_MINUTES - 1 ? "" : tr("Until {time}", { time: formatMinutes(sc.end) });
+            const u = sc.quiet ? undefined : lookup(sc.schedule);
+            return (
+              <div key={`${sc.schedule.id}:${sc.start}`} className="vm-plan-row" data-now={isNow ? "" : undefined} data-quiet={sc.quiet ? "" : undefined} data-past={past ? "" : undefined}>
+                <span className="vm-plan-time">{formatMinutes(sc.start)}</span>
+                {sc.quiet ? null : <VmCover src={u ? sourceCover(u) : null} name={nameOf(sc)} size={40} radius={10} />}
+                <span className="vm-plan-text">
+                  <span className="vm-plan-name vm-bdi">{nameOf(sc)}</span>
+                  {until || sc.quiet ? <span className="vm-plan-sub">{until || tr("No music")}</span> : null}
+                </span>
+                {isNext ? <span className="vm-plan-next">{tr("Next")}</span> : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-function StatusPill({ enabled }: { enabled: boolean }) {
-  const cls = enabled
-    ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-200"
-    : "border-slate-600/60 bg-slate-800/60 text-slate-400";
-  return (
-    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${cls}`}>
-      {enabled ? "Active" : "Off"}
-    </span>
-  );
-}
-
-function describeWhen(s: Schedule): { time: string; days: string } {
-  const start = s.startTimeLocal || "--:--";
-  const end = s.endTimeLocal && s.endTimeLocal !== "23:59" ? s.endTimeLocal : null;
-  const time = end ? `${start} – ${end}` : start;
-  if (s.recurrence === "one_off") {
-    return { time, days: s.oneOffDateLocal ? s.oneOffDateLocal : "One-off" };
-  }
-  const names = (s.daysOfWeek ?? []).map(dayName).filter(Boolean);
-  const days = names.length === 0 ? "—" : names.length === 7 ? "Every day" : names.join(" · ");
-  return { time, days };
-}
-
-function describeTarget(type: ScheduleTargetType, name: string): string {
-  switch (type) {
-    case "PLAYLIST":
-      return `Playlist · ${name}`;
-    case "SOURCE":
-      return `Track · ${name}`;
-    case "RADIO":
-      return `Radio · ${name}`;
-    case "SILENCE":
-      return "Quiet · stops the music";
-    case "BANK":
-      return `Music bank · ${name}`;
-    default:
-      return name;
-  }
-}
-
-function dayName(idx: number): string {
-  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][idx] ?? "";
-}
-
-function shortenId(id: string): string {
-  if (!id) return "(unknown)";
-  return id.length > 12 ? `${id.slice(0, 10)}…` : id;
-}
-
-function Clock() {
-  return (
-    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function Cal() {
-  return (
-    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <rect x="3" y="5" width="18" height="16" rx="2" />
-      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
-    </svg>
+      <p className="vm-plan-note">{tr("The plan is edited on the computer.")}</p>
+    </VmPage>
   );
 }
