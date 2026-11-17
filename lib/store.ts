@@ -124,7 +124,7 @@ function rowToSchedule(row: {
   deviceId: string | null; recurrence: string; oneOffDateLocal: string | null;
   daysOfWeek: number[]; startTimeLocal: string; endTimeLocal: string;
   enabled: boolean; priority: number; timezone: string;
-  requestedStartPosition: number | null; requestedEndPosition: number | null;
+  requestedStartPosition: number | null; requestedEndPosition: number | null; volume: number | null;
   createdBy: string | null; updatedBy: string | null; taxonomyTags: unknown;
   createdAt: Date; updatedAt: Date;
 }): Schedule {
@@ -147,6 +147,7 @@ function rowToSchedule(row: {
     timezone: row.timezone,
     requestedStartPosition: row.requestedStartPosition ?? undefined,
     requestedEndPosition: row.requestedEndPosition ?? undefined,
+    volume: row.volume ?? undefined,
     createdBy: row.createdBy ?? undefined,
     updatedBy: row.updatedBy ?? undefined,
     taxonomyTags: row.taxonomyTags as Schedule["taxonomyTags"] ?? undefined,
@@ -481,6 +482,7 @@ export const db = {
         timezone: input.timezone ?? "UTC",
         requestedStartPosition: input.requestedStartPosition ?? null,
         requestedEndPosition: input.requestedEndPosition ?? null,
+        volume: input.volume ?? null,
         createdBy: input.createdBy ?? null,
         taxonomyTags: input.taxonomyTags ? (input.taxonomyTags as object) : undefined,
       },
@@ -517,6 +519,7 @@ export const db = {
         ...(data.timezone !== undefined && { timezone: data.timezone }),
         ...(data.requestedStartPosition !== undefined && { requestedStartPosition: data.requestedStartPosition ?? null }),
         ...(data.requestedEndPosition !== undefined && { requestedEndPosition: data.requestedEndPosition ?? null }),
+        ...(data.volume !== undefined && { volume: data.volume ?? null }),
         ...(data.recurrence !== undefined && { recurrence: data.recurrence }),
         ...(data.oneOffDateLocal !== undefined && { oneOffDateLocal: data.oneOffDateLocal ?? null }),
         ...(data.updatedBy !== undefined && { updatedBy: data.updatedBy ?? null }),

@@ -1097,6 +1097,8 @@ model Schedule {
   priority               Int            @default(1)
   requestedStartPosition Int?
   requestedEndPosition   Int?
+  /// The player's volume (0-100) while this block is in force; null = the block leaves the volume as it is (owner 2026-11-17).
+  volume                 Int?
   createdBy              String?
   updatedBy              String?
   taxonomyTags           Json?

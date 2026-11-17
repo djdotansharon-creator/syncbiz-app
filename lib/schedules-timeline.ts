@@ -217,6 +217,7 @@ export function pastedScheduleBody(src: Schedule, dateYmd: string): Record<strin
     ...(src.endTimeLocal && src.endTimeLocal.trim() ? { endTimeLocal: src.endTimeLocal } : {}),
     enabled: true,
     priority: typeof src.priority === "number" ? src.priority : 1,
+    ...(typeof src.volume === "number" ? { volume: src.volume } : {}), // a copy keeps the volume the block was given
   };
 }
 

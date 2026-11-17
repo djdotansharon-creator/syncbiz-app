@@ -170,6 +170,8 @@ export type Schedule = {
   requestedStartPosition?: number;
   /** Optional hint sent to endpoint; depends on playback system */
   requestedEndPosition?: number;
+  /** The player's volume (0-100) while this block is in force; null / absent = the block leaves the volume as it is. See lib/schedule-volume.ts. */
+  volume?: number | null;
   createdAt?: string;
   updatedAt?: string;
   createdBy?: string;

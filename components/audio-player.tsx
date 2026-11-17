@@ -1,5 +1,6 @@
 "use client";
 
+import { guardVolume } from "@/lib/schedule-volume";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { usePlayback, type PlaybackTrack, type TrackSource, type PlaybackStatus } from "@/lib/playback-provider";
@@ -5190,7 +5191,9 @@ export function AudioPlayer() {
             else if (currentSource) playSource(currentSource);
             else console.warn("[SyncBiz Audit] PLAY blocked: no currentSource");
           });
-  const onVolumeChange = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
+  // a block's own volume (owner 2026-11-17): raising the volume above the schedule's setting asks first (lib/schedule-volume.ts); anything else goes straight through, as before
+  const applyVolume = isControlMirror ? deviceCtx!.setVolumeOrSend : setVolume;
+  const onVolumeChange = (v: number) => { guardVolume(v, applyVolume); };
 
   const canSeek =
     currentSource &&

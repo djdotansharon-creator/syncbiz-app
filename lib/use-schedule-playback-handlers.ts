@@ -22,7 +22,7 @@ function hasDesktopStatusBridge(): boolean {
  * `playSourceOrSend`, whatever the cloud WS state — and `route` tells runSchedulePlayback when it must wait.
  */
 export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
-  const { stop, setQueue, setLastMessage, status: providerStatus } = usePlayback();
+  const { stop, setQueue, setLastMessage, status: providerStatus, volume: providerVolume, setVolume: providerSetVolume } = usePlayback();
   const routedPlaySource = useRoutedPlaySource();
   const device = useDevicePlayer();
   // is music playing right now: the station's own status (what MAIN really plays) or this window's — read at call time, so the handlers keep their identity while the status changes
@@ -32,6 +32,15 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
     audibleRef.current = providerStatus === "playing" || masterStatus === "playing";
   });
   const isAudible = useCallback(() => audibleRef.current, []);
+  // the volume a block's own setting changes (and the one it found): the station's (what MAIN really plays) else this window's
+  const volumeRef = useRef<number | null>(null);
+  const masterVolume = device?.masterState?.volume;
+  useEffect(() => {
+    volumeRef.current = typeof masterVolume === "number" ? masterVolume : typeof providerVolume === "number" ? providerVolume : null;
+  });
+  const getVolume = useCallback(() => volumeRef.current, []);
+  const setVolumeOrSend = device?.setVolumeOrSend;
+  const setVolume = setVolumeOrSend ?? providerSetVolume;
 
   const isDesktopShell = !!device && hasDesktopStatusBridge();
   const mainSnapResolved = device?.mainSnapResolved ?? false;
@@ -49,6 +58,6 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
     const playSource = route.kind === "station" && stationPlay ? stationPlay : routedPlaySource;
     // a scheduled END / quiet block stops the music exactly like the Stop button does (on a station or a controller that is MAIN's STOP command)
     const stopScheduled = stopOrSend ?? stop;
-    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled, isAudible, bankStreamReady };
-  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isAudible, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster, bankStreamReady]);
+    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled, isAudible, getVolume, setVolume, bankStreamReady };
+  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isAudible, getVolume, setVolume, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster, bankStreamReady]);
 }

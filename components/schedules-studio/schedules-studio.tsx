@@ -1252,6 +1252,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           endTimeLocal: patch.endTimeLocal ?? (src.endTimeLocal || undefined),
           enabled: src.enabled,
           priority: typeof src.priority === "number" ? src.priority : 1,
+          ...(typeof src.volume === "number" ? { volume: src.volume } : {}), // "this day only" keeps the block's volume
         });
         try {
           await api("PATCH", `/api/schedules/${encodeURIComponent(src.id)}`, { daysOfWeek: rest });
@@ -1828,6 +1829,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const range = !sc.paused && !sc.shadowed && (orient === "h" || tall) ? ` – ${formatMinutes(Math.min(sc.end, DAY_MINUTES - 1))}` : "";
     if (display.times || plain) lines.push(`${formatMinutes(sc.start)}${range}`);
     if (display.length && !plain) lines.push(spanText(Math.min(sc.end, DAY_MINUTES) - sc.start));
+    if (typeof sc.schedule.volume === "number" && !plain) lines.push(tr("Volume {n}%", { n: sc.schedule.volume })); // the block carries its own volume (owner 2026-11-17)
     return (
       <div
         key={`${ghost ? "ghost-" : ""}${baseId(sc.schedule.id)}-${orient}-${sc.day}`}
@@ -2340,6 +2342,46 @@ function ColorSwatches({ value, onPick }: { value: number; onPick: (i: number) =
   );
 }
 
+/**
+ * The VOLUME of a block (owner 2026-11-17: "when I stand on a song I can decide how loud the player is at that time"). "The player's own" = the block leaves the volume as it is; "Set" gives the
+ * block its own, applied when it starts. The slider is saved when the finger / mouse is let go (not at every step). Someone who raises the volume above it during the block is asked first.
+ */
+function BlockVolume({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const tr = useTr();
+  const [moving, setMoving] = useState<number | null>(null); // the slider while it is being moved; null = it shows the saved value
+  const set = value !== null;
+  const shown = moving ?? value ?? 60;
+  const commit = () => {
+    if (moving !== null && moving !== value) onChange(moving);
+    setMoving(null);
+  };
+  return (
+    <div className="ss-vol">
+      <div className="ss-endmode" role="group" aria-label={tr("Volume")}>
+        <button type="button" className={!set ? "is-on" : ""} aria-pressed={!set} onClick={() => set && onChange(null)}>{tr("The player's own")}</button>
+        <button type="button" className={set ? "is-on" : ""} aria-pressed={set} onClick={() => !set && onChange(shown)}>{tr("Set for this block")}</button>
+      </div>
+      {set ? (
+        <div className="ss-vol-row">
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={shown}
+            aria-label={tr("Volume")}
+            onChange={(e) => setMoving(Number(e.target.value))}
+            onPointerUp={commit}
+            onKeyUp={commit}
+            onBlur={commit}
+          />
+          <span className="ss-vol-n">{shown}%</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ───────────────────────────── the "⋯" menu of a block (also a right-click) ─────────────────────────────
 
 const MENU_W = 224;
@@ -2695,6 +2737,13 @@ function ScenePopover({
             <div className="ss-field">
               <span className="ss-label">{tr("Color")}</span>
               <ColorSwatches value={colour} onPick={onColour} />
+            </div>
+          )}
+
+          {quiet ? null : (
+            <div className="ss-field">
+              <span className="ss-label">{tr("Volume")}</span>
+              <BlockVolume value={typeof schedule.volume === "number" ? schedule.volume : null} onChange={(v) => onPatch({ volume: v })} />
             </div>
           )}
 

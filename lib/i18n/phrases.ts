@@ -975,6 +975,15 @@ export const HE_PHRASES: Record<string, string> = {
   "Copy link": "העתקת קישור",
   "New code": "קוד חדש",
   "The person fills in their details and you approve them here.": "האדם ממלא את הפרטים שלו ואתם מאשרים אותו כאן.",
+  // ── A block's own volume (2026-11-17) ──
+  "The player's own": "של הנגן",
+  "Set for this block": "קבוע לבלוק הזה",
+  "Volume {n}%": "ווליום {n}%",
+  "This time has its own volume": "לשעות האלה יש ווליום משלהן",
+  "“{name}” is set to {n}%. Raise it to {v}% anyway?": "“{name}” מוגדר ל-{n}%. להגביר ל-{v}% בכל זאת?",
+  "The schedule set the volume to {n}% for now. Raise it to {v}% anyway?": "לוח הזמנים קבע עכשיו ווליום {n}%. להגביר ל-{v}% בכל זאת?",
+  "Keep {n}%": "להשאיר {n}%",
+  "Raise to {v}%": "להגביר ל-{v}%",
   // ── Phone app (2026-11-16) ──
   "Add your first branch from the Control Room on a computer, and it will appear here.": "הוסיפו את הסניף הראשון מחדר הבקרה במחשב, והוא יופיע כאן.",
   "Auto mix": "מיקס אוטומטי",
