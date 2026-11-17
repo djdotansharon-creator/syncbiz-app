@@ -202,3 +202,17 @@ export const IconLink = (p: SVGProps<SVGSVGElement>) => (
     <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
   </Svg>
 );
+/** identify a song — a sound wave */
+export const IconIdentify = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
+  </Svg>
+);
+/** the people of a branch — two heads */
+export const IconPeople = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <circle cx="9" cy="8.5" r="3.2" />
+    <path d="M3.5 19.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5" />
+    <path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M17.5 14.7c2 .5 3.5 2.2 3.5 4.8" />
+  </Svg>
+);
