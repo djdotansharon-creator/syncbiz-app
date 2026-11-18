@@ -22,6 +22,7 @@
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
+import type { LookupFunction } from "node:net";
 import { resolveRemoteMediaTarget, isForbiddenResolvedIp } from "./remote-media-url-policy";
 
 export class SsrfBlockedError extends Error {
@@ -40,19 +41,30 @@ type SafeFetchOptions = {
   userAgent?: string;
 };
 
-/** Connection-time guarded DNS lookup: blocks if the hostname resolves to ANY internal/reserved address. */
-function guardedLookup(hostname: string, options: dns.LookupOneOptions | dns.LookupAllOptions | number, cb: (err: NodeJS.ErrnoException | null, address: string, family: number) => void): void {
-  dns.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
-    if (err) return cb(err, "", 0);
-    const list = Array.isArray(addresses) ? addresses : [];
-    if (!list.length) return cb(new SsrfBlockedError(`no DNS address for ${hostname}`) as NodeJS.ErrnoException, "", 0);
+type LookupCb = (err: NodeJS.ErrnoException | null, address?: string | { address: string; family: number }[], family?: number) => void;
+
+/**
+ * Connection-time guarded DNS lookup: resolves the hostname and blocks if ANY resolved address is internal/reserved.
+ * Respects the caller's `all` option — Node's happy-eyeballs (autoSelectFamily) invokes `lookup` with `all:true` and
+ * expects the callback to return an ARRAY of {address, family}; otherwise it expects (err, address, family). Returning
+ * the wrong shape yields "Invalid IP address: undefined". We handle both so public hosts connect normally while every
+ * candidate address is still validated.
+ */
+function guardedLookup(hostname: string, options: dns.LookupOneOptions | dns.LookupAllOptions | number, cb: LookupCb): void {
+  const opt: { all?: boolean; family?: number } = typeof options === "object" && options ? (options as { all?: boolean; family?: number }) : {};
+  const wantAll = opt.all === true;
+  const family = typeof opt.family === "number" ? opt.family : 0;
+  dns.lookup(hostname, { all: true, verbatim: true, family }, (err, addresses) => {
+    if (err) return cb(err);
+    const list = (Array.isArray(addresses) ? addresses : []) as { address: string; family: number }[];
+    if (!list.length) return cb(new SsrfBlockedError(`no DNS address for ${hostname}`) as NodeJS.ErrnoException);
     for (const a of list) {
       if (isForbiddenResolvedIp(a.address, a.family)) {
-        return cb(new SsrfBlockedError(`host ${hostname} resolves to forbidden address ${a.address}`) as NodeJS.ErrnoException, "", 0);
+        return cb(new SsrfBlockedError(`host ${hostname} resolves to forbidden address ${a.address}`) as NodeJS.ErrnoException);
       }
     }
-    const chosen = list[0];
-    cb(null, chosen.address, chosen.family);
+    if (wantAll) return cb(null, list);
+    cb(null, list[0].address, list[0].family);
   });
 }
 
@@ -73,7 +85,9 @@ function requestOnce(
       u,
       {
         method: "GET",
-        lookup: guardedLookup, // connection-time IP enforcement (preserves Host + SNI: URL host is unchanged)
+        // connection-time IP enforcement (preserves Host + SNI: URL host is unchanged). Cast: guardedLookup handles
+        // both the single-result and happy-eyeballs `all` callback shapes, which the stock LookupFunction type omits.
+        lookup: guardedLookup as unknown as LookupFunction,
         headers: {
           "User-Agent": opts.userAgent,
           Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
