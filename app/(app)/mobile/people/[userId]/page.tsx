@@ -19,7 +19,9 @@ import {
   type RoleRow,
 } from "@/lib/mobile-people";
 import { VmPage, useVmUi } from "@/components/vm/vm-ui";
-import { VmCover } from "@/components/vm/vm-parts";
+import { VmCover, nameHue } from "@/components/vm/vm-parts";
+import { toneVars } from "@/components/vm/vm-tone";
+import { Rise, VmFlow, VmFold, VmKv } from "@/components/vm/vm-flow";
 import { IconCheck, IconChevronForward, IconPeople } from "@/components/vm/vm-icons";
 import { VmBack, agoLabel, levelLabel, stateLabel, useAsk } from "@/components/vm/vm-people-parts";
 
@@ -169,64 +171,80 @@ export default function MobilePersonPage() {
       onConfirm: () => void run(() => accountAction(person.email, "remove-member"), () => router.replace("/mobile/people")),
     });
 
+  const name = person.name || person.email;
+  const personTone = toneVars({ h: nameHue(name), s: 0.5 }, true);
+  const levelText = levelLabel(person.level, tr);
+  const roleText = person.roleName ?? levelText;
+  const roleValue = !ready.rolesOn ? levelText : admin ? levelText : role ? role.name : tr("No role yet");
   return (
-    <VmPage title={person.name || person.email} barTitle={person.name || person.email} lead={back}>
-      <div className="vm-hero" style={{ paddingTop: 4 }}>
-        <VmCover name={person.name || person.email} size={84} radius={999} />
-        <div className="vm-hero-sub vm-bdi" dir="ltr">{person.email}</div>
-        <div className="vm-hero-sub">
-          {person.roleName ?? levelLabel(person.level, tr)} · {stateLabel(person.status, tr)}
-          {person.isYou ? ` · ${tr("You")}` : ""}
+    <VmPage flow title="" barTitle={name} lead={back} tone={personTone}>
+      <VmFlow tone={personTone}>
+        <Rise enter={0}>
+          <div className="vm-hero2">
+            <VmCover name={name} size={96} radius={999} neutral />
+            <div className="vm-hero2-name vm-bdi">{name}{person.isYou ? ` · ${tr("You")}` : ""}</div>
+            <div className="vm-hero2-sub">{roleText} · {stateLabel(person.status, tr)}</div>
+          </div>
+        </Rise>
+
+        <div className="vm-fl-list" style={{ marginTop: 18 }}>
+          <Rise enter={1}>
+            {canGiveRole ? (
+              <button type="button" className="vm-fl-row" disabled={busy} onClick={openRoles} aria-haspopup="dialog">
+                <span className="vm-fl-text">{tr("Role")}</span>
+                <span className="vm-fl-val vm-bdi">{roleValue}</span>
+                <IconChevronForward className="vm-chev vm-flip" />
+              </button>
+            ) : (
+              <div className="vm-fl-row vm-fl-static">
+                <span className="vm-fl-text">{tr("Role")}</span>
+                <span className="vm-fl-val vm-bdi">{roleValue}</span>
+              </div>
+            )}
+          </Rise>
+          <Rise enter={2}>
+            {canPickBranches ? (
+              <button type="button" className="vm-fl-row" disabled={busy} onClick={openBranches} aria-haspopup="dialog">
+                <span className="vm-fl-text">{tr("Branches")}</span>
+                <span className="vm-fl-val vm-bdi">{reachText}</span>
+                <IconChevronForward className="vm-chev vm-flip" />
+              </button>
+            ) : (
+              <div className="vm-fl-row vm-fl-static">
+                <span className="vm-fl-text">{tr("Branches")}</span>
+                <span className="vm-fl-val vm-bdi">{reachText}</span>
+              </div>
+            )}
+          </Rise>
+          <Rise enter={3}>
+            <VmFold label={tr("Details")}>
+              <VmKv label={tr("E-mail")} value={person.email} dir="ltr" />
+              <VmKv label={tr("Level")} value={levelText} />
+              <VmKv label={tr("State")} value={stateLabel(person.status, tr)} />
+              <VmKv label={tr("Last sign-in")} value={agoLabel(person.lastSignInAt, tr)} />
+              <VmKv label={tr("Joined")} value={new Date(person.joinedAt).toLocaleDateString()} />
+              {role ? (
+                <VmKv label={tr("This role allows:")} value={allowed.length === 0 ? tr("Nothing yet") : allowed.map((k) => tr(PERMISSION_LABELS[k].title)).join(" · ")} />
+              ) : null}
+            </VmFold>
+          </Rise>
+          {canPause ? (
+            <Rise enter={4}>
+              <button type="button" className="vm-fl-row" disabled={busy} onClick={() => void run(() => accountAction(person.email, person.status === "paused" ? "resume-member" : "pause-member"))}>
+                <span className="vm-fl-text">{person.status === "paused" ? tr("Let them sign in again") : tr("Pause sign-in")}</span>
+              </button>
+            </Rise>
+          ) : null}
+          {canRemove ? (
+            <Rise enter={5}>
+              <button type="button" className="vm-fl-row" data-danger="" disabled={busy} onClick={askRemove}>
+                <span className="vm-fl-text">{tr("Remove from the business")}</span>
+              </button>
+            </Rise>
+          ) : null}
         </div>
-        <div className="vm-hero-sub">{tr("Last sign-in")}: {agoLabel(person.lastSignInAt, tr)}</div>
-      </div>
-
-      <div className="vm-sec">{tr("Role")}</div>
-      <div className="vm-group" style={{ marginTop: 0 }}>
-        {!ready.rolesOn ? (
-          <p className="vm-note">{tr("Roles are not switched on for this business.")}</p>
-        ) : admin ? (
-          <p className="vm-note">{tr("The owner and managers keep their level — it is not changed with a role.")}</p>
-        ) : (
-          <button type="button" className="vm-line" disabled={!canGiveRole || busy} onClick={openRoles} aria-haspopup="dialog">
-            <span className="vm-line-text vm-bdi">{role ? role.name : tr("No role yet")}</span>
-            {canGiveRole ? <IconChevronForward className="vm-chev vm-flip" /> : null}
-          </button>
-        )}
-      </div>
-      {role ? (
-        <p className="vm-sub vm-bdi" style={{ margin: "8px 24px 0" }}>
-          {allowed.length === 0 ? tr("This role allows nothing yet.") : `${tr("This role allows:")} ${allowed.map((k) => tr(PERMISSION_LABELS[k].title)).join(" · ")}`}
-        </p>
-      ) : null}
-
-      <div className="vm-sec">{tr("Branches")}</div>
-      <div className="vm-group" style={{ marginTop: 0 }}>
-        {canPickBranches ? (
-          <button type="button" className="vm-line" disabled={busy} onClick={openBranches} aria-haspopup="dialog">
-            <span className="vm-line-text vm-bdi">{reachText}</span>
-            <IconChevronForward className="vm-chev vm-flip" />
-          </button>
-        ) : (
-          <p className="vm-note vm-bdi">{reachText}</p>
-        )}
-      </div>
-
-      <div className="vm-sec">{tr("Account")}</div>
-      <div className="vm-group" style={{ marginTop: 0 }}>
-        {!canPause && !canRemove ? <p className="vm-note">{tr("Nothing to change here.")}</p> : null}
-        {canPause ? (
-          <button type="button" className="vm-line" disabled={busy} onClick={() => void run(() => accountAction(person.email, person.status === "paused" ? "resume-member" : "pause-member"))}>
-            <span className="vm-line-text">{person.status === "paused" ? tr("Let them sign in again") : tr("Pause sign-in")}</span>
-          </button>
-        ) : null}
-        {canRemove ? (
-          <button type="button" className="vm-line" disabled={busy} style={{ color: "var(--vm-danger)" }} onClick={askRemove}>
-            <span className="vm-line-text">{tr("Remove from the business")}</span>
-          </button>
-        ) : null}
-      </div>
-      {error ? <p className="vm-err" role="alert">{error}</p> : null}
+        {error ? <p className="vm-err" role="alert">{error}</p> : null}
+      </VmFlow>
     </VmPage>
   );
 }

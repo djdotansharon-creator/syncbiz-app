@@ -69,11 +69,12 @@ function sampleHs(url: string): Promise<Hs | null> {
 const nameHs = (name: string): Hs => ({ h: nameHue(name || "·"), s: 0.42 });
 
 /** the two colours the dark backgrounds are drawn from: a deeper (top) and a darker (bottom) shade of the song's hue */
-export function toneVars(hs: Hs): CSSProperties {
+export function toneVars(hs: Hs, deep = false): CSSProperties {
   const s = Math.min(0.7, Math.max(0.06, hs.s));
+  // `deep` = a darker shade of the same hue (a person's page: "more dark") — the song's own background stays as it is
   return {
-    ["--vm-t1" as string]: `hsl(${Math.round(hs.h)} ${Math.round(s * 85)}% 30%)`,
-    ["--vm-t2" as string]: `hsl(${Math.round(hs.h)} ${Math.round(s * 72)}% 15%)`,
+    ["--vm-t1" as string]: `hsl(${Math.round(hs.h)} ${Math.round(s * 85)}% ${deep ? 21 : 30}%)`,
+    ["--vm-t2" as string]: `hsl(${Math.round(hs.h)} ${Math.round(s * 72)}% ${deep ? 10 : 15}%)`,
   } as CSSProperties;
 }
 

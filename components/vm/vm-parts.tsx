@@ -41,6 +41,7 @@ export function VmCover({
   glyph,
   style,
   playing,
+  neutral,
 }: {
   src?: string | null;
   name: string;
@@ -53,6 +54,8 @@ export function VmCover({
   style?: CSSProperties;
   /** the Now Playing art breathes: full size while it plays, a little smaller while paused */
   playing?: boolean;
+  /** no colour of its own — a soft light disc with the initials (a person's disc on a page that already has a coloured background) */
+  neutral?: boolean;
 }) {
   // the load state belongs to the picture it was read for (a new `src` starts over without an effect)
   const [st, setSt] = useState<{ src: string | null | undefined; ok: boolean; bad: boolean }>({ src, ok: false, bad: false });
@@ -66,7 +69,7 @@ export function VmCover({
       style={{
         ...(size ? { width: size, height: size, fontSize: Math.round(size * 0.34) } : {}),
         borderRadius: radius,
-        ["--vm-tile" as string]: tile.background,
+        ["--vm-tile" as string]: neutral ? "rgba(255, 255, 255, 0.14)" : tile.background,
         ...style,
       }}
     >

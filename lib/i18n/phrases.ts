@@ -1129,6 +1129,27 @@ export const HE_PHRASES: Record<string, string> = {
   "Adding people with a code is not switched on yet.": "הוספת אנשים בקוד עוד לא הופעלה.",
   "Approved": "אושר",
   "Rejected": "נדחה",
+
+  // ── The flow: branch screen + person page (2026-11-18) ──
+  "Address": "כתובת",
+  "Branch name": "שם הסניף",
+  "Branch number": "מספר סניף",
+  "Change the branch name": "שינוי שם הסניף",
+  "Not installed yet": "עוד לא הותקן",
+  "Nothing yet": "עדיין כלום",
+  "Only the owner can change a branch.": "רק הבעלים יכול לשנות סניף.",
+  "The branch": "הסניף",
+  "The branch number and the address stay as they are.": "מספר הסניף והכתובת נשארים כמו שהם.",
+  "Time zone": "אזור זמן",
+  "Version": "גרסה",
+  "What plays": "מה מתנגן",
+  "Back to today": "חזרה להיום",
+  "Choose a date": "בחירת תאריך",
+  "Nothing is planned for this day": "אין תזמון ליום הזה",
+  "Pick songs, identify a song, play a jingle": "בוחרים שירים, מזהים שיר, משמיעים ג'ינגל",
+  "The day after": "היום הבא",
+  "The day before": "היום הקודם",
+  "Play by schedule": "ניגון לפי תזמון",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };

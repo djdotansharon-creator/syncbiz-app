@@ -56,7 +56,7 @@ export function useScheduleSwitch(branchId: string | null) {
 }
 
 /** the "Schedule — on / off" line (a `.vm-line`: it sits in a `.vm-group` on the branch screen, alone on Today's plan) */
-export function VmScheduleSwitchLine({ branchId }: { branchId: string | null }) {
+export function VmScheduleSwitchLine({ branchId, title }: { branchId: string | null; /** the line's name (default "Schedule") — the branch's schedule screen already has that as its heading */ title?: string }) {
   const tr = useTr();
   const ui = useVmUi();
   const { sw, busy, flip } = useScheduleSwitch(branchId);
@@ -71,7 +71,7 @@ export function VmScheduleSwitchLine({ branchId }: { branchId: string | null }) 
     >
       <IconCalendar />
       <span className="vm-line-text">
-        {tr("Schedule")}
+        {title ?? tr("Schedule")}
         <small>{!sw ? "…" : !sw.switchable ? tr("Not available for this branch") : sw.enabled ? tr("On — the branch follows its day plan") : tr("Off — nothing starts by itself")}</small>
       </span>
       <span className="vm-switch" data-on={sw?.enabled ? "" : undefined} data-busy={busy ? "" : undefined} />

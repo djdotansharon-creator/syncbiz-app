@@ -7,11 +7,54 @@ import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, Icon
 import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
 
+export type UpNextItem = { id: string; title: string; cover: string | null; tag: string };
+
+/** what comes next on the SELECTED branch: the staged "Play next" songs first, then the rest of the playlist after the current song */
+export function useUpNext(): UpNextItem[] {
+  const f = useMobileFleet();
+  const tr = useTr();
+  const shown = f.display.shown;
+  return useMemo(() => {
+    if (!shown) return [] as UpNextItem[];
+    const out: UpNextItem[] = [];
+    for (const q of shown.playNextQueue ?? []) out.push({ id: `q:${q.id}`, title: q.title, cover: q.cover, tag: tr("Play next") });
+    const tracks = shown.sessionTracks ?? [];
+    const i = typeof shown.currentTrackIndex === "number" ? shown.currentTrackIndex : -1;
+    if (tracks.length && i >= 0) {
+      for (const t of tracks.slice(i + 1, i + 9)) out.push({ id: `t:${t.id}`, title: t.title, cover: t.cover, tag: "" });
+    } else if (shown.nextSessionTrack) {
+      out.push({ id: "n", title: shown.nextSessionTrack.title, cover: shown.nextSessionTrack.cover, tag: "" });
+    }
+    return out.slice(0, 10);
+  }, [shown, tr]);
+}
+
+export function VmUpNextList({ items, playing }: { items: UpNextItem[]; playing: boolean }) {
+  const tr = useTr();
+  return (
+    <div className="vm-upnext">
+      <div className="vm-sec">
+        {tr("Up next")}
+        {playing ? <VmEq /> : null}
+      </div>
+      {items.map((u) => (
+        <div key={u.id} className="vm-row">
+          <VmCover src={u.cover} name={u.title} size={46} radius={11} />
+          <div className="vm-row-text">
+            <div className="vm-row-title vm-bdi">{u.title}</div>
+            {u.tag ? <div className="vm-row-sub">{u.tag}</div> : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * NOW PLAYING for the SELECTED branch — one component for the full-height sheet (opened from the mini-player) and for a branch's own screen.
  * It only shows what the branch's station reports and sends commands to that station; nothing plays on the phone.
  */
-export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => void; /** the branch's own screen already says which branch this is */ hideWho?: boolean }) {
+export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBranch?: () => void; /** the branch's own screen already says which branch this is */ hideWho?: boolean; /** the flow gives "Up next" a screen of its own */ hideUpNext?: boolean }) {
   const f = useMobileFleet();
   const tr = useTr();
   const tone = useNowTone();
@@ -26,20 +69,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
   const listTitle = shown?.sessionTitle || shown?.currentSource?.title || "";
   const subtitle = listTitle && listTitle !== trackTitle ? listTitle : "";
 
-  // what comes next on this branch: the staged "Play next" songs first, then the rest of the playlist after the current song
-  const upNext = useMemo(() => {
-    if (!shown) return [] as { id: string; title: string; cover: string | null; tag: string }[];
-    const out: { id: string; title: string; cover: string | null; tag: string }[] = [];
-    for (const q of shown.playNextQueue ?? []) out.push({ id: `q:${q.id}`, title: q.title, cover: q.cover, tag: tr("Play next") });
-    const tracks = shown.sessionTracks ?? [];
-    const i = typeof shown.currentTrackIndex === "number" ? shown.currentTrackIndex : -1;
-    if (tracks.length && i >= 0) {
-      for (const t of tracks.slice(i + 1, i + 9)) out.push({ id: `t:${t.id}`, title: t.title, cover: t.cover, tag: "" });
-    } else if (shown.nextSessionTrack) {
-      out.push({ id: "n", title: shown.nextSessionTrack.title, cover: shown.nextSessionTrack.cover, tag: "" });
-    }
-    return out.slice(0, 10);
-  }, [shown, tr]);
+  const upNext = useUpNext();
 
   if (!b) {
     return (
@@ -143,23 +173,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
             </button>
           </div>
 
-          {upNext.length ? (
-            <div className="vm-upnext">
-              <div className="vm-sec">
-                {tr("Up next")}
-                {playing ? <VmEq /> : null}
-              </div>
-              {upNext.map((u) => (
-                <div key={u.id} className="vm-row">
-                  <VmCover src={u.cover} name={u.title} size={46} radius={11} />
-                  <div className="vm-row-text">
-                    <div className="vm-row-title vm-bdi">{u.title}</div>
-                    {u.tag ? <div className="vm-row-sub">{u.tag}</div> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {upNext.length && !hideUpNext ? <VmUpNextList items={upNext} playing={playing} /> : null}
         </>
       )}
     </div>
