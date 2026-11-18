@@ -19,12 +19,18 @@ import { SCHEDULE_SWITCH_EVENT } from "@/lib/schedule-switch-client";
 import { clearScheduleDriven } from "@/lib/schedule-driven";
 import { clearQuietStopTries, noteQuietStopTry, peekQuietStopTries, quietStopFinished, waitForQuiet } from "@/lib/schedule-quiet-stop";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
+import { scheduleScopeNote } from "@/lib/schedule-branch-scope";
 import type { PlayStatus } from "@/lib/schedule-start-retry";
 import type { Schedule, Source } from "@/lib/types";
 
 /** Fixed cadence (owner 2026-10-15, 400-branch network): schedules are minute-granular → one check every 30 s. */
 const POLL_MS = 30_000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/**
+ * Why the schedule's log lines are `console.warn`: the desktop app's main process mirrors ONLY renderer warnings / errors into main.log (its `console-message` handler, level ≥ 2). The engine's lines used to be
+ * `console.info`, so on a station none of them (a start, a quiet stop, a retry…) ever reached main.log and a "why did it not play" question had no evidence. They are event-driven (a block's start / stop,
+ * a change of scope), a handful a day.
+ */
 /** how many polls a controller window waits for the player's state to become known before it treats the player as silent */
 const WATCH_UNKNOWN_MAX = 4;
 /** a browser window that has just opened does nothing for this long (unless it is the station's own window): the cloud socket needs a moment to tell it whether another player exists, and the first look used to start the block at once */
@@ -75,6 +81,7 @@ export function ScheduleAutoPlayer() {
     const d = new Date();
     watchState.current = { at: d.getTime(), day: ymdOf(d), min: d.getHours() * 60 + d.getMinutes(), unknown: 0 };
   }
+  const lastScopeNote = useRef<string | null>(null); // the last "which branch's schedule" line written to the log
   const startWatch = useRef<StartWatch | null>(null);
   const retryCarry = useRef<{ key: string; tries: number } | null>(null);
   // FLOOD FIX (2026-10-15): the playback handlers change identity on EVERY station status update (several per second).
@@ -115,7 +122,7 @@ export function ScheduleAutoPlayer() {
               /* a failed change is not retried */
             }
             writeFadeRestore(null);
-            console.info(`[VONO schedule] a fade-out that never finished — volume ${left}% put back`);
+            console.warn(`[VONO schedule] a fade-out that never finished — volume ${left}% put back`);
           }
         }
         // Network calls can throw (offline, tab nav, slow 5G on mobile, dev
@@ -132,6 +139,14 @@ export function ScheduleAutoPlayer() {
           if (!res.ok || cancelled) return;
           enabled = res.headers.get("x-schedule-enabled") !== "0";
           schedules = (await res.json()) as Schedule[];
+          // which branch's schedule this station follows, written to the log when it changes (audit F2: a block of another branch silently never starts here)
+          const otherHeader = res.headers.get("x-schedules-other-branches");
+          const other = otherHeader === null || otherHeader.trim() === "" || !Number.isFinite(Number(otherHeader)) ? null : Number(otherHeader);
+          const note = scheduleScopeNote({ branch, blocks: Array.isArray(schedules) ? schedules.length : 0, enabled, otherBranches: other });
+          if (note && note !== lastScopeNote.current) {
+            lastScopeNote.current = note;
+            console.warn(`[VONO schedule] ${note}`);
+          }
           try {
             localStorage.setItem(`${SCHEDULES_CACHE_KEY}:${branch}`, JSON.stringify({ at: Date.now(), schedules, enabled }));
           } catch {
@@ -181,7 +196,7 @@ export function ScheduleAutoPlayer() {
           const cur = currentBlockAt(schedules, now, skipIds);
           const verdict = decideStartCheck({ watch: sw, now: Date.now(), status: handlersRef.current.getPlayStatus?.() ?? null, stillCurrent: !!cur && scheduleAutoFireStorageKey(cur, now) === sw.key });
           if (verdict === "retry") {
-            console.info(`[VONO schedule] the start of the block did not start the music (try ${sw.tries}) — starting it again`);
+            console.warn(`[VONO schedule] the start of the block did not start the music (try ${sw.tries}) — starting it again`);
             retryCarry.current = { key: sw.key, tries: sw.tries };
             startWatch.current = null;
             try {
@@ -190,7 +205,7 @@ export function ScheduleAutoPlayer() {
               /* it is tried again at the next poll */
             }
           } else if (verdict === "give-up") {
-            console.info(`[VONO schedule] the block's music did not start after ${sw.tries} tries — leaving it`);
+            console.warn(`[VONO schedule] the block's music did not start after ${sw.tries} tries — leaving it`);
             startWatch.current = null;
             retryCarry.current = null;
           } else if (verdict === "ok") {
@@ -215,7 +230,7 @@ export function ScheduleAutoPlayer() {
         const action = decideScheduleAction({ schedules, now, skipIds, hasFired, reassertSilence: firstLook, watch });
         if (firstLook && blockVolume !== null && handlersRef.current.getVolume?.() !== blockVolume) {
           const set = applyBlockVolume(handlersRef.current, blockVolume);
-          if (set !== null) console.info(`[VONO schedule] restart inside "${inForce?.name ?? inForce?.id}" — its volume ${set}% put back`);
+          if (set !== null) console.warn(`[VONO schedule] restart inside "${inForce?.name ?? inForce?.id}" — its volume ${set}% put back`);
         }
         firstLook = false;
         if (!action) return;
@@ -226,7 +241,7 @@ export function ScheduleAutoPlayer() {
           } catch {
             /* ignore quota */
           }
-          console.info(`[VONO schedule] "${action.schedule.name ?? action.schedule.id}" was already in force when this window opened and music is playing — left alone`);
+          console.warn(`[VONO schedule] "${action.schedule.name ?? action.schedule.id}" was already in force when this window opened and music is playing — left alone`);
           return;
         }
         if (action.kind === "stop") {
@@ -275,7 +290,7 @@ export function ScheduleAutoPlayer() {
           giveBackVolume(); // the volume is put back only now that the music is quiet (or the stop did not work), so the next block starts at the right level
           if (cancelled) return;
           const finished = quietStopFinished(quiet, tryNo);
-          console.info(`[VONO schedule] quiet block "${action.schedule.name ?? action.schedule.id}" — ${fadeNote}; stop sent (try ${tryNo}); ${quiet ? "the music is quiet" : finished ? "still playing — giving up so it never fights a person" : "still playing — will repeat at the next poll"}`);
+          console.warn(`[VONO schedule] quiet block "${action.schedule.name ?? action.schedule.id}" — ${fadeNote}; stop sent (try ${tryNo}); ${quiet ? "the music is quiet" : finished ? "still playing — giving up so it never fights a person" : "still playing — will repeat at the next poll"}`);
           if (!finished) return;
           for (const k of action.fireKeys) {
             clearQuietStopTries(k);
@@ -291,7 +306,7 @@ export function ScheduleAutoPlayer() {
         // the block's own volume (or the volume the player had before a schedule changed it) is set BEFORE the music starts, so a quieter block never begins at the old, louder level
         {
           const set = applyBlockVolume(handlersRef.current, typeof winner.volume === "number" ? winner.volume : null);
-          if (set !== null) console.info(`[VONO schedule] "${winner.name ?? winner.id}" starts — volume ${set}%`);
+          if (set !== null) console.warn(`[VONO schedule] "${winner.name ?? winner.id}" starts — volume ${set}%`);
         }
 
         let list: Source[] = [];
@@ -336,7 +351,7 @@ export function ScheduleAutoPlayer() {
         // the start is watched until the music is really playing; a start that went nowhere is repeated into silence (lib/schedule-start-retry.ts)
         const carry = retryCarry.current;
         startWatch.current = { key: fireKey, at: Date.now(), tries: carry && carry.key === fireKey ? carry.tries + 1 : 1 };
-        console.info(`[VONO schedule] "${winner.name ?? winner.id}" — start handed over to the player (try ${startWatch.current.tries})`);
+        console.warn(`[VONO schedule] "${winner.name ?? winner.id}" — start handed over to the player (try ${startWatch.current.tries})`);
       } finally {
         busyRef.current = false;
       }

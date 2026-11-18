@@ -27,3 +27,16 @@ export function schedulesForBranch<T extends { branchId?: string | null }>(
     return mine === wanted || !ctx.knownBranchIds.has(mine);
   });
 }
+
+/**
+ * One line that says WHICH branch's schedule a window follows and how many blocks that is — written to the log when it changes (2026-11-18 audit, F2). Since 2026-11-16 a window runs only its own
+ * branch's blocks (`schedulesForBranch`); a block stored under another branch silently never starts here, and nothing said so. `otherBranches` = how many of this business's blocks the server left out
+ * because they belong to another branch (null = an older server that does not say). PURE.
+ */
+export function scheduleScopeNote(i: { branch: string; blocks: number; enabled: boolean; otherBranches: number | null }): string | null {
+  if (i.otherBranches === null) return null;
+  const head = `this station follows branch "${i.branch}": ${i.blocks} block(s), schedule switch ${i.enabled ? "ON" : "OFF"}`;
+  if (i.otherBranches <= 0) return head;
+  const warn = i.blocks === 0 && i.enabled ? "NOTHING WILL START FROM THE SCHEDULE here — " : "";
+  return `${warn}${head}; ${i.otherBranches} other block(s) of this business belong to other branches and do not run here`;
+}
