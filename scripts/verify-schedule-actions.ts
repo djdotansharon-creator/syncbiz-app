@@ -33,6 +33,7 @@ function runDay(schedules: Schedule[], from: [number, number], to: [number, numb
     if (!a) continue;
     const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     if (a.kind === "start") { fired.add(a.fireKey); log.push(`${hhmm} start ${a.schedule.id}`); }
+    else if (a.kind === "adopt") { fired.add(a.fireKey); log.push(`${hhmm} adopt ${a.schedule.id}`); }
     else { a.fireKeys.forEach((k) => fired.add(k)); log.push(`${hhmm} stop(${a.reason}) ${a.schedule.id}`); }
   }
   return { log, fired };

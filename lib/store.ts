@@ -5,6 +5,7 @@
  */
 
 import { prisma } from "./prisma";
+import { skipDatesFromTags, tagsWithSkipDates, ymdOf } from "./schedule-skip";
 import { canonicalContentBranchForWrite } from "./branch-resolver";
 import { ensureDefaultBrandId, defaultZoneData } from "./control-room-foundation";
 import {
@@ -151,9 +152,15 @@ function rowToSchedule(row: {
     createdBy: row.createdBy ?? undefined,
     updatedBy: row.updatedBy ?? undefined,
     taxonomyTags: row.taxonomyTags as Schedule["taxonomyTags"] ?? undefined,
+    skipDates: skipDatesOrUndefined(row.taxonomyTags), // "off for this day" dates (owner 2026-11-18), kept in the block's tags — lib/schedule-skip.ts
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function skipDatesOrUndefined(tags: unknown): string[] | undefined {
+  const d = skipDatesFromTags(tags);
+  return d.length > 0 ? d : undefined;
 }
 
 function rowToAnnouncement(row: {
@@ -502,9 +509,18 @@ export const db = {
         ? typeof endRaw === "string" && endRaw.trim().length > 0 ? endRaw : "23:59"
         : undefined;
 
+    // "off for this day" dates live in the block's existing tags column (no migration): the skip tags are replaced, every other tag is kept (lib/schedule-skip.ts)
+    let skipTags: object | undefined;
+    if (data.skipDates !== undefined) {
+      const cur = await prisma.schedule.findFirst({ where: { id: sid, workspaceId: wsId }, select: { taxonomyTags: true } });
+      if (!cur) return null;
+      skipTags = tagsWithSkipDates(cur.taxonomyTags, data.skipDates, ymdOf(new Date())) as object;
+    }
+
     const res = await prisma.schedule.updateMany({
       where: { id: sid, workspaceId: wsId },
       data: {
+        ...(skipTags !== undefined && { taxonomyTags: skipTags }),
         ...(data.name !== undefined && { name: data.name ?? null }),
         ...(data.branchId !== undefined && { branchId: data.branchId }),
         ...(data.targetType !== undefined && { targetType: data.targetType }),

@@ -28,6 +28,7 @@ import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
+import { isSkippedOn, withSkipDate, ymdOf } from "@/lib/schedule-skip";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import { JINGLE_SCHEDULE_EVENT, loadJingleSchedule } from "@/components/jingles-control/schedule-storage";
 import { setJinglesOpenTab } from "@/components/jingles-control/open-tab";
@@ -2762,6 +2763,21 @@ function ScenePopover({
               <span className="ss-switch-label">{tr("Active")}</span>
               <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
             </button>
+            {schedule.enabled && schedule.recurrence !== "one_off" && occurrenceDate ? (
+              // the father 2026-11-18: switch off ONE block for ONE day — the block before it then plays on until the next block that is on (lib/schedule-skip.ts)
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!isSkippedOn(schedule, occurrenceDate)}
+                className="ss-switch ss-switch--sm"
+                data-on={!isSkippedOn(schedule, occurrenceDate)}
+                title={tr("Off for this day only — the block before it plays on until the next one")}
+                onClick={() => onPatch({ skipDates: withSkipDate(schedule.skipDates, occurrenceDate, !isSkippedOn(schedule, occurrenceDate), ymdOf(new Date())) })}
+              >
+                <span className="ss-switch-label">{tr("Plays on {date}", { date: dateLabel(occurrenceDate) })}</span>
+                <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
+              </button>
+            ) : null}
             {autoPlaybackOff ? (
               <button type="button" className="ss-linkbtn" onClick={() => setAutoPlaybackOff(false)} title={tr("This block was switched off on this computer only")}>{tr("Off on this computer — turn on")}</button>
             ) : null}

@@ -9,6 +9,7 @@
 import type { Schedule } from "@/lib/types";
 import { parseLocalTimeToMinutes, numericSchedulePriority } from "@/lib/schedule-window";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
+import { isSkippedOn } from "@/lib/schedule-skip";
 
 export const DAY_MINUTES = 1440;
 /** the week starts on Sunday (0), like `Schedule.daysOfWeek` */
@@ -27,6 +28,8 @@ export type Scene = {
   quiet: boolean;
   /** a disabled block: drawn as a small dashed marker, it does not take part in the sequence */
   paused: boolean;
+  /** the block is switched on in general but OFF for this one date (owner 2026-11-18, lib/schedule-skip.ts): drawn like a paused block, and the block before it carries on */
+  offDay?: boolean;
   /** a second block with exactly the same start time as another: it never plays (the first one wins) */
   shadowed: boolean;
 };
@@ -102,11 +105,13 @@ export function appliesOnDay(s: Schedule, day: number, weekDates: string[]): boo
  */
 export function buildDayScenes(schedules: Schedule[], day: number, weekDates: string[], musicMinutes?: (s: Schedule) => number | null, floatingId?: string): Scene[] {
   const mine = schedules.filter((s) => appliesOnDay(s, day, weekDates));
+  const dateOfDay = weekDates[day];
+  const offToday = (s: Schedule): boolean => isSkippedOn(s, dateOfDay);
   // a block that is being CARRIED (owner 2026-11-15) is not part of the sequence: it floats above the others, keeps its own length (a block next to it never cuts it short, and it never
   // cuts the others short), and what it covers is only its own stretch
   const floating = floatingId ? mine.find((s) => s.id === floatingId && s.enabled) : undefined;
   const active = mine
-    .filter((s) => s.enabled && s.id !== floatingId)
+    .filter((s) => s.enabled && !offToday(s) && s.id !== floatingId)
     .sort((a, b) => {
       const d = startMinutes(a) - startMinutes(b);
       if (d !== 0) return d;
@@ -133,9 +138,9 @@ export function buildDayScenes(schedules: Schedule[], day: number, weekDates: st
     seen.add(start);
     scenes.push({ schedule: s, day, start, end, endSet: own !== null && own <= nextStart, quiet, paused: false, shadowed });
   }
-  for (const s of mine.filter((x) => !x.enabled)) {
+  for (const s of mine.filter((x) => !x.enabled || offToday(x))) {
     const start = startMinutes(s);
-    scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), endSet: false, quiet: isSilenceBlock(s), paused: true, shadowed: false });
+    scenes.push({ schedule: s, day, start, end: Math.min(DAY_MINUTES, start + 30), endSet: false, quiet: isSilenceBlock(s), paused: true, shadowed: false, ...(s.enabled ? { offDay: true } : {}) });
   }
   if (floating) {
     const start = startMinutes(floating);
