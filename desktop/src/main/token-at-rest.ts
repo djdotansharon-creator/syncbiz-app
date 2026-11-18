@@ -38,14 +38,17 @@ export type TokenCipher = {
 /**
  * No-protection cipher (default + no-DPAPI fallback). It reports unavailable and CANNOT seal — so a non-empty
  * token yields `null` (the save layer then refuses cleartext and keeps the existing on-disk value). A legacy
- * plaintext value still loads via `open` (passthrough), so nothing already on disk is lost.
+ * plaintext value still loads via `open` (passthrough), so nothing already on disk is lost; a SEALED value cannot
+ * be opened here → "" (never handed out as a token).
  */
 export function identityTokenCipher(): TokenCipher {
   return {
     available: () => false,
-    isSealed: () => false,
+    // 2026-11-18: a value that carries the seal marker IS sealed even though this cipher cannot open it — it must never be mistaken for a plaintext token (it used to be returned as-is, i.e. a garbage
+    // bearer token on any read before the real cipher was installed) and the save layer must recognise it so it is never overwritten with "".
+    isSealed: (stored) => typeof stored === "string" && stored.startsWith(TOKEN_SEAL_MAGIC),
     seal: (plain) => (plain ? null : ""), // cannot seal a real token without protection → null (never plaintext)
-    open: (stored) => (typeof stored === "string" ? stored : ""),
+    open: (stored) => (typeof stored === "string" && !stored.startsWith(TOKEN_SEAL_MAGIC) ? stored : ""),
   };
 }
 
