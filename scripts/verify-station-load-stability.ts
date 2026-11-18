@@ -14,7 +14,10 @@ const read = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 
 const sap = read("components/schedule-auto-player.tsx");
 assert("S1 schedules are checked every 30 s", /const POLL_MS = 30_000;/.test(sap));
-assert("S2 the polling effect depends ONLY on engine on/off + restore (not on per-update handlers)", /\}, \[engineEnabled, isRestoring\]\);/.test(sap) && !/\[engineEnabled, isRestoring, router/.test(sap));
+// 2026-11-18: the deps are now [isRestoring, stationBranch, isPhoneApp] (the per-browser engine switch was replaced by the branch's own switch read from the server on 2026-11-16; the phone app runs no schedule).
+// The flood-fix invariant is unchanged: the effect depends only on restore + two stable values (a branch id string, a route-derived boolean) — never on the playback handlers that change on every status update.
+const sapDeps = /\}, \[([^\]]*)\]\);\s*\n\s*return null;/.exec(sap)?.[1] ?? "";
+assert("S2 the polling effect depends ONLY on restore + stable values (a branch id, a route flag) — not on per-update handlers", sapDeps.split(",").map((x) => x.trim()).filter(Boolean).every((d) => ["isRestoring", "stationBranch", "isPhoneApp"].includes(d)) && /isRestoring/.test(sapDeps) && !/router|stop|setQueue|playSource|setVolume|getVolume|isAudible/.test(sapDeps));
 assert("S3 the latest playback handlers are read from a ref when a schedule fires", /const handlersRef = useRef\(/.test(sap) && /const h = handlersRef\.current;/.test(sap));
 
 const smc = read("components/sources-manager-client.tsx");

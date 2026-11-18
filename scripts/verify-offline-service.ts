@@ -125,7 +125,8 @@ async function main() {
     const mpv = read("desktop/src/main/mpv-manager.ts");
     assert("C14 MPV: ONE change — the loadfile target passes the offline resolver before the media token (play + prepared standby both use loadInternal)",
       /const \{ target, kind \} = normalizeMpvLoadTarget\(withStationMediaToken\(resolveOfflineUrl\(u\)\)\);/.test(mpv)
-      && (mpv.match(/resolveOfflineUrl/g) ?? []).length === 2 && /import \{ resolveOfflineUrl \} from "\.\/offline\/offline-runtime";/.test(mpv));
+      // 2026-11-18: count only CODE (comments stripped) — the C1 gate's explanatory comment names resolveOfflineUrl too; the invariant is still "one import + one call"
+      && (mpv.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").match(/resolveOfflineUrl/g) ?? []).length === 2 && /import \{ resolveOfflineUrl \} from "\.\/offline\/offline-runtime";/.test(mpv));
     const ipc = read("desktop/src/main/ipc-mvp.ts");
     assert("C15 init next to the station media token; refresh on a new desktop token",
       /initOfflineService\(\{ getConfig: \(\) => getEffectiveRuntimeConfig\(\), withToken: withStationMediaToken/.test(ipc) && /refreshOffline\("desktop-auth"\)/.test(ipc));
