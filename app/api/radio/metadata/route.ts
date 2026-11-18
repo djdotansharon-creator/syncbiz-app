@@ -3,6 +3,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { resolveRemoteMediaTarget } from "@/lib/remote-media-url-policy";
+import { safeFetch } from "@/lib/ssrf-safe-fetch";
 
 const DEFAULT_GENRE = "Radio";
 const DEFAULT_IMAGE = "/radio-default.svg";
@@ -18,19 +21,22 @@ function isValidUrl(s: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
+    // F1: require an authenticated session (the only caller is the signed-in Add-Radio form).
+    const user = await getCurrentUserFromCookies();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { url } = (await req.json()) as { url?: string };
     const raw = typeof url === "string" ? url.trim() : "";
-    if (!raw || !isValidUrl(raw)) {
+    // F1: reject invalid / non-public (internal / loopback / credentialed / non-http) targets before fetching.
+    if (!raw || !isValidUrl(raw) || resolveRemoteMediaTarget(raw) === null) {
       return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
     }
 
-    const res = await fetch(raw, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; SyncBiz/1.0; +https://syncbiz.app)",
-      },
-      signal: AbortSignal.timeout(8000),
-    }).catch(() => null);
+    // F1: SSRF-safe fetch — validates the RESOLVED IP at connection time (DNS rebinding) and re-validates every
+    // redirect hop, while preserving Host/SNI for public HTTPS. A blocked target throws → benign fallback below.
+    const res = await safeFetch(raw, { timeoutMs: 8000 }).catch(() => null);
 
     if (!res?.ok) {
       return NextResponse.json({
@@ -40,7 +46,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const html = await res.text();
+    const html = res.body;
     const title = parseOgTitle(html) ?? parseTitleTag(html) ?? extractTitleFromUrl(raw);
     const image = parseOgImage(html) ?? parseFavicon(html, raw) ?? null;
 
