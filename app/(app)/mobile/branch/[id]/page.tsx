@@ -6,19 +6,20 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { VmPage, useVmUi } from "@/components/vm/vm-ui";
-import { VmNowPlaying } from "@/components/vm/vm-now-playing";
+import { VmNowPlaying, useUpNext } from "@/components/vm/vm-now-playing";
 import { useNowTone } from "@/components/vm/vm-tone";
 import { VmCover } from "@/components/vm/vm-parts";
 import { Rise, VmFlow, VmFlowSection, VmFold, VmKv } from "@/components/vm/vm-flow";
+import { VmDayBoard } from "@/components/vm/vm-day-board";
 import { useBranchPeople } from "@/components/control-room/branch-people";
 import { useSongIdAvailable } from "@/lib/use-song-id-available";
 import { canRenameBranch, renameBranch, useBranchDetails } from "@/lib/use-branch-details";
 import { VmScheduleSwitchLine } from "@/components/vm/vm-schedule-switch";
-import { IconChevronBack, IconChevronForward, IconIdentify, IconJingle, IconLibrary, IconPencil, IconPeople, IconStore, IconUpNext } from "@/components/vm/vm-icons";
+import { IconChevronBack, IconChevronForward, IconIdentify, IconJingle, IconLibrary, IconPencil, IconPeople, IconStore } from "@/components/vm/vm-icons";
 
 /**
  * ONE BRANCH — a flow (owner 2026-11-18, an experiment: "the background does not move, only the elements rise from below as I scroll down, a part at a time, like the iPhone's Control Center").
- * Part 1: what the branch plays now (cover, position, volume, modes, what is next). Part 2: what plays — pick songs, identify a song / Shazam, jingles — and its schedule. Part 3: its people
+ * Screen by screen (owner 2026-11-18: "I cannot choose where to stop — it moves me a screen at a time"): 1 what the branch plays now (cover, position, volume, modes) · 2 what is next (when something is queued) · 3 what plays — pick songs, identify a song / Shazam, jingles — and its schedule · 4 its people
  * (only for an administrator) and the branch itself (address, number, time zone, player) behind an arrow, closed until it is pressed. The background is the colour of the song that plays.
  * Opening a branch makes it the one the whole app controls.
  */
@@ -78,6 +79,7 @@ export default function MobileBranchPage() {
   const people = useBranchPeople(id);
   const songId = useSongIdAvailable();
   const details = useBranchDetails(id);
+  const upNext = useUpNext();
 
   // opening a branch makes it THE branch the whole app (mini-player, library, search) controls
   const { select } = f;
@@ -130,19 +132,43 @@ export default function MobileBranchPage() {
   };
 
   return (
-    <VmPage flow title={branch?.name ?? ""} barTitle={branch?.name} lead={back} subtitle={branch?.city || undefined}>
-      <VmFlow tone={tone}>
-        {/* 1 — what plays now */}
-        <VmFlowSection label={tr("Now playing")}>
+    <VmPage flow title="" barTitle={branch?.name} lead={back} tone={tone}>
+      <VmFlow tone={tone} snap>
+        {/* page 1 — what plays now: one whole page, nothing of the next one under it */}
+        <VmFlowSection tall label={tr("Now playing")}>
           <Rise enter={0}>
-            <VmNowPlaying hideWho />
+            <VmNowPlaying hideUpNext />
           </Rise>
         </VmFlowSection>
 
-        {/* 2 — what plays, and when */}
+        {/* page 2 — what comes next (only when something is queued) */}
+        {upNext.length > 0 ? (
+          <VmFlowSection tall label={tr("Up next")}>
+            <Rise>
+              <h2 className="vm-fl-h1">{tr("Up next")}</h2>
+              <p className="vm-fl-sub">{tr("{n} songs", { n: upNext.length })}</p>
+            </Rise>
+            <div className="vm-fl-up">
+              {upNext.map((u) => (
+                <Rise key={u.id}>
+                  <div className="vm-row">
+                    <VmCover src={u.cover} name={u.title} size={46} radius={11} />
+                    <div className="vm-row-text">
+                      <div className="vm-row-title vm-bdi">{u.title}</div>
+                      {u.tag ? <div className="vm-row-sub">{u.tag}</div> : null}
+                    </div>
+                  </div>
+                </Rise>
+              ))}
+            </div>
+          </VmFlowSection>
+        ) : null}
+
+        {/* page 3 — what plays */}
         <VmFlowSection tall label={tr("What plays")}>
           <Rise>
-            <h2 className="vm-fl-h">{tr("What plays")}</h2>
+            <h2 className="vm-fl-h1">{tr("What plays")}</h2>
+            <p className="vm-fl-sub">{tr("Pick songs, identify a song, play a jingle")}</p>
           </Rise>
           <div className="vm-fl-list">
             <Rise>
@@ -157,32 +183,36 @@ export default function MobileBranchPage() {
               <FlowLink href="/mobile/jingles" icon={<IconJingle />} title={tr("Jingles")} sub={tr("Play a jingle on the speakers, or make a new one")} />
             </Rise>
           </div>
+        </VmFlowSection>
 
+        {/* page 4 — the schedule: the day as a board, the date can be changed */}
+        <VmFlowSection tall fill label={tr("Schedule")}>
           <Rise>
-            <h2 className="vm-fl-h" style={{ marginTop: 30 }}>{tr("Schedule")}</h2>
+            <h2 className="vm-fl-h1">{tr("Schedule")}</h2>
           </Rise>
           <div className="vm-fl-list">
             <Rise>
-              <VmScheduleSwitchLine branchId={branch?.id ?? null} />
-            </Rise>
-            <Rise>
-              <FlowLink href="/mobile/scheduling" icon={<IconUpNext />} title={tr("Today's plan")} />
+              <VmScheduleSwitchLine branchId={branch?.id ?? null} title={tr("Play by schedule")} />
             </Rise>
           </div>
+          <Rise fill>
+            <VmDayBoard branchId={branch?.id ?? null} />
+          </Rise>
         </VmFlowSection>
 
-        {/* 3 — who is here, and the branch itself */}
+        {/* page 5 — who is here, and the branch itself */}
         <VmFlowSection tall label={tr("The branch")}>
+          <Rise>
+            <h2 className="vm-fl-h1">{tr("The branch")}</h2>
+            {facts?.city || branch?.city ? <p className="vm-fl-sub vm-bdi">{facts?.city || branch?.city}</p> : <p className="vm-fl-sub" />}
+          </Rise>
           {people.state === "ready" ? (
             <>
-              <Rise>
-                <h2 className="vm-fl-h">{tr("People")}</h2>
-              </Rise>
               {people.assigned.length > 0 ? (
                 <Rise>
                   <div className="vm-avatars">
                     {people.assigned.slice(0, 6).map((p) => (
-                      <VmCover key={p.userId} name={p.name || p.email} size={40} radius={999} />
+                      <VmCover key={p.userId} name={p.name || p.email} size={40} radius={999} neutral />
                     ))}
                   </div>
                 </Rise>
@@ -194,13 +224,9 @@ export default function MobileBranchPage() {
               </div>
             </>
           ) : null}
-
-          <Rise>
-            <h2 className="vm-fl-h" style={{ marginTop: 30 }}>{tr("The branch")}</h2>
-          </Rise>
-          <div className="vm-fl-list">
+          <div className="vm-fl-list" style={{ marginTop: 12 }}>
             <Rise>
-              <VmFold label={tr("Details")} summary={facts?.address || facts?.city || undefined}>
+              <VmFold label={tr("Details")} summary={facts?.address || undefined}>
                 <VmKv label={tr("Name")} value={facts?.name || branch?.name || "—"} />
                 {facts?.address ? <VmKv label={tr("Address")} value={facts.address} /> : null}
                 {facts?.number ? <VmKv label={tr("Branch number")} value={facts.number} dir="ltr" /> : null}

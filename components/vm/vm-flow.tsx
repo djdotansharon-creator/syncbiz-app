@@ -28,6 +28,9 @@ export function easeOutBack(t: number): number {
 
 export type RiseState = { y: number; s: number; o: number };
 
+const ZONE_IN = 90;
+const ZONE_OUT = 56;
+
 /**
  * Where one element is drawn, from where it sits (`slot`, its untransformed box) and the visible area (`view`). Pure.
  *  · entering: while its top is within `zone` px above the bottom edge it rises from 64 px below, grows from 93 % to 100 % and fades in (with the small overshoot);
@@ -35,9 +38,9 @@ export type RiseState = { y: number; s: number; o: number };
  * An element that is fully inside the visible area is exactly at rest (y 0, scale 1, opacity 1).
  */
 export function riseState(slot: { top: number; bottom: number }, view: { top: number; bottom: number }): RiseState {
-  const zone = Math.max(70, (view.bottom - view.top) * 0.2);
-  const pin = clamp01((view.bottom - slot.top) / zone);
-  const pout = clamp01(1 - (slot.bottom - view.top) / zone);
+  // the zones are short on purpose: an element that sits where its page puts it (a heading at the top, the last row at the bottom) is always fully drawn — only an element that is really on its way in or out is not
+  const pin = clamp01((view.bottom - slot.top) / ZONE_IN);
+  const pout = clamp01(1 - (slot.bottom - view.top) / ZONE_OUT);
   const e = easeOutBack(pin);
   return {
     y: (1 - e) * 64 - pout * 34,
@@ -59,8 +62,7 @@ function paint(root: HTMLElement, scroller: HTMLElement, reduced: boolean): void
     return;
   }
   const cr = scroller.getBoundingClientRect();
-  const dock = parseFloat(getComputedStyle(scroller).paddingBottom) || 0; // the floating mini-player + tab bar cover the lower part of the scroll area
-  const view = { top: cr.top + 56, bottom: cr.bottom - dock * 0.62 };
+  const view = { top: cr.top + 40, bottom: cr.bottom }; // the top bar is above 40 px; the tab bar covers the lower edge, where the next page's elements come up from
   const rects = Array.from(slots, (s) => s.getBoundingClientRect()); // all reads first, then all writes: one layout per frame
   slots.forEach((s, i) => {
     const inner = s.firstElementChild as HTMLElement | null;
@@ -73,22 +75,41 @@ function paint(root: HTMLElement, scroller: HTMLElement, reduced: boolean): void
 }
 
 /** the page: a fixed background in `tone` (the CSS variables --vm-t1 / --vm-t2) and the parts that scroll over it */
-export function VmFlow({ tone, children }: { tone: CSSProperties; children: ReactNode }) {
+export function VmFlow({ tone, snap, children }: { tone: CSSProperties; /** screen by screen: every part is a full screen and the scroll always lands on one (a swipe moves one screen; you cannot stop in between) */ snap?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pages, setPages] = useState({ count: 0, active: 0 });
   useIsoLayoutEffect(() => {
     const root = ref.current;
     const scroller = document.getElementById("vm-scroll");
     if (!root || !scroller) return;
     const mq = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
     let raf = 0;
-    const run = () => {
+    const run = (first = false) => {
       raf = 0;
+      // the height of ONE screen: the scroll area without the tab bar (the parts are exactly this tall, so the scroll lands on each one's start)
+      const dock = parseFloat(getComputedStyle(scroller).paddingBottom) || 0;
+      root.style.setProperty("--vm-snap-h", `${Math.max(320, Math.round(scroller.clientHeight - dock))}px`);
       paint(root, scroller, !!mq?.matches);
+      if (first) return;
+      // which page we are on (the nearest part start) — for the dots at the edge
+      const secs = root.querySelectorAll<HTMLElement>(".vm-flow-sec");
+      const top = scroller.getBoundingClientRect().top;
+      let best = 0;
+      let bestD = Infinity;
+      secs.forEach((el, i) => {
+        const d = Math.abs(el.getBoundingClientRect().top - top);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      });
+      setPages((p) => (p.count === secs.length && p.active === best ? p : { count: secs.length, active: best }));
     };
     const schedule = () => {
-      if (!raf) raf = window.requestAnimationFrame(run);
+      if (!raf) raf = window.requestAnimationFrame(() => run());
     };
-    run();
+    run(true);
+    schedule();
     scroller.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null; // a part that appears later (the people row) changes the page's height
@@ -101,26 +122,45 @@ export function VmFlow({ tone, children }: { tone: CSSProperties; children: Reac
     };
   }, []);
   return (
-    <div className="vm-flow" style={tone} ref={ref}>
+    <div className="vm-flow" style={tone} ref={ref} data-snap={snap ? "" : undefined}>
       <div className="vm-flow-bg" aria-hidden />
+      {snap && pages.count > 1 ? (
+        <nav className="vm-pgdots">
+          {Array.from({ length: pages.count }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              className="vm-pgdot"
+              data-on={i === pages.active ? "" : undefined}
+              aria-label={`${i + 1} / ${pages.count}`}
+              aria-current={i === pages.active ? "true" : undefined}
+              onClick={() => {
+                const sec = ref.current?.querySelectorAll<HTMLElement>(".vm-flow-sec")[i];
+                const sc = document.getElementById("vm-scroll");
+                if (sec && sc) sc.scrollTo({ top: sc.scrollTop + sec.getBoundingClientRect().top - sc.getBoundingClientRect().top, behavior: "smooth" });
+              }}
+            />
+          ))}
+        </nav>
+      ) : null}
       {children}
     </div>
   );
 }
 
 /** one part of the page (the scroll settles on its start); `tall` = at least a screen high, so a part is a "page" */
-export function VmFlowSection({ children, tall, label }: { children: ReactNode; tall?: boolean; label?: string }) {
+export function VmFlowSection({ children, tall, fill, label }: { children: ReactNode; tall?: boolean; /** the part is a column whose last element (a `Rise fill`) takes the rest of the screen */ fill?: boolean; label?: string }) {
   return (
-    <section className="vm-flow-sec" data-tall={tall ? "" : undefined} aria-label={label}>
+    <section className="vm-flow-sec" data-tall={tall ? "" : undefined} data-fill={fill ? "" : undefined} aria-label={label}>
       {children}
     </section>
   );
 }
 
 /** one element that rises into place; `enter` (0, 1, 2…) also plays a short staggered entrance when the page opens */
-export function Rise({ children, enter, className }: { children: ReactNode; enter?: number; className?: string }) {
+export function Rise({ children, enter, fill, className }: { children: ReactNode; enter?: number; /** takes the rest of the screen (inside a `VmFlowSection fill`) */ fill?: boolean; className?: string }) {
   return (
-    <div data-rise className={`vm-rise${className ? ` ${className}` : ""}`} style={enter === undefined ? undefined : ({ ["--vm-i" as string]: enter } as CSSProperties)} data-enter={enter === undefined ? undefined : ""}>
+    <div data-rise data-fill={fill ? "" : undefined} className={`vm-rise${className ? ` ${className}` : ""}`} style={enter === undefined ? undefined : ({ ["--vm-i" as string]: enter } as CSSProperties)} data-enter={enter === undefined ? undefined : ""}>
       <div className="vm-rise-in">{children}</div>
     </div>
   );

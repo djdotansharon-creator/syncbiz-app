@@ -36,19 +36,26 @@ export function useVmUi(): VmUi {
  * `title` is big at the top of the page; once it has scrolled away a slim glass bar shows it small. `lead` (a back button) and `end` (actions) stay
  * visible in that bar all the time. Pages render inside the shell's one scroll container (#vm-scroll).
  */
-export function VmPage({ title, subtitle, lead, end, barTitle, flow, children }: { title: string; subtitle?: ReactNode; lead?: ReactNode; end?: ReactNode; barTitle?: string; /** a "flow" page (components/vm/vm-flow.tsx): no entrance animation of its own — its parts rise by themselves */ flow?: boolean; children: ReactNode }) {
+export function VmPage({ title, subtitle, lead, end, barTitle, flow, tone, children }: { title: string; subtitle?: ReactNode; lead?: ReactNode; end?: ReactNode; barTitle?: string; /** a "flow" page (components/vm/vm-flow.tsx): no entrance animation of its own — its parts rise by themselves */ flow?: boolean; /** the page's colours (--vm-t1 / --vm-t2) — the top bar of a flow page is drawn from them */ tone?: CSSProperties; children: ReactNode }) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const root = document.getElementById("vm-scroll");
     const el = sentinel.current;
-    if (!root || !el || typeof IntersectionObserver === "undefined") return;
+    if (!root) return;
+    if (flow) {
+      // a flow page has no large title to scroll away: the bar's title shows as soon as the page has moved
+      const on = () => setScrolled(root.scrollTop > 40);
+      root.addEventListener("scroll", on, { passive: true });
+      return () => root.removeEventListener("scroll", on);
+    }
+    if (!el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(([e]) => setScrolled(!e!.isIntersecting), { root, threshold: 0, rootMargin: "-52px 0px 0px 0px" });
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [flow]);
   return (
-    <div className="vm-page" data-flow={flow ? "" : undefined}>
+    <div className="vm-page" data-flow={flow ? "" : undefined} style={tone}>
       <div className="vm-bar" data-on={scrolled ? "" : undefined}>
         {lead ? <div className="vm-bar-lead">{lead}</div> : null}
         <span className="vm-bar-title vm-bdi">{barTitle ?? title}</span>

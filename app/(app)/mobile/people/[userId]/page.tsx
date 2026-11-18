@@ -172,15 +172,16 @@ export default function MobilePersonPage() {
     });
 
   const name = person.name || person.email;
+  const personTone = toneVars({ h: nameHue(name), s: 0.5 }, true);
   const levelText = levelLabel(person.level, tr);
   const roleText = person.roleName ?? levelText;
   const roleValue = !ready.rolesOn ? levelText : admin ? levelText : role ? role.name : tr("No role yet");
   return (
-    <VmPage flow title="" barTitle={name} lead={back}>
-      <VmFlow tone={toneVars({ h: nameHue(name), s: 0.5 }, true)}>
+    <VmPage flow title="" barTitle={name} lead={back} tone={personTone}>
+      <VmFlow tone={personTone}>
         <Rise enter={0}>
           <div className="vm-hero2">
-            <VmCover name={name} size={96} radius={999} />
+            <VmCover name={name} size={96} radius={999} neutral />
             <div className="vm-hero2-name vm-bdi">{name}{person.isYou ? ` · ${tr("You")}` : ""}</div>
             <div className="vm-hero2-sub">{roleText} · {stateLabel(person.status, tr)}</div>
           </div>

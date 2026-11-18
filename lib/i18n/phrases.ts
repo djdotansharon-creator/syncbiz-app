@@ -1143,6 +1143,13 @@ export const HE_PHRASES: Record<string, string> = {
   "Time zone": "אזור זמן",
   "Version": "גרסה",
   "What plays": "מה מתנגן",
+  "Back to today": "חזרה להיום",
+  "Choose a date": "בחירת תאריך",
+  "Nothing is planned for this day": "אין תזמון ליום הזה",
+  "Pick songs, identify a song, play a jingle": "בוחרים שירים, מזהים שיר, משמיעים ג'ינגל",
+  "The day after": "היום הבא",
+  "The day before": "היום הקודם",
+  "Play by schedule": "ניגון לפי תזמון",
 };
 
 const PHRASES: Record<string, Record<string, string> | undefined> = { he: HE_PHRASES };
