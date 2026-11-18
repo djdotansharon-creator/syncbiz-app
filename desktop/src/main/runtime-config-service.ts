@@ -175,7 +175,11 @@ export function loadRuntimeConfig(userData: string): DesktopRuntimeConfig {
   }
 }
 
-export function saveRuntimeConfig(userData: string, config: DesktopRuntimeConfig): SaveRuntimeConfigResult {
+export function saveRuntimeConfig(
+  userData: string,
+  config: DesktopRuntimeConfig,
+  opts: { /** the caller really means to remove the station token (a patch that set it to ""), as opposed to a save that merely carries an empty in-memory token */ explicitTokenClear?: boolean } = {},
+): SaveRuntimeConfigResult {
   mkdirSync(userData, { recursive: true });
   const file = join(userData, CONFIG_NAME);
 
@@ -185,7 +189,18 @@ export function saveRuntimeConfig(userData: string, config: DesktopRuntimeConfig
   let tokenPersisted = true;
   let legacyPlaintextRemains = false;
   if (!token) {
-    onDiskToken = ""; // intentional clear
+    // An EMPTY in-memory token is not always "clear it": when the sealed token on disk could not be opened this run (foreign Windows user / DPAPI not available yet / a read before the real cipher was
+    // installed) `loadRuntimeConfig` hands out "" — and every later save (device-identity reconcile, any settings patch, the music-folder heal) used to overwrite the sealed token with "" for good, so the
+    // station lost its identity until someone signed in again (2026-11-18 audit; the C6b commit message said the sealed blob is never overwritten — the code did not do that). Now: a sealed token that
+    // this cipher cannot open is KEPT unless the caller explicitly asked to clear it. A token that CAN be opened, or a legacy / empty one, is cleared as before.
+    const existing = opts.explicitTokenClear ? "" : readStoredWsToken(file);
+    if (existing !== "" && tokenCipher.isSealed(existing) && tokenCipher.open(existing) === "") {
+      onDiskToken = existing;
+      tokenPersisted = false;
+      warnLog("C6b token-at-rest: the sealed token on disk could not be opened this run — kept (NOT overwritten with an empty token)", {});
+    } else {
+      onDiskToken = ""; // intentional clear
+    }
   } else {
     const sealed = tokenCipher.seal(token); // string | null — NEVER plaintext
     if (sealed !== null) {
@@ -280,6 +295,6 @@ export function patchRuntimeConfig(
   if (!next.branchId.trim()) {
     next = { ...next, branchId: "default" };
   }
-  saveRuntimeConfig(userData, next);
+  saveRuntimeConfig(userData, next, { explicitTokenClear: patch.wsToken === "" });
   return next;
 }

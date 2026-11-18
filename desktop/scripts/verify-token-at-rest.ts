@@ -5,6 +5,8 @@
  *  - failure: encryption unavailable → a NEW token is NEVER written in cleartext; an existing token (sealed or
  *    legacy) is PRESERVED, not overwritten/blanked; tokenPersisted=false; a legacy-plaintext-remains WARN fires
  *    (without the token value); migration of a legacy token when protection is unavailable is recorded, not forced.
+ *  - 2026-11-18 (keep-sealed): a sealed token this run could not open ("" in memory) is NOT overwritten by a later unrelated save; an explicit clear still works; an early read before the real cipher is installed
+ *    never hands the blob out as a token.
  *  - durability: atomic write leaves no partial file / no leftover .tmp; a save that fails mid-write leaves the
  *    PREVIOUS file intact and throws (no false success); a corrupt file on restart recovers without crashing.
  *
@@ -15,6 +17,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   saveRuntimeConfig,
+  patchRuntimeConfig,
   loadRuntimeConfig,
   setTokenCipher,
   setConfigWarnLogger,
@@ -160,6 +163,52 @@ setTokenCipher(fakeCipher({ available: false }));
   const id = identityTokenCipher();
   assert("identity: available=false, seal(real)=null (never plaintext), seal('')='' , open passthrough",
     id.available() === false && id.seal("tok") === null && id.seal("") === "" && id.open("legacy") === "legacy");
+}
+
+// ── 2026-11-18: a sealed token that cannot be opened this run must NOT be overwritten with "" by a later, unrelated save ──
+{
+  const d = ud("keep-sealed");
+  warns = [];
+  setTokenCipher(fakeCipher());
+  saveRuntimeConfig(d, cfg(d, "REAL-TOKEN"));
+  const sealedOnDisk = JSON.parse(readFileSync(path.join(d, CONFIG_NAME), "utf8")).wsToken as string;
+  assert("keep-sealed: setup — the token is sealed on disk", sealedOnDisk.startsWith(TOKEN_SEAL_MAGIC));
+
+  // this run the cipher cannot open it (foreign user / DPAPI not ready): the config loads with an EMPTY token…
+  setTokenCipher(fakeCipher({ failOpen: true }));
+  const loaded = loadRuntimeConfig(d);
+  assert("keep-sealed: an unopenable sealed token loads as '' (never a garbage bearer token)", loaded.wsToken === "");
+  // …and an UNRELATED save (device-identity reconcile / a settings patch) carries that empty token
+  const r = saveRuntimeConfig(d, { ...loaded, branchId: "b2" });
+  assert("keep-sealed: an unrelated save does NOT overwrite the sealed token", JSON.parse(readFileSync(path.join(d, CONFIG_NAME), "utf8")).wsToken === sealedOnDisk);
+  assert("keep-sealed: the save reports tokenPersisted=false (no false success) and the other setting WAS saved", r.tokenPersisted === false && JSON.parse(readFileSync(path.join(d, CONFIG_NAME), "utf8")).branchId === "b2");
+  assert("keep-sealed: a WARN fired and it carries no token value", warns.some((w) => /kept \(NOT overwritten/.test(w)) && !warns.some((w) => w.includes("REAL-TOKEN")));
+  // the next run, with a working cipher, still has its identity
+  setTokenCipher(fakeCipher());
+  assert("keep-sealed: the next run with a working cipher still opens the same token (no re-login)", loadRuntimeConfig(d).wsToken === "REAL-TOKEN");
+
+  // an EXPLICIT clear still removes it (patch with wsToken "")
+  setTokenCipher(fakeCipher({ failOpen: true }));
+  patchRuntimeConfig(d, loadRuntimeConfig(d), { wsToken: "" });
+  assert("keep-sealed: an EXPLICIT clear (patch wsToken '') still removes the token", JSON.parse(readFileSync(path.join(d, CONFIG_NAME), "utf8")).wsToken === "");
+
+  // a token that CAN be opened and an empty in-memory token is a real clear, as before
+  setTokenCipher(fakeCipher());
+  saveRuntimeConfig(d, cfg(d, "T2"));
+  saveRuntimeConfig(d, cfg(d, ""));
+  assert("keep-sealed: an openable token + an empty in-memory token is cleared as before", JSON.parse(readFileSync(path.join(d, CONFIG_NAME), "utf8")).wsToken === "");
+
+  // before the real cipher is installed (the default identity cipher) a sealed blob is neither handed out as a token nor overwritten
+  const d2 = ud("keep-sealed-early");
+  setTokenCipher(fakeCipher());
+  saveRuntimeConfig(d2, cfg(d2, "EARLY"));
+  const blob = JSON.parse(readFileSync(path.join(d2, CONFIG_NAME), "utf8")).wsToken as string;
+  setTokenCipher(identityTokenCipher());
+  const early = loadRuntimeConfig(d2);
+  saveRuntimeConfig(d2, { ...early, branchId: "b3" });
+  assert("early read (identity cipher): the sealed blob is NOT returned as the token, and an early save keeps it", early.wsToken === "" && JSON.parse(readFileSync(path.join(d2, CONFIG_NAME), "utf8")).wsToken === blob);
+  const idc = identityTokenCipher();
+  assert("identity cipher: recognises a sealed value (isSealed) and never opens it; plaintext still passes through", idc.isSealed(TOKEN_SEAL_MAGIC + "xx") === true && idc.open(TOKEN_SEAL_MAGIC + "xx") === "" && idc.open("legacy") === "legacy" && idc.isSealed("legacy") === false);
 }
 
 try { rmSync(base, { recursive: true, force: true }); } catch { /* best-effort */ }
