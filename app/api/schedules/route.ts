@@ -51,7 +51,10 @@ export async function GET(req: NextRequest) {
       const sw = await getScheduleSwitch(user.tenantId, wanted);
       headers["X-Schedule-Enabled"] = sw.enabled ? "1" : "0";
     }
-    return NextResponse.json(schedulesForBranch(filtered, wanted, { canonicalDefaultBranchId, knownBranchIds }), { headers });
+    const scoped = schedulesForBranch(filtered, wanted, { canonicalDefaultBranchId, knownBranchIds });
+    // 2026-11-18 (audit F2): how many blocks the caller may see were left out because they belong to ANOTHER branch — so the player can say so in its log (lib/schedule-branch-scope.ts `scheduleScopeNote`)
+    headers["X-Schedules-Other-Branches"] = String(Math.max(0, filtered.length - scoped.length));
+    return NextResponse.json(scoped, { headers });
   }
   return NextResponse.json(filtered);
 }
