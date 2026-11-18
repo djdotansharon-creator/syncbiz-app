@@ -36,7 +36,7 @@ export function useVmUi(): VmUi {
  * `title` is big at the top of the page; once it has scrolled away a slim glass bar shows it small. `lead` (a back button) and `end` (actions) stay
  * visible in that bar all the time. Pages render inside the shell's one scroll container (#vm-scroll).
  */
-export function VmPage({ title, subtitle, lead, end, barTitle, children }: { title: string; subtitle?: ReactNode; lead?: ReactNode; end?: ReactNode; barTitle?: string; children: ReactNode }) {
+export function VmPage({ title, subtitle, lead, end, barTitle, flow, children }: { title: string; subtitle?: ReactNode; lead?: ReactNode; end?: ReactNode; barTitle?: string; /** a "flow" page (components/vm/vm-flow.tsx): no entrance animation of its own — its parts rise by themselves */ flow?: boolean; children: ReactNode }) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
@@ -48,7 +48,7 @@ export function VmPage({ title, subtitle, lead, end, barTitle, children }: { tit
     return () => io.disconnect();
   }, []);
   return (
-    <div className="vm-page">
+    <div className="vm-page" data-flow={flow ? "" : undefined}>
       <div className="vm-bar" data-on={scrolled ? "" : undefined}>
         {lead ? <div className="vm-bar-lead">{lead}</div> : null}
         <span className="vm-bar-title vm-bdi">{barTitle ?? title}</span>
