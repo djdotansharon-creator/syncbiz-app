@@ -74,7 +74,7 @@ async function main() {
   assert("S4 it is a portal over the app, not a route or a replacement of the shell", code.includes("createPortal(") && !code.includes("<AudioPlayer") && !code.includes("router.push"));
   assert("S5 while up, everything underneath is made inert — never hidden or unmounted", code.includes('setAttribute("inert"') && !/display\s*:\s*none|\.remove\(\)|unmount/.test(code));
   const shell = read("components", "app-shell.tsx");
-  assert("S6 the shell mounts it exactly once and still has exactly three <AudioPlayer /> mounts (no new instance)", (shell.match(/<KioskDisplay \/>/g) ?? []).length === 1 && (shell.match(/<AudioPlayer \/>/g) ?? []).length === 3);
+  assert("S6 the shell mounts it exactly once and still has exactly three <AudioPlayer /> mounts (no new instance)", (shell.match(/<KioskDisplay \/>/g) ?? []).length === 1 && (shell.match(/<MemoAudioPlayer \/>/g) ?? []).length === 3 && (shell.match(/<AudioPlayer \/>/g) ?? []).length === 1); // 2026-11-18: mounted through the MemoAudioPlayer wrapper (b07f8d3, perf) — three mounts of the wrapper, one <AudioPlayer /> inside it
   const player = read("components", "audio-player.tsx");
   // 2026-11-09: the publish moved into <NowPositionPublisher> (components/player-surface/live-timeline.tsx) so the display screen keeps its 4×/s
   // position without the whole player re-rendering. Same invariant: one display-only publish, mounted once per player, nothing reads it back.

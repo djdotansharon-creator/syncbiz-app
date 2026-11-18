@@ -21,7 +21,7 @@ const dpc = read("lib", "device-player-context.tsx");
 assert("M1 management routes = Dashboard, Control Room, Access Control (existing URLs) + the player-closed pages Jingles and Lock screen design",
   shell.includes(String.raw`const isManagementRoute = /^\/(dashboard|access-control|jingles|display-design|owner\/control-room)(\/|$)/.test(pathname ?? "");`));
 assert("M2 still exactly three <AudioPlayer /> mounts (streamer / mobile / main) — no new instance, no new branch",
-  (shell.match(/<AudioPlayer \/>/g) ?? []).length === 3);
+  (shell.match(/<MemoAudioPlayer \/>/g) ?? []).length === 3 && (shell.match(/<AudioPlayer \/>/g) ?? []).length === 1); // 2026-11-18: mounted through the MemoAudioPlayer wrapper (b07f8d3, perf) — three mounts of the wrapper, one <AudioPlayer /> inside it
 assert("M3 the player row is the SAME element: only class + inert + aria-hidden toggle (no conditional render)",
   shell.includes('${isManagementRoute ? " mgmt-deck-hidden" : ""}') && shell.includes("inert={isManagementRoute}") &&
   !/isManagementRoute \? null|isManagementRoute && <AudioPlayer|!isManagementRoute \? \(\s*<div\s+className=\{`\$\{isMediaThemeRoute/.test(shell));
