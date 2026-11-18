@@ -19,7 +19,7 @@ import { normalizeMpvLoadTarget } from "./mpv-input-normalize";
 import { withStationMediaToken } from "./media-token-provider";
 import { resolveOfflineUrl } from "./offline/offline-runtime";
 import { redactMediaToken } from "../shared/redact-media-token";
-import { resolveRemoteMediaTarget } from "../shared/remote-media-url-policy";
+import { resolveMpvLoadTarget } from "../shared/remote-media-url-policy";
 import { fileLog } from "./file-logger";
 
 const PIPELINE = "[SyncBiz:desktop-mpv:bridge]";
@@ -784,7 +784,9 @@ export class MpvManager {
     // re-checked. Fail-safe + fail-forward: a rejected target simply does not load — the current track keeps
     // playing and a crossfade standby times out so the orchestrator stays on the audible track. No st mutation
     // here, so playback truth is never falsified by a rejected command.
-    if (!resolveRemoteMediaTarget(u)) {
+    // 2026-11-18: `resolveMpvLoadTarget` = the remote-URL policy PLUS the one exception that must pass here — a LOCAL file on a drive of this computer (the renderer plays LOCAL music by sending its raw path
+    // through this very method). A UNC / network path, a LAN / loopback URL, `file://host/…` etc. stay rejected exactly as before. See shared/remote-media-url-policy.ts.
+    if (!resolveMpvLoadTarget(u)) {
       fileLog("WARN", "MPV_LOAD_REJECTED_C1", { attemptId, startPaused });
       console.warn(PIPELINE, "loadfile rejected by C1 remote-media policy", { pipe: this.pipePath, attemptId });
       return;

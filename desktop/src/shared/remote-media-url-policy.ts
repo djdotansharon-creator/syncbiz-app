@@ -89,6 +89,30 @@ export function resolveRemoteMediaTarget(raw: unknown, appBaseUrl?: string | nul
   return s; // original, unchanged
 }
 
+/** A LOCAL file on a drive of THIS machine: `C:\Music\a.mp3`, `C:/Music/a.mp3`, or the file URL form `file:///C:/Music/a.mp3` (empty host + a drive letter). */
+const LOCAL_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
+const LOCAL_DRIVE_FILE_URL = /^file:\/\/\/[a-zA-Z]:[\\/]/i;
+const MAX_LOCAL_PATH_LEN = 4096;
+
+/**
+ * C1 A2 — the engine's LAST gate before MPV `loadfile` (desktop/src/main/mpv-manager.ts `loadInternal`).
+ *
+ * WHY THIS EXISTS (2026-11-18): A2 used `resolveRemoteMediaTarget` directly, which rejects EVERY Windows drive path and `file:` — but the station's own renderer plays LOCAL music by sending the raw local
+ * path to `mpvPlayUrl` → `loadInternal` (components/audio-player.tsx; the restart restore and the offline-with-no-internet case included). So from commit 674fcad on, a LOCAL song never loaded (a
+ * `MPV_LOAD_REJECTED_C1` line in main.log, then silence). A2 is the right place for the gate, but a LOCAL file of this computer is not a "remote media URL" and must pass.
+ *
+ * RULE: a local DRIVE path (or a `file:///X:/…` URL) is allowed here; EVERYTHING else is judged exactly as before by `resolveRemoteMediaTarget` — so a UNC / network path (`\\host\share`, `\\?\…`),
+ * a `file://host/…` URL, a LAN / loopback / `localhost` URL, a non-http(s) scheme, credentials in the URL, … stay rejected. The WS boundary (A1: device-ws-manager PLAY / PLAY_SOURCE) keeps
+ * using `resolveRemoteMediaTarget` ONLY, so a path arriving over the cloud socket is still refused (CLAUDE.md §12: local paths never travel through WS).
+ */
+export function resolveMpvLoadTarget(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!s || s.length > MAX_LOCAL_PATH_LEN || s.includes("\0")) return null;
+  if (LOCAL_DRIVE_PATH.test(s) || LOCAL_DRIVE_FILE_URL.test(s)) return s;
+  return resolveRemoteMediaTarget(s);
+}
+
 /** Convenience boolean form — true when `u` is an approved absolute remote media URL. */
 export function isAllowedRemoteMediaUrl(u: string): boolean {
   return resolveRemoteMediaTarget(u) !== null;

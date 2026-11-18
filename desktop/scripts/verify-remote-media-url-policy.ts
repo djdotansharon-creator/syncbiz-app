@@ -238,17 +238,17 @@ no("server-relative with a non-http origin", "/api/media/x", "ftp://host");
     /resolveRemoteMediaTarget\(rUrl, this\.config\.apiBaseUrl\)/.test(srcCase) && /forbidden\/non-public media target \(C1\)/.test(srcCase));
 
   const mpv = read("desktop", "src", "main", "mpv-manager.ts");
-  assert("import of the policy present in mpv-manager",
-    /import \{ resolveRemoteMediaTarget \} from "\.\.\/shared\/remote-media-url-policy"/.test(mpv));
+  assert("import of the policy present in mpv-manager (2026-11-18: resolveMpvLoadTarget = the remote policy + the LOCAL drive-path exception)",
+    /import \{ resolveMpvLoadTarget \} from "\.\.\/shared\/remote-media-url-policy"/.test(mpv));
   const loadStart = mpv.indexOf("private loadInternal(");
   const load = mpv.slice(loadStart, mpv.indexOf("pause(): void {", loadStart));
-  const idxPolicy = load.indexOf("resolveRemoteMediaTarget(u)");
+  const idxPolicy = load.indexOf("resolveMpvLoadTarget(u)");
   const idxOffline = load.indexOf("resolveOfflineUrl(u)");
   assert("A2 wired in loadInternal: policy gate present", idxPolicy > -1);
   assert("A2 ordering: policy check runs BEFORE resolveOfflineUrl (loopback output never re-checked)",
     idxPolicy > -1 && idxOffline > -1 && idxPolicy < idxOffline, `policy@${idxPolicy} offline@${idxOffline}`);
   assert("A2 is fail-safe: a rejected target returns without loadfile, no st mutation",
-    /if \(!resolveRemoteMediaTarget\(u\)\) \{[\s\S]{0,400}?return;\s*\}/.test(load));
+    /if \(!resolveMpvLoadTarget\(u\)\) \{[\s\S]{0,400}?return;\s*\}/.test(load));
 
   const policy = read("desktop", "src", "shared", "remote-media-url-policy.ts");
   assert("policy module is PURE (no node: imports, no require, no fetch/net)",
