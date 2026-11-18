@@ -104,6 +104,17 @@ export function nextAutoIndex(s: Pick<UrlSession, "items" | "index">, repeatMode
   return null;
 }
 
+/**
+ * Owner 2026-11-04 (Lenovo + Dev-PC went silent): an item marked failed in this run (e.g. ONE transient failed prepare of
+ * the very song that is looping) must not end the music. When the session has nothing left ONLY because of those marks,
+ * this is the item the loop rule would play without them (null = the marks are not the reason — nothing to retry; loop
+ * "off" at the end of the list stays the operator's stop). Retries stay capped by MAX_AUTO_FAILURES at the call site.
+ */
+export function retryIndexAfterFailures(s: Pick<UrlSession, "items" | "index">, repeatMode: RepeatMode, failed: ReadonlySet<number>): number | null {
+  if (failed.size === 0 || nextAutoIndex(s, repeatMode, failed) !== null) return null;
+  return nextAutoIndex(s, repeatMode, new Set<number>());
+}
+
 /** The published id of item `i` (leaf ids follow the renderer's `<shell>:track:r<i>` convention). */
 export function sourceIdFor(s: UrlSession, i: number): string {
   return s.shell ? `${s.shell}${LEAF}r${i}` : s.sourceId;
