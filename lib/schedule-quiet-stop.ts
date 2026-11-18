@@ -41,6 +41,11 @@ export function noteQuietStopTry(key: string): number {
   return n;
 }
 
+/** how many tries this quiet block's stop has had so far (0 = none yet) */
+export function peekQuietStopTries(key: string): number {
+  return tries.get(key) ?? 0;
+}
+
 export function clearQuietStopTries(key: string): void {
   tries.delete(key);
 }

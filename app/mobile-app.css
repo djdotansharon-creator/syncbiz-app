@@ -483,6 +483,18 @@ html[data-sb-fx="lite"] .vm-bar[data-on], html[data-sb-fx="lite"] .vm-tabs { box
 .vm-day-blk[data-quiet] { background: rgba(255, 255, 255, 0.05); }
 .vm-day-blk[data-quiet] .vm-day-name { color: var(--vm-text2); font-weight: 500; }
 .vm-day-blk[data-past] { opacity: 0.5; }
+.vm-day-blk { text-align: start; color: inherit; font: inherit; transition: transform 160ms var(--vm-ease), background 140ms ease; }
+.vm-day-blk:active { transform: scale(0.985); }
+/* a block switched off for THIS day only: dimmed, a slim chip laid over the block that plays on through its time; the name is crossed out */
+.vm-day-blk[data-off] { z-index: 1; inset-inline: 76px 34px; background: rgba(40, 40, 46, 0.86); opacity: 0.8; }
+.vm-day-blk[data-off]::before { background: var(--vm-text3); }
+.vm-day-blk[data-off] .vm-day-name { text-decoration: line-through; color: var(--vm-text2); font-weight: 500; }
+.vm-blk-switch { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 64px; padding: 10px 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.08); text-align: start; color: var(--vm-text); font-size: 17px; font-weight: 600; transition: transform 160ms var(--vm-ease), opacity 140ms ease; }
+.vm-blk-switch:active { transform: scale(0.985); }
+.vm-blk-switch[disabled] { opacity: 0.7; }
+.vm-blk-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.vm-blk-switch-text small { font-size: 13px; font-weight: 400; line-height: 1.35; color: var(--vm-text2); }
+.vm-blk-err { color: var(--vm-danger); }
 .vm-day-name { font-size: 16px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vm-day-time { font-size: 13px; color: var(--vm-text2); line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vm-day-blk[data-short] { flex-direction: row; align-items: center; gap: 8px; padding-block: 0; }

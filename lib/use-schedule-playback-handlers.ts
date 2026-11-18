@@ -7,6 +7,7 @@ import { useRoutedPlaySource } from "@/lib/use-routed-play-source";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { decideScheduleRoute } from "@/lib/schedule-station-route";
 import { hasMediaSessionToken, subscribeMediaSession } from "@/lib/media/media-session";
+import type { PlayStatus } from "@/lib/schedule-start-retry";
 
 /** Inside the desktop shell with MAIN's status bridge (the same bridge device-player-context resolves the designation from). */
 function hasDesktopStatusBridge(): boolean {
@@ -47,6 +48,20 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
   const isDesignatedStation = device?.isDesignatedAudioStation ?? false;
   const isBranchConnected = device?.isBranchConnected ?? false;
   const hasMaster = !!device?.masterDeviceId;
+  // what the Player is doing, for the engine's check that a block's start really started the music: the station's own status (MAIN) when this window shows / controls a station — null until the first
+  // status has arrived, so "not known yet" is never taken for "silent" — else this window's own player
+  const playStatusRef = useRef<PlayStatus>(null);
+  const controlsAnother = (device?.deviceMode === "CONTROL" && hasMaster) || isDesignatedStation;
+  useEffect(() => {
+    playStatusRef.current = controlsAnother ? (masterStatus ?? null) : (providerStatus ?? null);
+  });
+  const getPlayStatus = useCallback(() => playStatusRef.current, []);
+  // a window that only controls ANOTHER player (not the station's own window): it never takes over music that plays when it opens in the middle of a block
+  const controlsRef = useRef(false);
+  useEffect(() => {
+    controlsRef.current = device?.deviceMode === "CONTROL" && hasMaster && !isDesignatedStation;
+  });
+  const controlsAnotherPlayer = useCallback(() => controlsRef.current, []);
   const stationPlay = device?.playSourceOrSend;
   const stopOrSend = device?.stopOrSend;
   // a music bank streams through the media token the MASTER holds; a CONTROL only routes the token-free source to it (same rule as the Royalty-Free screen)
@@ -58,6 +73,6 @@ export function useSchedulePlaybackHandlers(): SchedulePlaybackHandlers {
     const playSource = route.kind === "station" && stationPlay ? stationPlay : routedPlaySource;
     // a scheduled END / quiet block stops the music exactly like the Stop button does (on a station or a controller that is MAIN's STOP command)
     const stopScheduled = stopOrSend ?? stop;
-    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled, isAudible, getVolume, setVolume, bankStreamReady };
-  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isAudible, getVolume, setVolume, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster, bankStreamReady]);
+    return { stop, setQueue, playSource, setLastMessage, route, stopScheduled, isAudible, getPlayStatus, controlsAnotherPlayer, getVolume, setVolume, bankStreamReady };
+  }, [stop, setQueue, setLastMessage, routedPlaySource, stationPlay, stopOrSend, isAudible, getPlayStatus, controlsAnotherPlayer, getVolume, setVolume, isDesktopShell, mainSnapResolved, isDesignatedStation, isBranchConnected, hasMaster, bankStreamReady]);
 }

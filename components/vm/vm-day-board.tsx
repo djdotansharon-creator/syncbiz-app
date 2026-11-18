@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMobileSources } from "@/lib/mobile-sources-context";
 import { useLocale } from "@/lib/locale-context";
 import { useTr } from "@/lib/i18n/use-tr";
@@ -9,6 +9,8 @@ import type { Schedule } from "@/lib/types";
 import { playlistSeconds } from "@/components/vm/vm-source-row";
 import { PX_PER_MIN, boardLayout, dateKey, pad2, parseDateKey, shiftDay } from "@/lib/day-board";
 import { IconChevronBack, IconChevronForward, IconUpNext } from "@/components/vm/vm-icons";
+import { useVmUi } from "@/components/vm/vm-ui";
+import { isSkippedOn, withSkipDate } from "@/lib/schedule-skip";
 
 /**
  * THE DAY BOARD (owner 2026-11-18: "I want to see a real daily board — the day's schedule — and to change the date when I press on it"). The day of the OPEN branch as a timeline: the hours down the side,
@@ -18,8 +20,10 @@ import { IconChevronBack, IconChevronForward, IconUpNext } from "@/components/vm
  */
 
 /** the schedules of one branch (re-read when the app comes back to the front: the plan may have been changed on the computer) */
-function useBranchSchedules(branchId: string | null): { schedules: Schedule[] | null; status: "loading" | "ready" | "error" } {
+function useBranchSchedules(branchId: string | null): { schedules: Schedule[] | null; status: "loading" | "ready" | "error"; reload: () => void } {
   const [res, setRes] = useState<{ branch: string | null; schedules: Schedule[] | null; status: "loading" | "ready" | "error" }>({ branch: null, schedules: null, status: "loading" });
+  const [round, setRound] = useState(0); // a block was switched on / off for a day: read the plan again
+  const reload = useCallback(() => setRound((n) => n + 1), []);
   useEffect(() => {
     if (!branchId) return;
     let alive = true;
@@ -40,15 +44,71 @@ function useBranchSchedules(branchId: string | null): { schedules: Schedule[] | 
       alive = false;
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [branchId]);
-  return res.branch === branchId ? { schedules: res.schedules, status: res.status } : { schedules: null, status: "loading" };
+  }, [branchId, round]);
+  return res.branch === branchId ? { schedules: res.schedules, status: res.status, reload } : { schedules: null, status: "loading", reload };
+}
+
+/**
+ * ONE BLOCK, ONE DAY (the father 2026-11-18: "to switch off only today's 14:00 playlist — an ON / OFF button; then the 8:00 playlist plays on until the 18:00 one"). Opened by pressing a block on the board:
+ * its name and time, and the switch "plays on <this day>". Off = the block does not start that day and the block before it plays on until the next block that is on; the block itself and every other day
+ * stay exactly as they are. Saved with the same route the computer uses (PATCH /api/schedules/:id — `skipDates`), so the station obeys it at its next look (within 30 s).
+ */
+function VmBlockSheet({ scene, name, dateStr, dateText, today, onSaved }: { scene: Scene; /** the name the board shows for it */ name: string; dateStr: string; dateText: string; /** the day is today: "Plays today" */ today: boolean; onSaved: () => void }) {
+  const tr = useTr();
+  const ui = useVmUi();
+  const [dates, setDates] = useState<string[]>(scene.schedule.skipDates ?? []);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(false);
+  const off = isSkippedOn({ skipDates: dates }, dateStr);
+  const sc = scene.schedule;
+  // a block that is off for this day is drawn as a marker (its length is not meaningful): only its start time
+  const range = scene.offDay || scene.end >= DAY_MINUTES - 1 ? formatMinutes(scene.start) : `${formatMinutes(scene.start)}–${formatMinutes(scene.end)}`;
+  const flip = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(false);
+    try {
+      const res = await fetch(`/api/schedules/${encodeURIComponent(sc.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ skipDates: withSkipDate(dates, dateStr, !off, dateKey(new Date())) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const saved = (await res.json()) as Schedule;
+      setDates(Array.isArray(saved.skipDates) ? saved.skipDates : []);
+      onSaved();
+    } catch {
+      setErr(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="vm-ask">
+      <h2 className="vm-bdi">{name}</h2>
+      <p><bdi dir="ltr">{range}</bdi></p>
+      <button type="button" className="vm-blk-switch" role="switch" aria-checked={!off} onClick={() => void flip()} disabled={busy}>
+        <span className="vm-blk-switch-text">
+          {today ? tr("Plays today") : tr("Plays on {date}", { date: dateText })}
+          <small>{off ? tr("Off — the block before it plays on until the next one") : tr("On — plays at its time")}</small>
+        </span>
+        <span className="vm-switch" data-on={off ? undefined : ""} data-busy={busy ? "" : undefined} />
+      </button>
+      {err ? <p className="vm-blk-err">{tr("Couldn't save the change")}</p> : null}
+      <button type="button" className="vm-ask-btn" data-main onClick={() => ui.closeSheet()}>
+        {tr("Done")}
+      </button>
+    </div>
+  );
 }
 
 export function VmDayBoard({ branchId }: { branchId: string | null }) {
   const tr = useTr();
   const { locale } = useLocale();
   const { sources } = useMobileSources();
-  const { schedules, status } = useBranchSchedules(branchId);
+  const { schedules, status, reload } = useBranchSchedules(branchId);
+  const ui = useVmUi();
   const [now, setNow] = useState<Date | null>(null);
   const [picked, setPicked] = useState<string | null>(null); // null = today
   const boardRef = useRef<HTMLDivElement>(null);
@@ -87,7 +147,8 @@ export function VmDayBoard({ branchId }: { branchId: string | null }) {
       const sec = u?.origin === "playlist" ? playlistSeconds(u.playlist) : null;
       return sec && sec > 0 ? Math.max(1, Math.ceil((sec + 20) / 60)) : null;
     };
-    return buildDayScenes(schedules, day.getDay(), weekDatesFor(day), musicMinutes).filter((s) => !s.paused && !s.shadowed);
+    // a block switched off for THIS day only stays on the board (dimmed) so it can be switched on again; a block that is paused for every day is not drawn
+    return buildDayScenes(schedules, day.getDay(), weekDatesFor(day), musicMinutes).filter((s) => !s.shadowed && (!s.paused || s.offDay));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedules, dayKeyStr, lookup]);
 
@@ -168,16 +229,29 @@ export function VmDayBoard({ branchId }: { branchId: string | null }) {
             {blocks.map(({ scene: sc, top, height }) => {
               const isNow = playingNow === sc;
               const isNext = next === sc;
-              const past = isToday && sc.end <= nowMin && !isNow;
+              const off = !!sc.offDay;
+              const past = isToday && sc.end <= nowMin && !isNow && !off;
               const until = sc.end >= DAY_MINUTES - 1 ? "" : `${formatMinutes(sc.start)}–${formatMinutes(sc.end)}`;
               return (
-                <div key={`${sc.schedule.id}:${sc.start}`} className="vm-day-blk" data-now={isToday && isNow ? "" : undefined} data-quiet={sc.quiet ? "" : undefined} data-past={past ? "" : undefined} data-short={height < 46 ? "" : undefined} style={{ top, height }}>
+                <button
+                  type="button"
+                  key={`${sc.schedule.id}:${sc.start}`}
+                  className="vm-day-blk"
+                  data-now={isToday && isNow ? "" : undefined}
+                  data-quiet={sc.quiet ? "" : undefined}
+                  data-past={past ? "" : undefined}
+                  data-off={off ? "" : undefined}
+                  data-short={height < 46 || off ? "" : undefined}
+                  style={{ top, height: off ? Math.min(height, 40) : height }}
+                  aria-label={`${nameOf(sc)} ${until || formatMinutes(sc.start)}`}
+                  onClick={() => ui.openSheet(nameOf(sc), <VmBlockSheet scene={sc} name={nameOf(sc)} dateStr={dayKeyStr} dateText={label} today={isToday} onSaved={reload} />)}
+                >
                   <span className="vm-day-name vm-bdi">{nameOf(sc)}</span>
                   <span className="vm-day-time">
-                    <bdi dir="ltr">{until || formatMinutes(sc.start)}</bdi>
-                    {isToday && isNext ? ` · ${tr("Next")}` : ""}
+                    {off ? tr("Off") : <bdi dir="ltr">{until || formatMinutes(sc.start)}</bdi>}
+                    {!off && isToday && isNext ? ` · ${tr("Next")}` : ""}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>

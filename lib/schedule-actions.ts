@@ -18,11 +18,14 @@
  */
 import type { Schedule } from "@/lib/types";
 import { isScheduleInActiveWindow, numericSchedulePriority, parseLocalTimeToMinutes, scheduleAutoFireStorageKey } from "@/lib/schedule-window";
+import { isSkippedOn, ymdOf } from "@/lib/schedule-skip";
 
 const DEFAULT_END_MINUTES = 23 * 60 + 59;
 
 export type ScheduleAction =
   | { kind: "start"; schedule: Schedule; fireKey: string }
+  /** the block is in force and music is ALREADY playing that this window did not start: it is marked as handled and nothing is played (see `watch` below) */
+  | { kind: "adopt"; schedule: Schedule; fireKey: string }
   | { kind: "stop"; schedule: Schedule; reason: "silence" | "end"; fireKeys: string[] }
   | null;
 
@@ -48,6 +51,8 @@ function dayMatches(s: Schedule, now: Date): boolean {
 /** has the block's day come and its start passed (a legacy overnight window still counts as "started")? Its own end is NOT looked at here. */
 function hasStarted(s: Schedule, now: Date): boolean {
   if (!s.enabled) return false;
+  // switched off for THIS DAY only (owner 2026-11-18): the block is not part of today's sequence — the block before it carries on until the next one that is on
+  if (isSkippedOn(s, ymdOf(now))) return false;
   const cur = now.getHours() * 60 + now.getMinutes();
   if (dayMatches(s, now) && cur >= parseLocalTimeToMinutes(s.startTimeLocal)) return true;
   return isScheduleInActiveWindow(s, now);
@@ -108,6 +113,13 @@ export function decideScheduleAction(input: {
   hasFired: (key: string) => boolean;
   /** the first look after the app (re)started: a quiet period is made quiet again even if its stop already ran today (music restored after a restart must not play on after closing time) */
   reassertSilence?: boolean;
+  /**
+   * Only for a window that merely CONTROLS another player (a browser / the phone), never for the player's own window. Owner 2026-11-18: "while the schedule runs, if someone presses a playlist in the
+   * middle of the day, it plays on until the next block". A controller window has its own "started today" memory, so one opened in the middle of a block thinks the block never started — and
+   * used to start it over the person's choice. `sinceMin` = the minute of the day this window began to watch; a block that started EARLIER than that was already in force before the window
+   * existed: while music is playing (`audible` true) it is only adopted (marked), never played over it. `audible` null = not known yet → wait. Silence → the block starts, as ever.
+   */
+  watch?: { sinceMin: number; audible: boolean | null };
 }): ScheduleAction {
   const { now, hasFired } = input;
   const cur = now.getHours() * 60 + now.getMinutes();
@@ -122,5 +134,14 @@ export function decideScheduleAction(input: {
   const end = explicitEndMinutes(current);
   // its own music is over: nothing stops (the player carries on with suggested songs until the next block) and it is not started late either
   if (end !== null && cur >= end) return null;
-  return hasFired(startKey) ? null : { kind: "start", schedule: current, fireKey: startKey };
+  if (hasFired(startKey)) return null;
+  if (input.watch) {
+    const start = parseLocalTimeToMinutes(current.startTimeLocal);
+    const inherited = start > cur /* an overnight window that began yesterday */ || start < input.watch.sinceMin - 1;
+    if (inherited) {
+      if (input.watch.audible === null) return null; // what plays is not known yet: look again at the next poll
+      if (input.watch.audible) return { kind: "adopt", schedule: current, fireKey: startKey };
+    }
+  }
+  return { kind: "start", schedule: current, fireKey: startKey };
 }

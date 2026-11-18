@@ -272,7 +272,7 @@ html[data-sb-display="white"] .ss-days button.is-on { background: #1c1c1e; color
 .ss-quick button:hover { color: var(--ss-fg); }
 .ss-quick button.is-on { color: var(--ss-fg); box-shadow: inset 0 0 0 1.5px var(--ss-fg); }
 .ss-date, .ss-select { height: 32px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--ss-surface-2); color: var(--ss-fg); font-size: 13px; font-family: inherit; outline: 0; color-scheme: dark; }
-.ss-pop-toggles { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ss-pop-toggles { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .ss-pop-actions { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
 .ss-pop-actions .ss-btn { white-space: nowrap; padding: 0 13px; font-size: 12.5px; }
 

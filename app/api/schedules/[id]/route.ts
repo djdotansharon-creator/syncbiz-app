@@ -6,6 +6,7 @@ import { getCurrentUserFromCookies, hasBranchAccess, getUserIdFromSession } from
 import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import { normalizeScheduleVolume } from "@/lib/schedule-volume-value";
+import { normalizeSkipDates } from "@/lib/schedule-skip";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
 function resolveAccountScope(userTenantId: string): string {
@@ -102,8 +103,12 @@ export async function PATCH(
   const volume = normalizeScheduleVolume((data as { volume?: unknown }).volume);
   if (volume === "invalid") return NextResponse.json({ error: "volume must be a whole number from 0 to 100" }, { status: 400 });
 
+  const skipDates = normalizeSkipDates((data as { skipDates?: unknown }).skipDates);
+  if (skipDates === "invalid") return NextResponse.json({ error: "skipDates must be a list of dates written YYYY-MM-DD" }, { status: 400 });
+
   const updates: Partial<Schedule> = {};
   if (volume !== undefined) updates.volume = volume; // null clears it
+  if (skipDates !== undefined) updates.skipDates = skipDates; // off for those days only (owner 2026-11-18)
   if (data.name !== undefined) updates.name = data.name;
   if (data.branchId !== undefined) updates.branchId = data.branchId;
   if (data.targetType !== undefined) updates.targetType = data.targetType;

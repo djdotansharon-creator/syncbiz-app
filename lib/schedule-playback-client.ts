@@ -12,6 +12,7 @@ import type { Schedule, Source } from "@/lib/types";
 import { stationMayStart, type ScheduleRoute } from "@/lib/schedule-station-route";
 import { bankPackToUnified, findBankPack } from "@/lib/music-bank/bank-play-source";
 import { markScheduleDriven } from "@/lib/schedule-driven";
+import type { PlayStatus } from "@/lib/schedule-start-retry";
 
 export type SchedulePlaybackHandlers = {
   stop: () => void;
@@ -23,6 +24,10 @@ export type SchedulePlaybackHandlers = {
   stopScheduled?: () => void;
   /** 2026-11-17 — is music playing right now (the station's own status, else this window's)? The engine uses it to see that a quiet block's stop really worked (lib/schedule-quiet-stop.ts). Omitted = no signal. */
   isAudible?: () => boolean;
+  /** 2026-11-18 — what the Player is doing: "playing" | "paused" | "idle" | "stopped", or null while that is not known (a station whose first status has not arrived). The engine uses it to see that a block's start really started the music (lib/schedule-start-retry.ts). Omitted = no signal. */
+  getPlayStatus?: () => PlayStatus;
+  /** 2026-11-18 — this window only CONTROLS another player (a browser / the phone with a station playing elsewhere): it must not play over music that is already playing when it opens in the middle of a block (see decideScheduleAction `watch`). Omitted = false. */
+  controlsAnotherPlayer?: () => boolean;
   /** 2026-11-17 — a block's own volume (lib/schedule-volume.ts): the volume now, and the way to change it (the Player's own path: MAIN's SET_VOLUME on a station / controller, else the local one). Omitted = the engine leaves the volume alone. */
   getVolume?: () => number | null;
   setVolume?: (value: number) => void;

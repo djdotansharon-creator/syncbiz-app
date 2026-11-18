@@ -172,6 +172,8 @@ export type Schedule = {
   requestedEndPosition?: number;
   /** The player's volume (0-100) while this block is in force; null / absent = the block leaves the volume as it is. See lib/schedule-volume.ts. */
   volume?: number | null;
+  /** Dates (YYYY-MM-DD) on which this block is switched OFF for that one day only (owner 2026-11-18); the block stays as it is on every other day. See lib/schedule-skip.ts. */
+  skipDates?: string[];
   createdAt?: string;
   updatedAt?: string;
   createdBy?: string;

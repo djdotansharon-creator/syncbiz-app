@@ -1,5 +1,7 @@
 # Phone app — "the flow" redesign: how to go back
 
+> **Kept as a prototype (2026-11-18):** the owner's father liked the new interface less, so "the flow" is saved as a **design prototype** that can be brought back at any time — without reverting anything on `main` and without losing the work done since. It is the git tag `phone-prototype/flow-2026-11-18` (on GitHub, immutable, → `1827aaa`, the state of `main` right after the flow was merged) and the kept branch `son/phone-flow-2026-11-18`. To look at it or to restore only its look later: `git checkout phone-prototype/flow-2026-11-18 -- components/vm app/mobile-app.css 'app/(app)/mobile'` on a new branch (then re-apply the day-board switch from the schedule round below if it is still wanted). Never delete or move the tag.
+
 The phone app's branch screen and person page were redesigned on 2026-11-18 as an experiment ("the flow": whole pages like the iPhone Control Center, a day board, frameless rows, details behind an arrow). It is **RENDERER ONLY** — no database, server, desktop or migration change — so going back is a plain code revert and needs no data step.
 
 ## Known-good reference (what the phone app was before the flow)
@@ -42,3 +44,9 @@ Railway keeps recent deployments: the deployment above can be redeployed from th
 - `lib/i18n/phrases.ts` (Hebrew), `scripts/verify-mobile-flow.ts`, `scripts/verify-mobile-app.ts`
 
 The people-management screens (PR #205) and the older schedule page (`/mobile/scheduling`) were not changed by the flow.
+
+## Schedule engine round (2026-11-18, the father's four notes) — RENDERER + SERVER (additive), no database migration
+
+What changed (all in one PR on top of the flow): (1) a block's **start is watched** and repeated into silence if the player did not start (`lib/schedule-start-retry.ts`); (2) a scheduled **stop fades out over 9 s** through the Player's own volume path (`lib/schedule-fade.ts`); (3) one block can be **switched off for one day** (`Schedule.skipDates`, stored in the block's existing `taxonomyTags` column as `skip-date` tags — `lib/schedule-skip.ts`; Studio card switch "Plays on <date>", phone day board: press a block); (4) music a person chose in the middle of a block **plays on until the next block** — the phone app (`/mobile`) runs no schedule of its own, and a control-room browser window opened inside a block adopts it instead of playing over the music (`decideScheduleAction` `watch`).
+
+Going back: `git revert -m 1 <the merge commit of this round>` (a revert PR, no force push). No data step is needed: the only stored thing is `skip-date` tags inside `taxonomyTags` — an older app ignores them, and they can stay. The PROD database is untouched (no migration).
