@@ -58,12 +58,12 @@ assert("W4 the first retry of an outage is quick while the app is in front, the 
 assert("W5 what was last seen is kept from the FIRST drop (not from every failed try) and cleared when connected", /setHeld\(\(prev\) => prev \?\? \{ branches: lastBranchesRef\.current/.test(own) && /setHeld\(null\);/.test(own) && /held,\n/.test(own));
 const fleet = rd("lib/mobile-fleet.tsx");
 assert("W6 the phone keeps drawing the last-seen branches for a few seconds after a drop — a picture only: commands still need a LIVE connection", /const HOLD_MS = 10_000;/.test(fleet) && /const liveKnown = \(owner\.status === "connected" && owner\.listed\) \|\| holding;/.test(fleet) && /canControl: !!selected\?\.online && owner\.status === "connected"/.test(fleet));
-const home = rd("app/(app)/mobile/home/page.tsx");
-assert("W7 the 'connecting' notice appears only when the connection STAYS down (a blink shows nothing)", /useAfter\(\(f\.connection === "error" \|\| f\.connection === "disconnected"\) && !f\.holding, 2500\)/.test(home) && /\{showNotice \? \(/.test(home));
+const shellSrc = rd("components/vm/vm-ui.tsx");
+assert("W7 the phone's connection notice (every screen, not only the branch list) appears only when the line STAYS down — ONE continuous stretch of 3 s, a blink or a socket retrying shows nothing", /useAfter\(f\.connection !== "connected", 3000\)/.test(shellSrc) && /<ConnectionBanner \/>/.test(shellSrc) && !/showNotice/.test(rd("app/(app)/mobile/home/page.tsx")));
 const toneLib = rd("lib/cover-tone.ts");
 const tone = rd("components/vm/vm-tone.ts");
 assert("W8 a picture that could not be read is not remembered as 'no colour' for the whole session (a later try may work)", /if \(!v\) cache\.delete\(url\);/.test(toneLib));
-assert("W9 the song's colour is read AHEAD: when a song is chosen (before the station answers) and for the next song", /warmTone\(source\.cover\);/.test(fleet) && /warmTone\(nextCover\)/.test(rd("components/vm/vm-now-playing.tsx")));
+assert("W9 the song's colour is read AHEAD: when a song is chosen (before the station answers) and for the next song", /warmTone\(pic\);/.test(fleet) && /warmTone\(nextCover\)/.test(rd("components/vm/vm-now-playing.tsx")));
 assert("W10 the tone hook never makes a colour from a name while waiting: `useNowTone` says 'wait' while the list is unread / the phone connects / the state has not arrived — and a branch is not 'away' until the connection says so", /const waiting = !f\.loaded \|\| !b \|\| b\.status === "unknown" \|\| \(b\.online && !s\) \|\| !f\.known;/.test(tone) && /const mode: ToneMode = waiting \? "wait" : quiet \? \(calm \? "calm" : "wait"\) : "song";/.test(tone) && /const CALM_AFTER_MS = 700;/.test(tone) && /useHeldFor\(!waiting && quiet, CALM_AFTER_MS\)/.test(tone));
 assert("W11 while the phone connects the song screen does not say 'Nothing playing' (it would turn into the song a moment later)", /b\.status === "unknown" \|\| !f\.known \|\| \(b\.online && !shown\) \? \(/.test(rd("components/vm/vm-now-playing.tsx")));
 

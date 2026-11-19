@@ -144,6 +144,10 @@
 .vm-pill[data-quiet] { background: rgba(255, 255, 255, 0.12); color: var(--vm-text); }
 .vm-notice { margin: 8px 14px 0; padding: 12px 14px; border-radius: 16px; background: rgba(255, 179, 64, 0.12); color: var(--vm-amber); font-size: 14px; line-height: 1.4; display: flex; align-items: center; gap: 10px; }
 .vm-notice svg { font-size: 20px; flex: none; }
+/* the phone's own connection, on every screen: a line at the top of the page that stays in view while it scrolls */
+.vm-conn { position: sticky; z-index: 45; top: calc(var(--vm-safe-t) + 6px); margin: calc(var(--vm-safe-t) + 6px) 14px 0; padding: 10px 14px; border-radius: 16px; background: rgb(44, 32, 12); color: var(--vm-amber); font-size: 14px; line-height: 1.35; display: flex; align-items: center; gap: 10px; animation: vm-conn-in 220ms var(--vm-ease) both; }
+.vm-conn svg { font-size: 20px; flex: none; }
+@keyframes vm-conn-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
 /* ── the dock: glass tab bar + the floating mini-player above it ── */
 .vm-dock { position: fixed; inset-inline: 0; bottom: 0; z-index: 40; pointer-events: none; }
@@ -219,6 +223,8 @@
 .vm-tbtn { width: 72px; height: 72px; display: inline-flex; align-items: center; justify-content: center; font-size: 38px; color: var(--vm-text); transition: transform 160ms var(--vm-ease), opacity 160ms ease; }
 .vm-tbtn:active { transform: scale(0.86); opacity: 0.7; }
 .vm-tbtn[disabled] { opacity: 0.3; pointer-events: none; }
+/* a song is being started: Next / Previous wait for it (one change at a time) — they look like they wait */
+.vm-tbtn[data-busy], .vm-icobtn[data-busy] { opacity: 0.4; }
 /* play / pause: the icon alone, big — no circle around it (owner 2026-11-17) */
 .vm-tbtn--play { width: 96px; height: 96px; font-size: 68px; }
 .vm-tbtn--play:active { transform: scale(0.9); }

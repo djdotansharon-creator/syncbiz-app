@@ -14,7 +14,9 @@ import { useRemoteOwner, type ConnectionStatus } from "@/lib/remote-control/ws-c
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import type { UnifiedSource } from "@/lib/source-types";
+import { getPlaylistTracks } from "@/lib/playlist-types";
 import { warmTone } from "@/lib/cover-tone";
+import { followingOf, pickIncoming, withIncoming, type TappedIncoming } from "@/lib/mobile-incoming";
 import {
   beginTransition,
   decideUserCommand,
@@ -346,6 +348,8 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     setTransitionState(t);
     if (!holdsAudible(t)) setHeldState(null);
   }, []);
+  // the item that was pressed (or the one a Next/Prev goes to), kept with the transition it belongs to — drawn at once while the station is still starting it (lib/mobile-incoming.ts)
+  const [tapped, setTapped] = useState<TappedIncoming | null>(null);
   const liveState = selected?.state ?? null;
   const liveStateRef = useRef<StationPlaybackState | null>(liveState);
   useEffect(() => {
@@ -423,7 +427,10 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       const prior = liveStateRef.current?.mpvAttemptId;
       if (typeof prior !== "number") return; // an older station engine (no mirrored attempt id) → no "Loading…" rather than a stuck one
       captureHeld();
-      setTransition(beginTransition({ origin, targetKey: null, now: Date.now(), priorAttemptId: prior, audibleAtStart: liveStateRef.current?.status === "playing" }));
+      const t = beginTransition({ origin, targetKey: null, now: Date.now(), priorAttemptId: prior, audibleAtStart: liveStateRef.current?.status === "playing" });
+      const go = followingOf(liveStateRef.current, origin === "next" ? 1 : -1);
+      setTapped(go ? { ...go, at: t.startedAt } : null);
+      setTransition(t);
     },
     [captureHeld, setTransition],
   );
@@ -456,7 +463,10 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       });
       transitionRef.current = t;
       setTransitionState(t);
-      warmTone(source.cover); // the song's colour is read while the station starts it — ready when the song appears
+      const oneSong = source.origin !== "playlist" || (source.playlist ? getPlaylistTracks(source.playlist).length === 1 : false);
+      const pic = source.cover ?? (source.playlist ? getPlaylistTracks(source.playlist)[0]?.cover ?? null : null);
+      setTapped(oneSong && source.title ? { title: source.title, cover: pic, at: t.startedAt } : null);
+      warmTone(pic); // the song's colour is read while the station starts it — ready when the song appears
       send("PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
     },
     [captureHeld, send, target],
@@ -510,8 +520,11 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     // (drawn as paused, without a running clock: it is a picture of how the branch was, not a claim about now)
     const rs = !live.shown && !liveState && rememberedState && rememberedState.id === selectedId ? rememberedState.state : null;
     const remembered = rs ? ({ ...rs, status: rs.status === "playing" ? "paused" : rs.status, positionAt: undefined } as StationPlaybackState) : null;
-    return { shown: live.shown ?? remembered, loading: live.loading, label: transitionLabel(transition) };
-  }, [liveState, heldState, transition, rememberedState, selectedId]);
+    // the song being started is drawn at once (title, picture, colours) while the old one is still audible — "Loading…" says so; it ends by itself when the station plays it or fails
+    const incoming = pickIncoming({ transition, tapped, live: liveState, held: holdsAudible(transition) ? heldState : null });
+    const base = live.shown ?? remembered;
+    return { shown: incoming ? withIncoming(base, incoming) : base, loading: live.loading, label: transitionLabel(transition) };
+  }, [liveState, heldState, transition, tapped, rememberedState, selectedId]);
 
   const value: FleetValue = useMemo(
     () => ({

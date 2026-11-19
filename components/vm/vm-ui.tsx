@@ -11,7 +11,7 @@ import { useMobileRole } from "@/lib/mobile-role-context";
 import { VmNowPlaying } from "@/components/vm/vm-now-playing";
 import { VmCover, VmEq, VmMarquee, branchLine } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
-import { IconCheck, IconLibrary, IconNext, IconPause, IconPerson, IconPlay, IconSearch, IconStore, IconSwap } from "@/components/vm/vm-icons";
+import { IconCheck, IconLibrary, IconNext, IconPause, IconPerson, IconPlay, IconSearch, IconStore, IconSwap, IconWifiOff } from "@/components/vm/vm-icons";
 
 /* ───────────────────────────── the phone app's own UI state ───────────────────────────── */
 
@@ -257,13 +257,53 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
         <button type="button" className="vm-icobtn" onClick={() => (playing ? f.pause() : f.play())} disabled={!f.canControl} aria-label={playing ? tr("Pause") : tr("Play")}>
           {playing ? <IconPause /> : <IconPlay />}
         </button>
-        <button type="button" className="vm-icobtn" onClick={f.next} disabled={!f.canControl || !s || s.status === "idle"} aria-label={tr("Next")}>
+        <button type="button" className="vm-icobtn" onClick={f.next} disabled={!f.canControl || !s || s.status === "idle"} data-busy={f.display.loading ? "" : undefined} aria-label={tr("Next")}>
           <IconNext />
         </button>
       </div>
       <div className="vm-mini-prog" aria-hidden>
         <i style={{ ["--p" as string]: `${pct}%` } as React.CSSProperties} />
       </div>
+    </div>
+  );
+}
+
+/** true only once `flag` has stayed true for `ms` — a short blink of "connecting" is not shown (owner 2026-11-19: "when I come back there is a disconnect until it connects") */
+function useAfter(flag: boolean, ms: number): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    if (!flag) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the wait starts over each time the condition begins
+      setLate(false);
+      return;
+    }
+    const t = setTimeout(() => setLate(true), ms);
+    return () => clearTimeout(t);
+  }, [flag, ms]);
+  return flag && late;
+}
+
+/**
+ * THE PHONE'S OWN CONNECTION, said on EVERY screen (owner 2026-11-19: "if there is a problem with the connection it is not written as it should be").
+ * It is about the PHONE reaching VONO — never about a branch (a branch that is away says so on its own card and screen). It only speaks when the trouble STAYS:
+ * a quick reconnect (the app coming back to the front) shows nothing, the screens keep the last-seen branches meanwhile.
+ */
+function ConnectionBanner() {
+  const f = useMobileFleet();
+  const tr = useTr();
+  // "no line" is ONE continuous stretch — the socket flipping between connecting and failed while it retries does not start the wait over
+  const noLine = useAfter(f.connection !== "connected", 3000);
+  // a line that was up and is gone is "can't reach"; a line that has not come up yet since the app opened is "connecting"
+  const [wasUp, setWasUp] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- remembers that the line was up once
+    if (f.connection === "connected") setWasUp(true);
+  }, [f.connection]);
+  if (!noLine) return null;
+  return (
+    <div className="vm-conn" role="status" aria-live="polite">
+      <IconWifiOff />
+      <span>{wasUp ? tr("Can't reach VONO. Trying again…") : tr("Connecting to your branches…")}</span>
     </div>
   );
 }
@@ -363,6 +403,7 @@ export function VmShell({ children }: { children: ReactNode }) {
       <div className="vm" data-boot={booting ? "" : undefined}>
         <PwaRegister />
         <div className="vm-scroll" id="vm-scroll" ref={scrollRef} data-legacy={LEGACY_ROUTE.test(pathname) ? "" : undefined} data-flat={FLAT_ROUTE.test(pathname) ? "" : undefined}>
+          <ConnectionBanner />
           {children}
         </div>
         <Dock onOpenNowPlaying={ui.openNowPlaying} />
