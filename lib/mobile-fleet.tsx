@@ -81,6 +81,8 @@ export type FleetDisplay = {
 
 export type FleetValue = {
   connection: ConnectionStatus;
+  /** the live list has been heard (now, or a moment ago while it was coming back) — or we waited long enough (6 s) to call it: before that a branch that is "not live" is NOT yet "away" (no "offline" / "no player installed" flash while the phone connects) */
+  known: boolean;
   /** the live connection dropped a moment ago and is coming back: the last-seen branches and states are still drawn (a picture, nothing is sent from it) — so a short drop does not blank the screen */
   holding: boolean;
   /** the branch list has been read from the database at least once */
@@ -182,7 +184,14 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
 
   const [db, setDb] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // the branch this phone used last is read at once (not in an effect a frame later: that frame said "No branch selected")
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    try {
+      return typeof window === "undefined" ? null : localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   // the remembered picture (read after mount: the server renders without the phone's storage)
   useEffect(() => {
     const cached = readJson<DbBranch[]>(DB_CACHE_KEY);
@@ -244,7 +253,8 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
   const holding = !!held && owner.status !== "connected" && holdOver !== held.at;
   const liveBranches = holding && held ? held.branches : owner.branches;
   const liveStates = holding && held ? held.states : owner.remoteStateByDeviceId;
-  const liveKnown = owner.status === "connected" || holding;
+  // "known" = the live list has been HEARD (registered is a moment earlier — the list is what says which branches are live), or it was a moment ago and is coming back
+  const liveKnown = (owner.status === "connected" && owner.listed) || holding;
 
   const branches: FleetBranch[] = useMemo(() => {
     const liveById = new Map(liveBranches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
@@ -506,6 +516,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
   const value: FleetValue = useMemo(
     () => ({
       connection: owner.status,
+      known: liveKnown || gaveUp,
       holding,
       loaded: db !== null,
       loadError,
@@ -530,7 +541,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       interrupt,
       toggleBranch,
     }),
-    [owner.status, holding, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
+    [owner.status, liveKnown, gaveUp, holding, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
   );
 
   return <FleetContext.Provider value={value}>{children}</FleetContext.Provider>;

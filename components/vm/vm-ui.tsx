@@ -243,10 +243,10 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
         }
       }}
     >
-      <VmCover src={cover} name={title || b.name} size={42} radius={10} />
+      <VmCover src={cover} name={title || b.name} size={42} radius={10} quietTile />
       <div className="vm-mini-text">
         <div className="vm-mini-title">
-          {title ? <VmMarquee text={title} /> : <span style={{ color: "var(--vm-text2)" }}>{b.online ? tr("Nothing playing") : b.status === "unknown" ? "…" : tr("Offline")}</span>}
+          {title ? <VmMarquee text={title} /> : <span style={{ color: "var(--vm-text2)" }}>{b.online ? tr("Nothing playing") : b.status === "unknown" || !f.known ? "…" : tr("Offline")}</span>}
         </div>
         <div className="vm-mini-sub vm-bdi">
           {playing ? <VmEq /> : <span className="vm-dot" data-s={b.status} />}

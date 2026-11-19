@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { StationPlaybackState } from "@/lib/remote-control/types";
 import { computeLivePosition } from "@/lib/remote-control/live-position";
 import type { FleetBranch } from "@/lib/mobile-fleet";
+import { rememberedTone, type Hs } from "@/lib/cover-tone";
 
 /** m:ss (h:mm:ss over an hour) — "–:––" while the length is not known */
 export function fmtTime(sec: number | null | undefined): string {
@@ -31,6 +32,12 @@ function tileFor(name: string): { background: string; initials: string } {
   return { background: `linear-gradient(135deg, hsl(${a} 42% 34%), hsl(${b} 48% 20%))`, initials };
 }
 
+/** the tile of a picture's own remembered colour (the same two shades the song's background is drawn from) */
+function tileFromHs(hs: Hs): string {
+  const sat = Math.min(0.7, Math.max(0.06, hs.s));
+  return `linear-gradient(135deg, hsl(${Math.round(hs.h)} ${Math.round(sat * 85)}% 34%), hsl(${Math.round(hs.h)} ${Math.round(sat * 72)}% 20%))`;
+}
+
 /** A square / round picture: the image fades in when it has loaded; until then (or without one) a tile coloured from the name. */
 export function VmCover({
   src,
@@ -42,6 +49,7 @@ export function VmCover({
   style,
   playing,
   neutral,
+  quietTile,
 }: {
   src?: string | null;
   name: string;
@@ -56,12 +64,19 @@ export function VmCover({
   playing?: boolean;
   /** no colour of its own — a soft light disc with the initials (a person's disc on a page that already has a coloured background) */
   neutral?: boolean;
+  /** the song's own picture (the player's art, the mini-player): while the picture is on its way the tile is that picture's REMEMBERED colour (or the neutral dark) with no initials — never a colour made from the
+   *  name (owner 2026-11-19: "at the start there is a green background, then the picture" — the green was the name's tile) */
+  quietTile?: boolean;
 }) {
   // the load state belongs to the picture it was read for (a new `src` starts over without an effect)
   const [st, setSt] = useState<{ src: string | null | undefined; ok: boolean; bad: boolean }>({ src, ok: false, bad: false });
   const ok = st.src === src && st.ok;
   const bad = st.src === src && st.bad;
   const tile = tileFor(name || "·");
+  // the song's picture: its own remembered colour (or the neutral dark) under it the WHOLE time — also while it fades in, so no name colour ever shows through
+  const quiet = !!quietTile && !!src && !bad;
+  const own = useMemo(() => (quiet ? rememberedTone(src) : null), [quiet, src]);
+  const tileBg = neutral ? "rgba(255, 255, 255, 0.14)" : quiet ? (own ? tileFromHs(own) : "linear-gradient(135deg, #2c2c34, #1b1b21)") : tile.background;
   return (
     <div
       className={`vm-cover ${className}`}
@@ -69,11 +84,11 @@ export function VmCover({
       style={{
         ...(size ? { width: size, height: size, fontSize: Math.round(size * 0.34) } : {}),
         borderRadius: radius,
-        ["--vm-tile" as string]: neutral ? "rgba(255, 255, 255, 0.14)" : tile.background,
+        ["--vm-tile" as string]: tileBg,
         ...style,
       }}
     >
-      {glyph ?? tile.initials}
+      {quiet ? null : (glyph ?? tile.initials)}
       {src && !bad ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" data-ok={ok ? "" : undefined} onLoad={() => setSt({ src, ok: true, bad: false })} onError={() => setSt({ src, ok: false, bad: true })} />

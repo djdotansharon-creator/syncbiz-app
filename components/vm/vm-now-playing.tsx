@@ -81,7 +81,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
 
   if (!b) {
     // the branch list has not been read yet: nothing to say (a "No branch selected" for a moment is a lie)
-    if (!f.loaded) return <div className="vm-np" aria-busy />;
+    if (!f.loaded || !f.known) return <div className="vm-np" aria-busy />;
     return (
       <div className="vm-offline">
         <b>{tr("No branch selected")}</b>
@@ -105,7 +105,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
         </button>
       )}
 
-      {!b.online && b.status !== "unknown" ? (
+      {!b.online && b.status !== "unknown" && f.known ? (
         <div className="vm-offline" style={{ margin: "26px 0 0" }}>
           <IconWifiOff />
           <b>{b.status === "install" ? tr("No player installed yet") : tr("This branch is offline")}</b>
@@ -115,14 +115,14 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
         </div>
       ) : (
         <>
-          <VmCover className="vm-np-art" src={cover} name={trackTitle || b.name} radius={22} playing={playing} />
+          <VmCover className="vm-np-art" src={cover} name={trackTitle || b.name} radius={22} playing={playing} quietTile />
           <div className="vm-np-titles">
             {trackTitle ? (
               <>
                 <VmMarquee className="vm-np-title" text={trackTitle} />
                 {subtitle ? <div className="vm-np-artist vm-bdi">{subtitle}</div> : null}
               </>
-            ) : b.status === "unknown" || (b.online && !shown) ? (
+            ) : b.status === "unknown" || !f.known || (b.online && !shown) ? (
               // still connecting: nothing is said yet (a "Nothing playing" that turns into the song a moment later is a lie)
               <div className="vm-np-title" aria-busy>
                 &nbsp;

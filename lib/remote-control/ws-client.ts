@@ -748,6 +748,8 @@ export function useRemoteOwner() {
   const quickRetryUsedRef = useRef(false);
   const lastProbeAtRef = useRef(0);
   const [held, setHeld] = useState<{ branches: BranchSummary[]; states: Record<string, StationPlaybackState>; at: number } | null>(null);
+  /** the branch list has arrived on THIS socket (`REGISTERED` comes a moment before it — in that gap nothing is known about which branches are live) */
+  const [listed, setListed] = useState(false);
   useEffect(() => {
     const scheduler = createReconnectScheduler({
       onFire: () => {
@@ -861,6 +863,7 @@ export function useRemoteOwner() {
     const ws = new globalThis.WebSocket(url);
     wsRef.current = ws;
     setStatus("connecting");
+    setListed(false);
     if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
       console.info(reconnectTrigger > 0 ? "[SyncBiz WS client] reconnect using latest token" : "[SyncBiz WS client] connecting owner");
     }
@@ -898,6 +901,7 @@ export function useRemoteOwner() {
         if (data.type === "BRANCH_LIST") {
           lastBranchesRef.current = data.branches;
           setBranches(data.branches);
+          setListed(true);
           setSelectedBranchId((prev) => (prev ? prev : data.branches[0]?.branchId ?? null));
         } else if (data.type === "STATE_UPDATE") {
           lastStatesRef.current[data.deviceId] = data.state;
@@ -924,6 +928,7 @@ export function useRemoteOwner() {
       // what was seen is kept (with the moment of the first drop) so a screen can keep showing it while the socket comes back
       if (lastBranchesRef.current.length) setHeld((prev) => prev ?? { branches: lastBranchesRef.current, states: { ...lastStatesRef.current }, at: Date.now() });
       setStatus("disconnected");
+      setListed(false);
       setBranches([]);
       setRemoteStateByDeviceId({});
       if (!intentionalClose) reconnectSchedulerRef.current?.scheduleRetry(); // server restart / network loss: back on its own (backoff, forever)
@@ -1086,6 +1091,8 @@ export function useRemoteOwner() {
     remoteStateByDeviceId,
     /** what was last seen while connected, kept from the first drop until the socket is back (null = connected, or nothing was ever seen) — a screen may keep showing it for a short time */
     held,
+    /** the branch list has arrived on the current socket (status "connected" alone is a moment earlier: registered, list not yet here) */
+    listed,
     status,
     sendCommand,
     sendCommandTo,

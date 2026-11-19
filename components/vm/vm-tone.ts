@@ -98,9 +98,9 @@ export function useNowTone(): CSSProperties {
   const s = f.display.shown;
   const cover = s?.currentTrack?.cover ?? s?.currentSource?.cover ?? null;
   const title = s?.currentTrack?.title || s?.currentSource?.title || "";
-  // we do not KNOW yet: the branch list is being read, the phone is still connecting (a branch that is not live YET is not "away" until the connection says so), or the branch's state has not arrived —
+  // we do not KNOW yet: the branch list is being read, the phone is still connecting (a branch that is not live YET is not "away" until the live list has been heard — `known`), or the branch's state has not arrived —
   // the song that played last stays, its colour at once
-  const waiting = !f.loaded || !b || b.status === "unknown" || (b.online && !s) || (!b.online && f.connection !== "connected" && !f.holding);
+  const waiting = !f.loaded || !b || b.status === "unknown" || (b.online && !s) || !f.known;
   // we KNOW nothing plays: the branch is away, or its player is idle
   const quiet = !b || !b.online || !s || s.status === "idle" || s.status === "stopped";
   const calm = useHeldFor(!waiting && quiet, CALM_AFTER_MS);
