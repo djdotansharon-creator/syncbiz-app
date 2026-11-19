@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMobileFleet, type FleetBranch, type FleetStatus } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { VmPage } from "@/components/vm/vm-ui";
@@ -49,21 +49,6 @@ function BranchCard({ b, onToggle }: { b: FleetBranch; onToggle: (id: string) =>
   );
 }
 
-/** true only once `flag` has stayed true for `ms` — a short blink of "connecting" is not shown (owner 2026-11-19: "when I come back there is a disconnect until it connects") */
-function useAfter(flag: boolean, ms: number): boolean {
-  const [late, setLate] = useState(false);
-  useEffect(() => {
-    if (!flag) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- the wait starts over each time the condition begins
-      setLate(false);
-      return;
-    }
-    const t = setTimeout(() => setLate(true), ms);
-    return () => clearTimeout(t);
-  }, [flag, ms]);
-  return flag && late;
-}
-
 function statusWord(s: FleetStatus, tr: (t: string) => string): string {
   switch (s) {
     case "playing": return tr("Playing");
@@ -78,8 +63,6 @@ export default function MobileBranchesPage() {
   const f = useMobileFleet();
   const tr = useTr();
   const [q, setQ] = useState("");
-  // the notice only says something when the connection STAYS down — a quick reconnect (the app coming back to the front) shows nothing, the branches stay drawn meanwhile
-  const showNotice = useAfter((f.connection === "error" || f.connection === "disconnected") && !f.holding, 2500);
 
   const visible = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -99,12 +82,6 @@ export default function MobileBranchesPage() {
 
   return (
     <VmPage title={tr("Branches")} subtitle={sub}>
-      {showNotice ? (
-        <div className="vm-notice" role="status">
-          <IconWifiOff />
-          <span>{f.connection === "error" ? tr("Can't reach VONO. Trying again…") : tr("Connecting to your branches…")}</span>
-        </div>
-      ) : null}
 
       {f.branches.length > 5 ? (
         <label className="vm-field">
