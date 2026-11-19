@@ -18,3 +18,22 @@ export function takeJinglesOpenTab(): JinglesOpenTab | null {
   pending = null;
   return t;
 }
+
+/**
+ * Open a SCHEDULED jingle's own settings (owner 2026-11-19: the Schedules screen's jingle marker says "Edit", and it lands on that jingle's time / days screen).
+ * Set before opening the console (it takes it when it mounts) — or, if it is already open, it reacts to the event.
+ */
+export const JINGLES_OPEN_EDIT_EVENT = "syncbiz:jingles-open-edit";
+
+let pendingEdit: string | null = null;
+
+export function setJinglesOpenEdit(scheduleItemId: string): void {
+  pendingEdit = scheduleItemId;
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(JINGLES_OPEN_EDIT_EVENT, { detail: scheduleItemId }));
+}
+
+export function takeJinglesOpenEdit(): string | null {
+  const id = pendingEdit;
+  pendingEdit = null;
+  return id;
+}

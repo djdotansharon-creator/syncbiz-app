@@ -29,7 +29,7 @@ import {
   SAMPLER_PADS,
 } from "./seed-data";
 import { VOICE_PRESETS_BY_LANG, voiceMenuLabel } from "./voice-presets";
-import { JINGLES_OPEN_TAB_EVENT, takeJinglesOpenTab, type JinglesOpenTab } from "./open-tab";
+import { JINGLES_OPEN_EDIT_EVENT, JINGLES_OPEN_TAB_EVENT, takeJinglesOpenEdit, takeJinglesOpenTab, type JinglesOpenTab } from "./open-tab";
 import { fetchCloudPads, savePadToCloud, padsFromCloud } from "./cloud-pads";
 import { loadJingleSchedule, persistJingleSchedule, JINGLE_SCHEDULE_EVENT } from "./schedule-storage";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
@@ -1093,6 +1093,29 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   const schedLoadedBranchRef = useRef<string | null>(stationBranchIdNow());
   const skipSchedPersistRef = useRef(false);
 
+  // EDIT a scheduled jingle (owner 2026-11-19): its row's "Edit" — or the Schedules screen's jingle marker, which hands over the item's id — opens that
+  // schedule's own screen (time, days / date) on what it is now; Save replaces it (same id), it never adds a second one.
+  const [editItem, setEditItem] = useState<MockScheduleItem | null>(null);
+  const [editWanted, setEditWanted] = useState<string | null>(() => takeJinglesOpenEdit());
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === "string") {
+        takeJinglesOpenEdit();
+        setEditWanted(id);
+      }
+    };
+    window.addEventListener(JINGLES_OPEN_EDIT_EVENT, on);
+    return () => window.removeEventListener(JINGLES_OPEN_EDIT_EVENT, on);
+  }, []);
+  useEffect(() => {
+    if (!editWanted) return;
+    const it = schedItems.find((x) => x.id === editWanted);
+    if (!it) return; // the branch's list may still be arriving — it opens when the item is there
+    setEditItem(it);
+    setEditWanted(null);
+  }, [editWanted, schedItems]);
+
   // Status (display-only; no selector)
   const branchStatus: MockBranchLinkStatus = "online";
   const engineStatus: MockEngineStatus = "ready";
@@ -1900,17 +1923,20 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                     const time = si.timeOfDay ?? si.whenLabel.match(/(\d{1,2}:\d{2})\s*$/)?.[1] ?? "";
                     const next = whenNextLabel(si);
                     return (
-                      <li key={si.id} className="jcs-row" style={{ ["--d" as string]: `${Math.min(i, 10) * 45}ms` } as React.CSSProperties}>
+                      <li key={si.id} className="jcs-row jcs-row--edit" style={{ ["--d" as string]: `${Math.min(i, 10) * 45}ms` } as React.CSSProperties} onClick={() => setEditItem(si)}>
                         <span className="jcs-time">{time || "—"}</span>
                         <span className="jcs-text">
                           <b dir="auto">{si.label}</b>
                           <i>{localizeWhen(si.whenLabel.replace(/\s*·?\s*\d{1,2}:\d{2}\s*$/, "") || si.repeatLabel, tr)}</i>
                         </span>
                         {next ? <span className="jcs-next">{localizeWhen(next, tr)}</span> : null}
+                        <button type="button" className="jcs-edit" onClick={(e) => { e.stopPropagation(); setEditItem(si); }} aria-label={`${tr("Edit")} ${si.label}`}>
+                          {tr("Edit")}
+                        </button>
                         <button
                           type="button"
                           className="jcs-x"
-                          onClick={() => setSchedItems((prev) => prev.filter((x) => x.id !== si.id))}
+                          onClick={(e) => { e.stopPropagation(); setSchedItems((prev) => prev.filter((x) => x.id !== si.id)); }}
                           title={tr("Remove schedule")}
                           aria-label={`${tr("Remove schedule")} ${si.label}`}
                         >
@@ -1944,6 +1970,16 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               inline={scheduleInline ?? undefined}
               nowMs={scheduleNow}
               onClose={() => setScheduleForAsset(null)}
+            />
+          ) : null}
+          {editItem ? (
+            <JingleScheduleDialog
+              key={editItem.id}
+              edit={editItem}
+              jingle={{ id: editItem.id, label: editItem.label, url: editItem.url ?? "", color: "#d1d1d6", bell: editItem.preRoll ? (editItem.bellStyle ?? "ding") : null }}
+              origin={null}
+              nowMs={Date.now()}
+              onClose={() => setEditItem(null)}
             />
           ) : null}
           </div>

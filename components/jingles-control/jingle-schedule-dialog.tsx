@@ -51,6 +51,41 @@ export function whenNextLabel(item: MockScheduleItem, now = Date.now()): string 
   return `${sameDay ? "Today" : DAY_NAME[d.getDay()]} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+/**
+ * What the dialog opens on when it EDITS a schedule that already exists (owner 2026-11-19: "I have no control over a jingle I set a time for — I can't
+ * change its time or make it every day at a specific time"): its kind (fixed days / one time), its time, its days, and — for a one-time — how many days
+ * from today the date is (never before today: a date that has passed opens on today, and the "already passed" line says so).
+ */
+export function editDefaults(item: MockScheduleItem, nowMs: number): { mode: "fixed" | "once"; hour: number; minute: number; days: number[]; dateOffset: number } {
+  const at = item.scheduledAtIso ? new Date(item.scheduledAtIso) : null;
+  const atOk = !!at && !Number.isNaN(at.getTime());
+  const tm = /^(\d{1,2}):(\d{2})$/.exec(item.timeOfDay ?? "") ?? /(\d{1,2}):(\d{2})\s*$/.exec(item.whenLabel ?? "");
+  const hour = tm ? Math.min(23, Number(tm[1])) : atOk ? at!.getHours() : 12;
+  const minute = tm ? Math.min(59, Number(tm[2])) : atOk ? at!.getMinutes() : 0;
+  // an older / example row has only its words ("Daily", "Weekly", "Fri 17:30"): they are read as the kind they say
+  const word = (item.repeatLabel ?? "").trim().toLowerCase();
+  const repeat = item.repeat ?? (word === "daily" || word === "every day" ? "daily" : word === "weekly" ? "weekly" : "once");
+  if (repeat === "once") {
+    let dateOffset = 0;
+    if (atOk) {
+      const a = new Date(at!);
+      a.setHours(0, 0, 0, 0);
+      const n = new Date(nowMs);
+      n.setHours(0, 0, 0, 0);
+      dateOffset = Math.max(0, Math.round((a.getTime() - n.getTime()) / 86400000));
+    }
+    return { mode: "once", hour, minute, days: ALL_DAYS, dateOffset };
+  }
+  const days =
+    repeat === "weekdays" && item.days && item.days.length > 0 ? [...item.days].sort((x, y) => x - y)
+    : repeat === "weekly" && atOk ? [at!.getDay()]
+    : repeat === "weekly" && DAY_NAME.findIndex((d) => new RegExp(`\\b${d}\\b`).test(item.whenLabel ?? "")) >= 0 ? [DAY_NAME.findIndex((d) => new RegExp(`\\b${d}\\b`).test(item.whenLabel ?? ""))]
+    : ALL_DAYS;
+  return { mode: "fixed", hour, minute, days, dateOffset: 0 };
+}
+
 function Unit({ value, max, step, onChange, label }: { value: number; max: number; step: number; onChange: (v: number) => void; label: string }) {
   const tr = useTr();
   const ref = useRef<HTMLDivElement>(null);
@@ -123,27 +158,30 @@ function Unit({ value, max, step, onChange, label }: { value: number; max: numbe
   );
 }
 
-export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, inline }: { jingle: JingleRef; origin: { x: number; y: number } | null; nowMs: number; onClose: () => void; inline?: { t: number; r: number; b: number; l: number } }) {
+export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, inline, edit }: { jingle: JingleRef; origin: { x: number; y: number } | null; nowMs: number; onClose: () => void; inline?: { t: number; r: number; b: number; l: number }; /** edit THIS schedule (same id, replaced on Save) instead of adding a new one */ edit?: MockScheduleItem }) {
   const tr = useTr();
   const { locale } = useLocale();
   // the schedule is kept PER BRANCH (main, F4 — a scheduled jingle fires once per branch): the dialog reads and writes the branch this screen belongs to
   const branch = useStationBranchId() ?? stationBranchIdNow() ?? "default";
   // `now` comes from the click that opened the dialog (render stays pure) and is refreshed while it is open
   const [nowMs, setNowMs] = useState(nowMs0);
-  const [mode, setMode] = useState<"fixed" | "once">("fixed");
+  // editing: it opens on what the schedule already is (kind, time, days, date); a new one opens on the next free 5-minute slot
+  const d0 = edit ? editDefaults(edit, nowMs0) : null;
+  const [mode, setMode] = useState<"fixed" | "once">(d0?.mode ?? "fixed");
   // default = the next free 5-minute slot (a slot that is already "now" would be in the past by the time you save)
   const slot0 = new Date(Math.ceil((nowMs0 + 1) / 300000) * 300000);
-  const [hour, setHour] = useState(slot0.getHours());
-  const [minute, setMinute] = useState(slot0.getMinutes());
-  const [days, setDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6]);
-  const [dateOffset, setDateOffset] = useState(0);
-  const [mine, setMine] = useState<MockScheduleItem[]>(() => loadJingleSchedule(stationBranchIdNow() ?? "default").filter((x) => x.url === jingle.url));
+  const [hour, setHour] = useState(d0?.hour ?? slot0.getHours());
+  const [minute, setMinute] = useState(d0?.minute ?? slot0.getMinutes());
+  const [days, setDays] = useState<number[]>(d0?.days ?? ALL_DAYS);
+  const [dateOffset, setDateOffset] = useState(d0?.dateOffset ?? 0);
+  // (editing one schedule: the list of this jingle's other schedules is not shown — they are edited from their own rows)
+  const [mine, setMine] = useState<MockScheduleItem[]>(() => (edit ? [] : loadJingleSchedule(stationBranchIdNow() ?? "default").filter((x) => x.url === jingle.url)));
   const [phase, setPhase] = useState<"open" | "saved" | "closing">("open");
   const timers = useRef<number[]>([]);
 
   useEffect(() => {
     const list = timers.current;
-    const refresh = () => setMine(loadJingleSchedule(branch).filter((x) => x.url === jingle.url));
+    const refresh = () => setMine(edit ? [] : loadJingleSchedule(branch).filter((x) => x.url === jingle.url));
     window.addEventListener(JINGLE_SCHEDULE_EVENT, refresh);
     const tick = window.setInterval(() => setNowMs(Date.now()), 20000);
     return () => {
@@ -151,7 +189,7 @@ export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, i
       list.forEach((t) => window.clearTimeout(t));
       window.removeEventListener(JINGLE_SCHEDULE_EVENT, refresh);
     };
-  }, [jingle.url, branch]);
+  }, [jingle.url, branch, edit]);
 
   const close = () => {
     setPhase("closing");
@@ -169,7 +207,10 @@ export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, i
   const save = () => {
     if (!canSave || phase !== "open") return;
     const bell = (jingle.bell ?? "ding") as JingleBellStyle;
-    const base = { id: `jq-${crypto.randomUUID()}`, label: jingle.label, targetLabel: "Queue", url: jingle.url, preRoll: !!jingle.bell, bellStyle: bell };
+    // editing keeps everything that is not the time: the same id (a pad's `pad:<id>` link and the studio's marker stay), name, jingle, bell
+    const base = edit
+      ? { id: edit.id, label: edit.label, targetLabel: edit.targetLabel, url: edit.url, preRoll: edit.preRoll, bellStyle: edit.bellStyle }
+      : { id: `jq-${crypto.randomUUID()}`, label: jingle.label, targetLabel: "Queue", url: jingle.url, preRoll: !!jingle.bell, bellStyle: bell };
     let item: MockScheduleItem;
     if (mode === "fixed") {
       const sorted = [...days].sort((a, b) => a - b);
@@ -179,7 +220,8 @@ export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, i
     } else {
       item = { ...base, whenLabel: `${DAY_NAME[when.getDay()]} ${when.getDate()}/${when.getMonth() + 1} · ${pad2(hour)}:${pad2(minute)}`, repeatLabel: "Once", repeat: "once", scheduledAtIso: when.toISOString() };
     }
-    persistJingleSchedule(branch, [...loadJingleSchedule(branch), item]);
+    const all = loadJingleSchedule(branch);
+    persistJingleSchedule(branch, edit && all.some((x) => x.id === edit.id) ? all.map((x) => (x.id === edit.id ? item : x)) : [...all, item]);
     setPhase("saved");
     timers.current.push(window.setTimeout(close, 900));
   };
@@ -200,7 +242,7 @@ export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, i
         data-mode={mode}
         style={panelStyle}
         role="dialog"
-        aria-label={`${tr("Schedule")} ${jingle.label}`}
+        aria-label={edit ? `${tr("Edit schedule")} ${jingle.label}` : `${tr("Schedule")} ${jingle.label}`}
       >
         <header className="sb-js-head">
           <span dir="auto" className="sb-js-title">{jingle.label}</span>
@@ -280,7 +322,7 @@ export function JingleScheduleDialog({ jingle, origin, nowMs: nowMs0, onClose, i
           {phase === "saved" ? (
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-label={tr("Scheduled")}><path className="sb-js-tick" d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" /></svg>
           ) : (
-            tr("Schedule")
+            edit ? tr("Save") : tr("Schedule")
           )}
         </button>
       </div>
