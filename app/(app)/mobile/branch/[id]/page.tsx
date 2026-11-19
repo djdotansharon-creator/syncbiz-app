@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { VmPage, useVmUi } from "@/components/vm/vm-ui";
-import { VmNowPlaying, useUpNext } from "@/components/vm/vm-now-playing";
+import { VmNowPlaying } from "@/components/vm/vm-now-playing";
 import { useNowTone } from "@/components/vm/vm-tone";
 import { VmCover } from "@/components/vm/vm-parts";
 import { Rise, VmFlow, VmFlowSection, VmFold, VmKv } from "@/components/vm/vm-flow";
@@ -15,7 +15,7 @@ import { useBranchPeople } from "@/components/control-room/branch-people";
 import { useSongIdAvailable } from "@/lib/use-song-id-available";
 import { canRenameBranch, renameBranch, useBranchDetails } from "@/lib/use-branch-details";
 import { VmScheduleSwitchLine } from "@/components/vm/vm-schedule-switch";
-import { IconChevronBack, IconChevronForward, IconIdentify, IconJingle, IconLibrary, IconPencil, IconPeople, IconStore } from "@/components/vm/vm-icons";
+import { IconCalendar, IconChevronBack, IconChevronForward, IconIdentify, IconJingle, IconLibrary, IconPencil, IconPeople, IconStore } from "@/components/vm/vm-icons";
 
 /**
  * ONE BRANCH — a flow (owner 2026-11-18, an experiment: "the background does not move, only the elements rise from below as I scroll down, a part at a time, like the iPhone's Control Center").
@@ -34,6 +34,28 @@ function FlowLink({ href, icon, title, sub }: { href: string; icon: ReactNode; t
       </span>
       <IconChevronForward className="vm-chev vm-flip" />
     </Link>
+  );
+}
+
+/** one SQUARE of the branch's actions (owner 2026-11-19: squares instead of rows) — a link, or a button that scrolls to a screen of this page */
+function Tile({ href, onClick, icon, title, sub }: { href?: string; onClick?: () => void; icon: ReactNode; title: string; sub?: string }) {
+  const body = (
+    <>
+      {icon}
+      <span className="vm-tile-text">
+        {title}
+        {sub ? <small>{sub}</small> : null}
+      </span>
+    </>
+  );
+  return href ? (
+    <Link href={href} className="vm-tile">
+      {body}
+    </Link>
+  ) : (
+    <button type="button" className="vm-tile" onClick={onClick}>
+      {body}
+    </button>
   );
 }
 
@@ -68,6 +90,12 @@ function RenameBody({ initial, onSave, labels }: { initial: string; onSave: (nam
   );
 }
 
+/** scroll to one screen of the branch's page (the pages are named by their label) */
+function goToPage(label: string): void {
+  const el = Array.from(document.querySelectorAll<HTMLElement>(".vm-flow-sec")).find((x) => x.getAttribute("aria-label") === label);
+  el?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 export default function MobileBranchPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(String(params?.id ?? ""));
@@ -79,7 +107,6 @@ export default function MobileBranchPage() {
   const people = useBranchPeople(id);
   const songId = useSongIdAvailable();
   const details = useBranchDetails(id);
-  const upNext = useUpNext();
 
   // opening a branch makes it THE branch the whole app (mini-player, library, search) controls
   const { select } = f;
@@ -137,52 +164,28 @@ export default function MobileBranchPage() {
         {/* page 1 — what plays now: one whole page, nothing of the next one under it */}
         <VmFlowSection tall label={tr("Now playing")}>
           <Rise enter={0}>
-            <VmNowPlaying hideUpNext />
+            <VmNowPlaying />
           </Rise>
         </VmFlowSection>
 
-        {/* page 2 — what comes next (only when something is queued) */}
-        {upNext.length > 0 ? (
-          <VmFlowSection tall label={tr("Up next")}>
-            <Rise>
-              <h2 className="vm-fl-h1">{tr("Up next")}</h2>
-              <p className="vm-fl-sub">{tr("{n} songs", { n: upNext.length })}</p>
-            </Rise>
-            <div className="vm-fl-up">
-              {upNext.map((u) => (
-                <Rise key={u.id}>
-                  <div className="vm-row">
-                    <VmCover src={u.cover} name={u.title} size={46} radius={11} />
-                    <div className="vm-row-text">
-                      <div className="vm-row-title vm-bdi">{u.title}</div>
-                      {u.tag ? <div className="vm-row-sub">{u.tag}</div> : null}
-                    </div>
-                  </div>
-                </Rise>
-              ))}
-            </div>
-          </VmFlowSection>
-        ) : null}
-
-        {/* page 3 — what plays */}
-        <VmFlowSection tall label={tr("What plays")}>
+        {/* page 2 — the branch's actions, as squares (owner 2026-11-19: "in the second screen I get the actions straight away — squares, not rows"). The next song is on the song screen itself. */}
+        <VmFlowSection tall label={tr("Actions")}>
           <Rise>
-            <h2 className="vm-fl-h1">{tr("What plays")}</h2>
+            <h2 className="vm-fl-h1">{tr("Actions")}</h2>
             <p className="vm-fl-sub">{tr("Pick songs, identify a song, play a jingle")}</p>
           </Rise>
-          <div className="vm-fl-list">
-            <Rise>
-              <FlowLink href="/mobile/library" icon={<IconLibrary />} title={tr("Pick something to play")} sub={tr("Playlists and your library")} />
-            </Rise>
-            {songId.any ? (
-              <Rise>
-                <FlowLink href="/mobile/identify" icon={<IconIdentify />} title={tr("Identify a song")} sub={tr("Listen to the room, or paste a Shazam link")} />
-              </Rise>
-            ) : null}
-            <Rise>
-              <FlowLink href="/mobile/jingles" icon={<IconJingle />} title={tr("Jingles")} sub={tr("Play a jingle on the speakers, or make a new one")} />
-            </Rise>
-          </div>
+          <Rise>
+            <div className="vm-tiles">
+              <Tile href="/mobile/library" icon={<IconLibrary />} title={tr("Pick something to play")} />
+              {songId.any ? <Tile href="/mobile/identify" icon={<IconIdentify />} title={tr("Identify a song")} /> : null}
+              <Tile href="/mobile/jingles" icon={<IconJingle />} title={tr("Jingles")} />
+              <Tile onClick={() => goToPage(tr("Schedule"))} icon={<IconCalendar />} title={tr("Schedule")} />
+              {people.state === "ready" ? (
+                <Tile href={`/mobile/branch/${encodeURIComponent(id)}/people`} icon={<IconPeople />} title={tr("People")} sub={tr("{n} on this branch", { n: people.assigned.length })} />
+              ) : null}
+              <Tile onClick={() => goToPage(tr("The branch"))} icon={<IconStore />} title={tr("The branch")} />
+            </div>
+          </Rise>
         </VmFlowSection>
 
         {/* page 4 — the schedule: the day as a board, the date can be changed */}

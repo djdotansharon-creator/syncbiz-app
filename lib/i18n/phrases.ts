@@ -1148,6 +1148,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Nothing is planned for this day": "אין תזמון ליום הזה",
   "Plays on {date}": "מנגן ב־{date}",
   "Plays today": "מנגן היום",
+  "Actions": "פעולות",
   "On — plays at its time": "פעיל — מתנגן בזמנו",
   "Off — the block before it plays on until the next one": "כבוי — הבלוק שלפניו ימשיך לנגן עד הבלוק הבא",
   "Off for this day only — the block before it plays on until the next one": "כבוי ליום הזה בלבד — הבלוק שלפניו ימשיך לנגן עד הבלוק הבא",

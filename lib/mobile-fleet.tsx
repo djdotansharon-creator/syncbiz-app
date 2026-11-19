@@ -14,6 +14,7 @@ import { useRemoteOwner, type ConnectionStatus } from "@/lib/remote-control/ws-c
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import type { UnifiedSource } from "@/lib/source-types";
+import { warmTone } from "@/lib/cover-tone";
 import {
   beginTransition,
   decideUserCommand,
@@ -80,6 +81,10 @@ export type FleetDisplay = {
 
 export type FleetValue = {
   connection: ConnectionStatus;
+  /** the live list has been heard (now, or a moment ago while it was coming back) — or we waited long enough (6 s) to call it: before that a branch that is "not live" is NOT yet "away" (no "offline" / "no player installed" flash while the phone connects) */
+  known: boolean;
+  /** the live connection dropped a moment ago and is coming back: the last-seen branches and states are still drawn (a picture, nothing is sent from it) — so a short drop does not blank the screen */
+  holding: boolean;
   /** the branch list has been read from the database at least once */
   loaded: boolean;
   loadError: boolean;
@@ -114,8 +119,52 @@ const FleetContext = createContext<FleetValue | null>(null);
 type SendTo = ReturnType<typeof useRemoteOwner>["sendCommandTo"];
 
 const STORAGE_KEY = "vono-mobile-branch";
+/**
+ * INSTANT OPEN (owner 2026-11-19: "it does not come up at once, it is slow"). The first screen needs the branch list (a request) and the branch's state (a socket: token → connect → list → state), a second or
+ * three on a phone. So what was last seen is remembered on the phone — the branch list, and the last state of each branch (what it played, its cover and colours, volume and modes) — and drawn at once;
+ * the live answer replaces it as it arrives. A remembered state is only a picture: `canControl` stays false until the branch is really connected, and nothing is ever sent from it.
+ */
+const DB_CACHE_KEY = "vono-mobile-db-v1";
+const STATE_CACHE_KEY = "vono-mobile-state-v1:";
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* no room / blocked: the memory is only a help */
+  }
+}
+/** the part of a station's state worth remembering: what it plays, how it looks, how it is set (never the whole queue) */
+function slimState(s: StationPlaybackState): StationPlaybackState {
+  return {
+    status: s.status,
+    currentTrack: s.currentTrack ?? null,
+    currentSource: s.currentSource ?? null,
+    currentTrackIndex: s.currentTrackIndex,
+    sessionTitle: s.sessionTitle ?? null,
+    sessionTracks: (s.sessionTracks ?? []).slice(0, 10),
+    nextSessionTrack: s.nextSessionTrack,
+    playNextQueue: (s.playNextQueue ?? []).slice(0, 5),
+    duration: s.duration,
+    position: s.position,
+    positionAt: s.positionAt,
+    volume: s.volume,
+    shuffle: s.shuffle,
+    autoMix: s.autoMix,
+    repeatMode: s.repeatMode,
+  } as StationPlaybackState;
+}
 /** the connected-station list is only sent on request — ask again so a station that drops shows Offline (same cadence as the Control Room) */
 const LIVE_REFRESH_MS = 10_000;
+/** how long the last-seen branches stay drawn after the live connection drops (owner 2026-11-19: "when I connect again there is a disconnect until it connects") — a long outage then shows the truth */
+const HOLD_MS = 10_000;
 
 function statusOf(online: boolean, hasStation: boolean, liveKnown: boolean, state: StationPlaybackState | null): FleetStatus {
   if (!online && !hasStation) return "install";
@@ -135,7 +184,20 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
 
   const [db, setDb] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // the branch this phone used last is read at once (not in an effect a frame later: that frame said "No branch selected")
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    try {
+      return typeof window === "undefined" ? null : localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  // the remembered picture (read after mount: the server renders without the phone's storage)
+  useEffect(() => {
+    const cached = readJson<DbBranch[]>(DB_CACHE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the phone's remembered branch list, once on mount
+    if (Array.isArray(cached) && cached.length) setDb((cur) => cur ?? cached.filter((b) => b && typeof b.id === "string"));
+  }, []);
 
   // the branch list from the database (names, city, logo, whether a station exists)
   useEffect(() => {
@@ -145,8 +207,10 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((rows: unknown) => {
           if (off) return;
-          setDb(Array.isArray(rows) ? (rows as DbBranch[]).filter((b) => b && typeof b.id === "string") : []);
+          const list = Array.isArray(rows) ? (rows as DbBranch[]).filter((b) => b && typeof b.id === "string") : [];
+          setDb(list);
           setLoadError(false);
+          writeJson(DB_CACHE_KEY, list);
         })
         .catch(() => {
           if (!off) setLoadError(true);
@@ -178,14 +242,26 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     };
   }, [owner.status]);
 
-  const liveKnown = owner.status === "connected";
+  // the live connection dropped a moment ago: what it showed stays drawn for HOLD_MS (the timer runs from the first drop, not from every failed try)
+  const held = owner.held;
+  const [holdOver, setHoldOver] = useState<number | null>(null);
+  useEffect(() => {
+    if (!held) return;
+    const t = setTimeout(() => setHoldOver(held.at), Math.max(0, HOLD_MS - (Date.now() - held.at)));
+    return () => clearTimeout(t);
+  }, [held]);
+  const holding = !!held && owner.status !== "connected" && holdOver !== held.at;
+  const liveBranches = holding && held ? held.branches : owner.branches;
+  const liveStates = holding && held ? held.states : owner.remoteStateByDeviceId;
+  // "known" = the live list has been HEARD (registered is a moment earlier — the list is what says which branches are live), or it was a moment ago and is coming back
+  const liveKnown = (owner.status === "connected" && owner.listed) || holding;
 
   const branches: FleetBranch[] = useMemo(() => {
-    const liveById = new Map(owner.branches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
+    const liveById = new Map(liveBranches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
     const out: FleetBranch[] = (db ?? []).map((b) => {
       const live = liveById.get(b.id) ?? null;
       liveById.delete(b.id);
-      const state = live ? owner.remoteStateByDeviceId[live.masterDeviceId] ?? null : null;
+      const state = live ? liveStates[live.masterDeviceId] ?? null : null;
       const hasStation = b.hasStation !== false;
       return {
         id: b.id,
@@ -202,7 +278,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     });
     // a connected station whose branch is not in the list (legacy id) — still shown, never hidden
     for (const live of liveById.values()) {
-      const state = owner.remoteStateByDeviceId[live.masterDeviceId] ?? null;
+      const state = liveStates[live.masterDeviceId] ?? null;
       out.push({
         id: live.canonicalBranchId || live.branchId,
         rawId: live.branchId,
@@ -217,7 +293,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       });
     }
     return out.sort((a, b) => RANK[a.status] - RANK[b.status] || a.name.localeCompare(b.name));
-  }, [db, owner.branches, owner.remoteStateByDeviceId, liveKnown]);
+  }, [db, liveBranches, liveStates, liveKnown]);
 
   // the chosen branch: the last one used on this phone, else the one playing, else the first online, else the first.
   // An AUTOMATIC choice waits for the live list (else the first launch would lock onto an offline branch before the player's state arrives) and
@@ -380,6 +456,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       });
       transitionRef.current = t;
       setTransitionState(t);
+      warmTone(source.cover); // the song's colour is read while the station starts it — ready when the song appears
       send("PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
     },
     [captureHeld, send, target],
@@ -413,14 +490,34 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // the selected branch's last known state: remembered when it changes (not every second), drawn until the live one arrives
+  const [rememberedState, setRememberedState] = useState<{ id: string; state: StationPlaybackState } | null>(null);
+  useEffect(() => {
+    if (!selectedId) return;
+    const cached = readJson<StationPlaybackState>(STATE_CACHE_KEY + selectedId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the remembered state of the chosen branch, read when it is chosen
+    setRememberedState(cached ? { id: selectedId, state: cached } : null);
+  }, [selectedId]);
+  const liveSig = liveState ? `${liveState.status}|${liveState.currentSource?.id ?? ""}|${liveState.currentTrack?.title ?? ""}|${liveState.currentTrackIndex}|${liveState.volume ?? ""}|${liveState.shuffle ? 1 : 0}${liveState.autoMix ? 1 : 0}|${liveState.repeatMode ?? ""}` : "";
+  useEffect(() => {
+    if (!selectedId || !liveStateRef.current) return;
+    writeJson(STATE_CACHE_KEY + selectedId, slimState(liveStateRef.current));
+  }, [selectedId, liveSig]);
+
   const display: FleetDisplay = useMemo(() => {
-    const d = displayPlaybackState(liveState, holdsAudible(transition) ? heldState : null, transition);
-    return { shown: d.shown, loading: d.loading, label: transitionLabel(transition) };
-  }, [liveState, heldState, transition]);
+    const live = displayPlaybackState(liveState, holdsAudible(transition) ? heldState : null, transition);
+    // nothing live yet: the remembered state of this branch is drawn (a picture, never a command source — `canControl` is still false until the branch is connected)
+    // (drawn as paused, without a running clock: it is a picture of how the branch was, not a claim about now)
+    const rs = !live.shown && !liveState && rememberedState && rememberedState.id === selectedId ? rememberedState.state : null;
+    const remembered = rs ? ({ ...rs, status: rs.status === "playing" ? "paused" : rs.status, positionAt: undefined } as StationPlaybackState) : null;
+    return { shown: live.shown ?? remembered, loading: live.loading, label: transitionLabel(transition) };
+  }, [liveState, heldState, transition, rememberedState, selectedId]);
 
   const value: FleetValue = useMemo(
     () => ({
       connection: owner.status,
+      known: liveKnown || gaveUp,
+      holding,
       loaded: db !== null,
       loadError,
       branches,
@@ -444,7 +541,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       interrupt,
       toggleBranch,
     }),
-    [owner.status, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
+    [owner.status, liveKnown, gaveUp, holding, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
   );
 
   return <FleetContext.Provider value={value}>{children}</FleetContext.Provider>;

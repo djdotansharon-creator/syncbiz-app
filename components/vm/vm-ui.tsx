@@ -243,10 +243,10 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
         }
       }}
     >
-      <VmCover src={cover} name={title || b.name} size={42} radius={10} />
+      <VmCover src={cover} name={title || b.name} size={42} radius={10} quietTile />
       <div className="vm-mini-text">
         <div className="vm-mini-title">
-          {title ? <VmMarquee text={title} /> : <span style={{ color: "var(--vm-text2)" }}>{b.online ? tr("Nothing playing") : tr("Offline")}</span>}
+          {title ? <VmMarquee text={title} /> : <span style={{ color: "var(--vm-text2)" }}>{b.online ? tr("Nothing playing") : b.status === "unknown" || !f.known ? "…" : tr("Offline")}</span>}
         </div>
         <div className="vm-mini-sub vm-bdi">
           {playing ? <VmEq /> : <span className="vm-dot" data-s={b.status} />}
@@ -319,6 +319,12 @@ export function VmShell({ children }: { children: ReactNode }) {
   const [sheet, setSheet] = useState<{ label: string; node: ReactNode } | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // the first moments after the app opens: the colours are put on at once (no glide from the neutral dark) — the glide is for a song CHANGING, not for opening (owner 2026-11-19)
+  const [booting, setBooting] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setBooting(false), 1100);
+    return () => clearTimeout(t);
+  }, []);
 
   // owner 2026-11-16: no local player on the phone for now — an old "Player" choice saved on this phone is put back to Controller
   const { mobileRole, setMobileRole } = useMobileRole();
@@ -354,7 +360,7 @@ export function VmShell({ children }: { children: ReactNode }) {
 
   return (
     <VmUiContext.Provider value={ui}>
-      <div className="vm">
+      <div className="vm" data-boot={booting ? "" : undefined}>
         <PwaRegister />
         <div className="vm-scroll" id="vm-scroll" ref={scrollRef} data-legacy={LEGACY_ROUTE.test(pathname) ? "" : undefined} data-flat={FLAT_ROUTE.test(pathname) ? "" : undefined}>
           {children}

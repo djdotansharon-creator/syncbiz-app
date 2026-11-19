@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconRepeatOne, IconShuffle, IconVolumeHigh, IconVolumeLow, IconWifiOff } from "@/components/vm/vm-icons";
 import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
+import { warmTone } from "@/lib/cover-tone";
 
 export type UpNextItem = { id: string; title: string; cover: string | null; tag: string };
 
@@ -54,7 +55,7 @@ export function VmUpNextList({ items, playing }: { items: UpNextItem[]; playing:
  * NOW PLAYING for the SELECTED branch — one component for the full-height sheet (opened from the mini-player) and for a branch's own screen.
  * It only shows what the branch's station reports and sends commands to that station; nothing plays on the phone.
  */
-export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBranch?: () => void; /** the branch's own screen already says which branch this is */ hideWho?: boolean; /** the flow gives "Up next" a screen of its own */ hideUpNext?: boolean }) {
+export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => void; /** the branch's own screen already says which branch this is */ hideWho?: boolean }) {
   const f = useMobileFleet();
   const tr = useTr();
   const tone = useNowTone();
@@ -70,8 +71,17 @@ export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBran
   const subtitle = listTitle && listTitle !== trackTitle ? listTitle : "";
 
   const upNext = useUpNext();
+  const nextSong = upNext[0] ?? null; // owner 2026-11-19: not a list — just the next song
+  const nextCover = nextSong?.cover ?? null;
+  // the next song's colour is read ahead, so it is ready when that song starts (owner 2026-11-19: the picture changed but the background did not)
+  useEffect(() => {
+    warmTone(nextCover);
+  }, [nextCover]);
+  const [volOpen, setVolOpen] = useState(false); // owner 2026-11-19: the volume is not needed open all the time — one press opens it
 
   if (!b) {
+    // the branch list has not been read yet: nothing to say (a "No branch selected" for a moment is a lie)
+    if (!f.loaded || !f.known) return <div className="vm-np" aria-busy />;
     return (
       <div className="vm-offline">
         <b>{tr("No branch selected")}</b>
@@ -95,7 +105,7 @@ export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBran
         </button>
       )}
 
-      {!b.online ? (
+      {!b.online && b.status !== "unknown" && f.known ? (
         <div className="vm-offline" style={{ margin: "26px 0 0" }}>
           <IconWifiOff />
           <b>{b.status === "install" ? tr("No player installed yet") : tr("This branch is offline")}</b>
@@ -105,13 +115,18 @@ export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBran
         </div>
       ) : (
         <>
-          <VmCover className="vm-np-art" src={cover} name={trackTitle || b.name} radius={22} playing={playing} />
+          <VmCover className="vm-np-art" src={cover} name={trackTitle || b.name} radius={22} playing={playing} quietTile />
           <div className="vm-np-titles">
             {trackTitle ? (
               <>
                 <VmMarquee className="vm-np-title" text={trackTitle} />
                 {subtitle ? <div className="vm-np-artist vm-bdi">{subtitle}</div> : null}
               </>
+            ) : b.status === "unknown" || !f.known || (b.online && !shown) ? (
+              // still connecting: nothing is said yet (a "Nothing playing" that turns into the song a moment later is a lie)
+              <div className="vm-np-title" aria-busy>
+                &nbsp;
+              </div>
             ) : (
               <div className="vm-np-title" style={{ color: "var(--vm-text2)" }}>{tr("Nothing playing")}</div>
             )}
@@ -145,13 +160,11 @@ export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBran
             </button>
           </div>
 
-          <div className="vm-vol">
-            <IconVolumeLow />
-            <VmSlider value={vol} max={100} onLive={(v) => f.setVolume(v)} onCommit={(v) => f.setVolume(v)} label={tr("Volume")} disabled={!can} />
-            <IconVolumeHigh />
-          </div>
-
           <div className="vm-modes">
+            <button type="button" className="vm-mode" data-on={volOpen ? "" : undefined} onClick={() => setVolOpen((v) => !v)} aria-expanded={volOpen} aria-label={tr("Volume")}>
+              {vol <= 0 ? <IconVolumeLow /> : <IconVolumeHigh />}
+              <span>{`${Math.round(vol)}%`}</span>
+            </button>
             <button type="button" className="vm-mode" data-on={shown?.shuffle ? "" : undefined} onClick={() => f.setShuffle(!shown?.shuffle)} disabled={!can} aria-pressed={!!shown?.shuffle}>
               <IconShuffle />
               <span>{tr("Shuffle")}</span>
@@ -173,7 +186,25 @@ export function VmNowPlaying({ onPickBranch, hideWho, hideUpNext }: { onPickBran
             </button>
           </div>
 
-          {upNext.length && !hideUpNext ? <VmUpNextList items={upNext} playing={playing} /> : null}
+          <div className="vm-volfold" data-open={volOpen ? "" : undefined}>
+            <div className="vm-volfold-in" inert={!volOpen}>
+              <div className="vm-vol">
+                <IconVolumeLow />
+                <VmSlider value={vol} max={100} onLive={(v) => f.setVolume(v)} onCommit={(v) => f.setVolume(v)} label={tr("Volume")} disabled={!can} />
+                <IconVolumeHigh />
+              </div>
+            </div>
+          </div>
+
+          {nextSong ? (
+            <div className="vm-np-next">
+              <VmCover src={nextSong.cover} name={nextSong.title} size={40} radius={10} />
+              <div className="vm-np-next-text">
+                <small>{nextSong.tag || tr("Next")}</small>
+                <span className="vm-bdi">{nextSong.title}</span>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>
