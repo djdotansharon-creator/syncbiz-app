@@ -5857,6 +5857,25 @@ html[data-sb-display="white"] .sb-pl-plus:hover { background: rgba(255, 255, 255
 @keyframes sb-npl-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes sb-npl-pop { 0% { transform: scale(1); } 50% { transform: scale(1.16); } 100% { transform: scale(1); } }
 .sb-npl-fail { margin: 10px 0 0 6px; font-size: 12.5px; color: #ff6b61; }
+/* 2026-11-19: DJ AI or by hand — the two ways to make a playlist (the first step of the new-playlist window, when DJ AI is offered) */
+.sb-npl-choices { display: grid; gap: 10px; }
+.sb-npl-choice { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; border: 0; border-radius: 20px; text-align: start; cursor: pointer; color: inherit; background: rgba(255, 255, 255, 0.08); transition: background-color 220ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-npl-choice:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+.sb-npl-choice:active { transform: scale(0.985); }
+.sb-npl-choice:focus-visible { outline: 2px solid rgba(94, 233, 240, 0.7); outline-offset: 2px; }
+.sb-npl-choice--ai { background: linear-gradient(135deg, rgba(94, 233, 240, 0.2), rgba(255, 255, 255, 0.08) 70%); }
+.sb-npl-choice--ai:hover { background: linear-gradient(135deg, rgba(94, 233, 240, 0.3), rgba(255, 255, 255, 0.12) 70%); }
+.sb-npl-choice-ico { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 14px; object-fit: contain; }
+.sb-npl-choice-ico--hand { display: inline-flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.1); }
+.sb-npl-choice-ico--hand svg { width: 24px; height: 24px; }
+.sb-npl-choice-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sb-npl-choice-text b { font-size: 16px; font-weight: 600; letter-spacing: -0.005em; }
+.sb-npl-choice-text small { font-size: 12.5px; line-height: 1.35; opacity: 0.62; }
+.sb-npl-back { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: 0 6px 0 -4px; padding: 0; border: 0; border-radius: 50%; vertical-align: -5px; color: inherit; background: transparent; opacity: 0.7; cursor: pointer; transition: opacity 160ms ease, background-color 160ms ease; }
+.sb-npl-back:hover { opacity: 1; background: rgba(255, 255, 255, 0.12); }
+.sb-npl-back svg { width: 16px; height: 16px; }
+[dir="rtl"] .sb-npl-back { margin: 0 -4px 0 6px; }
+[dir="rtl"] .sb-npl-back svg { transform: scaleX(-1); }
 
 /* ── (bw) 2026-10-18 owner: the queue panel gets categories next to QUEUE — "Queue" and "Jingles" (room for more); a bar
    glides under the active one; the Jingles pane lists quick pads + saved jingles as glass rows, one tap = on air.
