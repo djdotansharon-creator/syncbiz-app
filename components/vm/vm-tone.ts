@@ -15,6 +15,39 @@ export type Hs = { h: number; s: number };
 
 const cache = new Map<string, Promise<Hs | null>>();
 
+/**
+ * REMEMBERED COLOURS (owner 2026-11-19: "when I load the player it shows the branch's colour first and only then the song's — I want the song's colour at once"). The colour of a picture is read from
+ * the picture, which needs the picture to load — a second or two after the page. So every colour that was read is remembered on the phone (per picture, and "the last one shown"): the next open paints the
+ * song's colour on the FIRST frame. And while a colour is being read, nothing is made up from a NAME any more (that was the "branch colour" first, then another, then the song's).
+ */
+const TONE_KEY = "vono-mobile-tone-v1:";
+const LAST_TONE_KEY = "vono-mobile-tone-last-v1";
+function readHs(key: string): Hs | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<Hs>;
+    return typeof v.h === "number" && typeof v.s === "number" && Number.isFinite(v.h) && Number.isFinite(v.s) ? { h: v.h, s: v.s } : null;
+  } catch {
+    return null;
+  }
+}
+function writeHs(key: string, hs: Hs): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ h: Math.round(hs.h), s: Math.round(hs.s * 100) / 100 }));
+  } catch {
+    /* only a help */
+  }
+}
+/** the colour remembered for this picture (null = never read) */
+export function rememberedTone(url: string | null | undefined): Hs | null {
+  return url ? readHs(TONE_KEY + url) : null;
+}
+/** the last colour any song showed on this phone (null = none yet) */
+export function lastTone(): Hs | null {
+  return readHs(LAST_TONE_KEY);
+}
+
 function hexToHs(hex: string): Hs | null {
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!m) return null;
@@ -35,6 +68,12 @@ function hexToHs(hex: string): Hs | null {
 function sampleHs(url: string): Promise<Hs | null> {
   const hit = cache.get(url);
   if (hit) return hit;
+  const known = readHs(TONE_KEY + url);
+  if (known) {
+    const done = Promise.resolve<Hs | null>(known);
+    cache.set(url, done);
+    return done;
+  }
   const p = new Promise<Hs | null>((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -54,7 +93,9 @@ function sampleHs(url: string): Promise<Hs | null> {
         if (!ctx) return done(null);
         ctx.drawImage(img, 0, 0, 24, 24);
         const tone = toneFromPixels(ctx.getImageData(0, 0, 24, 24).data);
-        done(tone ? hexToHs(tone.c2) : null);
+        const hs = tone ? hexToHs(tone.c2) : null;
+        if (hs) writeHs(TONE_KEY + url, hs);
+        done(hs);
       } catch {
         done(null);
       }
@@ -82,20 +123,35 @@ export function toneVars(hs: Hs, deep = false): CSSProperties {
  * The colour of a cover as CSS variables (`--vm-t1`, `--vm-t2`). While a new picture is being read the previous colour stays (then glides), so a track change is one
  * smooth move, not a flash through the name's colour. `calm` = nothing plays: a quiet, nearly neutral tint of the name.
  */
-export function useCoverTone(cover: string | null | undefined, name: string, calm = false): CSSProperties {
+export function useCoverTone(cover: string | null | undefined, name: string, calm = false, /** this is the colour of what the branch PLAYS (not a picture in a list): remembered as "the last song's colour" for the next open */ nowPlaying = false): CSSProperties {
+  // the first frame: the colour remembered for THIS picture, else the last song's colour — read after mount (the server renders without a phone's storage); `null` = the neutral dark, never a colour made from a name
   const [got, setGot] = useState<Hs | null>(null);
+  const [settled, setSettled] = useState(false); // true once the picture's own answer is in (a colour, or "cannot be read")
   useEffect(() => {
     let alive = true;
+    const quick = rememberedTone(cover) ?? (nowPlaying ? lastTone() : null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the remembered colour of a phone's storage, read once the picture is known
+    if (quick) setGot((cur) => cur ?? quick);
+    setSettled(false);
     void (cover ? sampleHs(cover) : Promise.resolve(null)).then((hs) => {
-      if (alive) setGot(hs ?? nameHs(name));
+      if (!alive) return;
+      if (hs) {
+        setGot(hs);
+        if (nowPlaying) writeHs(LAST_TONE_KEY, hs);
+      }
+      setSettled(true);
     });
     return () => {
       alive = false;
     };
-  }, [cover, name]);
+  }, [cover, nowPlaying]);
   if (calm) return toneVars({ h: nameHue(name || "·"), s: 0.1 });
-  return toneVars(got ?? nameHs(name));
+  // a colour is made from the NAME only when the picture has really answered "no colour" (none, or it cannot be read) and nothing was remembered — never while it is still loading
+  return toneVars(got ?? (settled ? nameHs(name) : NEUTRAL_HS));
 }
+
+/** the neutral dark of the app before any colour is known (the same one the CSS starts from) */
+const NEUTRAL_HS: Hs = { h: 240, s: 0.06 };
 
 /** the colour of what the SELECTED branch plays now (for the dock's mini-player, the Now Playing sheet, a branch's screen) */
 export function useNowTone(): CSSProperties {
@@ -104,6 +160,8 @@ export function useNowTone(): CSSProperties {
   const s = f.display.shown;
   const cover = s?.currentTrack?.cover ?? s?.currentSource?.cover ?? null;
   const title = s?.currentTrack?.title || s?.currentSource?.title || "";
-  const quiet = !b || !b.online || !s || s.status === "idle" || s.status === "stopped";
-  return useCoverTone(quiet ? null : cover, title || b?.name || "", quiet);
+  // the phone is still connecting (the branch's state has not arrived): the song that played last stays — its colour, at once — instead of a "branch colour" that is replaced a moment later
+  const connecting = !!b && (b.status === "unknown" || (b.online && !s));
+  const quiet = !b || (!b.online && !connecting) || !s || s.status === "idle" || s.status === "stopped";
+  return useCoverTone(quiet ? null : cover, title || b?.name || "", quiet && !connecting, true);
 }

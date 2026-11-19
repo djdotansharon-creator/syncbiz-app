@@ -114,6 +114,48 @@ const FleetContext = createContext<FleetValue | null>(null);
 type SendTo = ReturnType<typeof useRemoteOwner>["sendCommandTo"];
 
 const STORAGE_KEY = "vono-mobile-branch";
+/**
+ * INSTANT OPEN (owner 2026-11-19: "it does not come up at once, it is slow"). The first screen needs the branch list (a request) and the branch's state (a socket: token → connect → list → state), a second or
+ * three on a phone. So what was last seen is remembered on the phone — the branch list, and the last state of each branch (what it played, its cover and colours, volume and modes) — and drawn at once;
+ * the live answer replaces it as it arrives. A remembered state is only a picture: `canControl` stays false until the branch is really connected, and nothing is ever sent from it.
+ */
+const DB_CACHE_KEY = "vono-mobile-db-v1";
+const STATE_CACHE_KEY = "vono-mobile-state-v1:";
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* no room / blocked: the memory is only a help */
+  }
+}
+/** the part of a station's state worth remembering: what it plays, how it looks, how it is set (never the whole queue) */
+function slimState(s: StationPlaybackState): StationPlaybackState {
+  return {
+    status: s.status,
+    currentTrack: s.currentTrack ?? null,
+    currentSource: s.currentSource ?? null,
+    currentTrackIndex: s.currentTrackIndex,
+    sessionTitle: s.sessionTitle ?? null,
+    sessionTracks: (s.sessionTracks ?? []).slice(0, 10),
+    nextSessionTrack: s.nextSessionTrack,
+    playNextQueue: (s.playNextQueue ?? []).slice(0, 5),
+    duration: s.duration,
+    position: s.position,
+    positionAt: s.positionAt,
+    volume: s.volume,
+    shuffle: s.shuffle,
+    autoMix: s.autoMix,
+    repeatMode: s.repeatMode,
+  } as StationPlaybackState;
+}
 /** the connected-station list is only sent on request — ask again so a station that drops shows Offline (same cadence as the Control Room) */
 const LIVE_REFRESH_MS = 10_000;
 
@@ -136,6 +178,12 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<DbBranch[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // the remembered picture (read after mount: the server renders without the phone's storage)
+  useEffect(() => {
+    const cached = readJson<DbBranch[]>(DB_CACHE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the phone's remembered branch list, once on mount
+    if (Array.isArray(cached) && cached.length) setDb((cur) => cur ?? cached.filter((b) => b && typeof b.id === "string"));
+  }, []);
 
   // the branch list from the database (names, city, logo, whether a station exists)
   useEffect(() => {
@@ -145,8 +193,10 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((rows: unknown) => {
           if (off) return;
-          setDb(Array.isArray(rows) ? (rows as DbBranch[]).filter((b) => b && typeof b.id === "string") : []);
+          const list = Array.isArray(rows) ? (rows as DbBranch[]).filter((b) => b && typeof b.id === "string") : [];
+          setDb(list);
           setLoadError(false);
+          writeJson(DB_CACHE_KEY, list);
         })
         .catch(() => {
           if (!off) setLoadError(true);
@@ -413,10 +463,28 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // the selected branch's last known state: remembered when it changes (not every second), drawn until the live one arrives
+  const [rememberedState, setRememberedState] = useState<{ id: string; state: StationPlaybackState } | null>(null);
+  useEffect(() => {
+    if (!selectedId) return;
+    const cached = readJson<StationPlaybackState>(STATE_CACHE_KEY + selectedId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the remembered state of the chosen branch, read when it is chosen
+    setRememberedState(cached ? { id: selectedId, state: cached } : null);
+  }, [selectedId]);
+  const liveSig = liveState ? `${liveState.status}|${liveState.currentSource?.id ?? ""}|${liveState.currentTrack?.title ?? ""}|${liveState.currentTrackIndex}|${liveState.volume ?? ""}|${liveState.shuffle ? 1 : 0}${liveState.autoMix ? 1 : 0}|${liveState.repeatMode ?? ""}` : "";
+  useEffect(() => {
+    if (!selectedId || !liveStateRef.current) return;
+    writeJson(STATE_CACHE_KEY + selectedId, slimState(liveStateRef.current));
+  }, [selectedId, liveSig]);
+
   const display: FleetDisplay = useMemo(() => {
-    const d = displayPlaybackState(liveState, holdsAudible(transition) ? heldState : null, transition);
-    return { shown: d.shown, loading: d.loading, label: transitionLabel(transition) };
-  }, [liveState, heldState, transition]);
+    const live = displayPlaybackState(liveState, holdsAudible(transition) ? heldState : null, transition);
+    // nothing live yet: the remembered state of this branch is drawn (a picture, never a command source — `canControl` is still false until the branch is connected)
+    // (drawn as paused, without a running clock: it is a picture of how the branch was, not a claim about now)
+    const rs = !live.shown && !liveState && rememberedState && rememberedState.id === selectedId ? rememberedState.state : null;
+    const remembered = rs ? ({ ...rs, status: rs.status === "playing" ? "paused" : rs.status, positionAt: undefined } as StationPlaybackState) : null;
+    return { shown: live.shown ?? remembered, loading: live.loading, label: transitionLabel(transition) };
+  }, [liveState, heldState, transition, rememberedState, selectedId]);
 
   const value: FleetValue = useMemo(
     () => ({
