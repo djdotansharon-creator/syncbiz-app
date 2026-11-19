@@ -99,8 +99,30 @@ function periodMs(item: MockScheduleItem): number | null {
   return repeat === "daily" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
 }
 
-/** The latest occurrence at or before `now` (ms), or null if none yet. */
+/**
+ * The latest occurrence at or before `now` (ms), or null if none yet.
+ *
+ * FIXED DAYS ("weekdays": chosen days of the week at a time of day — the dialog's default, "every day at 12:30" included): the latest
+ * chosen day whose time has passed, looking back a week. It used to be computed like a weekly item (the first firing + whole weeks), so
+ * a jingle set to "every day" was only ever due on the weekday it was first scheduled — it fired once a week (owner 2026-11-19: "I can't
+ * set it to be every day at a specific time"). Nothing before the first firing (`scheduledAtIso`, the first time after saving or editing)
+ * counts, so saving at 12:30:05 for 12:30 never fires on the spot.
+ */
 export function lastFiringMs(item: MockScheduleItem, now: number): number | null {
+  if (item.repeat === "weekdays") {
+    const days = item.days && item.days.length > 0 ? item.days : [0, 1, 2, 3, 4, 5, 6];
+    const [hh, mm] = (item.timeOfDay ?? "00:00").split(":").map((n) => parseInt(n, 10));
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+    const first = item.scheduledAtIso ? Date.parse(item.scheduledAtIso) : NaN;
+    for (let back = 0; back < 8; back++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - back);
+      d.setHours(hh, mm, 0, 0);
+      if (d.getTime() > now || !days.includes(d.getDay())) continue;
+      return Number.isFinite(first) && d.getTime() < first ? null : d.getTime();
+    }
+    return null;
+  }
   const base = item.scheduledAtIso ? Date.parse(item.scheduledAtIso) : NaN;
   if (!Number.isFinite(base) || base > now) return null;
   const step = periodMs(item);

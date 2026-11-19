@@ -157,6 +157,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Tap to assign": "הקישו לשיוך",
   "Edit pad": "עריכת כפתור",
   "Edit": "עריכה",
+  "Edit schedule": "עריכת תזמון",
   "Stop": "עצירה",
   "Preview": "תצוגה מקדימה",
   "No audio to play": "אין אודיו להשמעה",

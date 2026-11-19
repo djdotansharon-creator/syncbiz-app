@@ -31,7 +31,7 @@ import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 import { isSkippedOn, withSkipDate, ymdOf } from "@/lib/schedule-skip";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import { JINGLE_SCHEDULE_EVENT, loadJingleSchedule } from "@/components/jingles-control/schedule-storage";
-import { setJinglesOpenTab } from "@/components/jingles-control/open-tab";
+import { setJinglesOpenEdit, setJinglesOpenTab } from "@/components/jingles-control/open-tab";
 import {
   DAY_MINUTES,
   WEEK_DAYS,
@@ -2145,9 +2145,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           dateLabel={dateLabel}
           onClose={() => setJmenu(null)}
           onOpen={() => {
+            const id = jmenu.item.id;
             setJmenu(null);
-            // the Jingles screen is where jingles are made and scheduled — open it on its Schedule tab
+            // the Jingles screen is where jingles are made and scheduled — open it on its Schedule tab, on THIS jingle's own settings (time, days)
             setJinglesOpenTab("schedule");
+            setJinglesOpenEdit(id);
             router.push("/jingles");
           }}
         />
@@ -2807,7 +2809,7 @@ function BellIcon() {
   );
 }
 
-/** the little card of a jingle marker: its name, when it plays, and a way into the Jingles screen — nothing more */
+/** the little card of a jingle marker: its name, when it plays, and "Edit" — that jingle's own settings on the Jingles screen (owner 2026-11-19) */
 function JingleMenu({
   menu, dayName, dateLabel, onClose, onOpen,
 }: {
@@ -2893,7 +2895,7 @@ function JingleMenu({
         </span>
       </div>
       <button type="button" role="menuitem" className="ss-menu-item" onClick={onOpen}>
-        <span>{tr("Open in Jingles")}</span>
+        <span>{tr("Edit")}</span>
       </button>
     </div>,
     document.body,
