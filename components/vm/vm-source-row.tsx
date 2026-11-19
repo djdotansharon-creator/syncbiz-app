@@ -47,7 +47,8 @@ export function useSendSource() {
         return false;
       }
       if (!cur.canControl) {
-        ui.toast(tr("{name} is offline", { name: cur.selected.name }));
+        // the PHONE has no line to VONO: that is not the branch's fault (owner 2026-11-19)
+        ui.toast(cur.connection !== "connected" ? tr("Not sent — no connection to VONO") : tr("{name} is offline", { name: cur.selected.name }));
         return false;
       }
       return true;

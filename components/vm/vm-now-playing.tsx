@@ -111,7 +111,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
           <b>{b.status === "install" ? tr("No player installed yet") : tr("This branch is offline")}</b>
           {b.status === "install"
             ? tr("Install VONO on the branch computer from the Control Room, and it will show here.")
-            : tr("Its player is not connected right now. It keeps playing by itself, and shows here as soon as it is back.")}
+            : tr("Its player is not connected right now. It will show here as soon as it is back.")}
         </div>
       ) : (
         <>
@@ -142,7 +142,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
           </div>
 
           <div className="vm-transport">
-            <button type="button" className="vm-tbtn" onClick={f.prev} disabled={!can || idle} aria-label={tr("Previous")}>
+            <button type="button" className="vm-tbtn" onClick={f.prev} disabled={!can || idle} data-busy={f.display.loading ? "" : undefined} aria-label={tr("Previous")}>
               <IconPrev />
             </button>
             <button
@@ -155,7 +155,7 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
             >
               {playing ? <IconPause /> : <IconPlay />}
             </button>
-            <button type="button" className="vm-tbtn" onClick={f.next} disabled={!can || idle} aria-label={tr("Next")}>
+            <button type="button" className="vm-tbtn" onClick={f.next} disabled={!can || idle} data-busy={f.display.loading ? "" : undefined} aria-label={tr("Next")}>
               <IconNext />
             </button>
           </div>
