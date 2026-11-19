@@ -4543,6 +4543,7 @@ function SourcesManagerInner({
         <NewPlaylistPop
           onCreate={async (name) => (await handleCreatePlaylist(name, { build: false })) !== null}
           onClose={() => setCreatePlaylistOpen(false)}
+          onDjAi={() => setActiveCenterModule("dj-creator-assistant")}
         />
       ) : null}
       {/* Saved-to-library confirmation — loud, unmissable, self-dismissing */}
