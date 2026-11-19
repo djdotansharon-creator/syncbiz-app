@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
 import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconRepeatOne, IconShuffle, IconVolumeHigh, IconVolumeLow, IconWifiOff } from "@/components/vm/vm-icons";
 import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
+import { warmTone } from "@/lib/cover-tone";
 
 export type UpNextItem = { id: string; title: string; cover: string | null; tag: string };
 
@@ -71,6 +72,11 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
 
   const upNext = useUpNext();
   const nextSong = upNext[0] ?? null; // owner 2026-11-19: not a list — just the next song
+  const nextCover = nextSong?.cover ?? null;
+  // the next song's colour is read ahead, so it is ready when that song starts (owner 2026-11-19: the picture changed but the background did not)
+  useEffect(() => {
+    warmTone(nextCover);
+  }, [nextCover]);
   const [volOpen, setVolOpen] = useState(false); // owner 2026-11-19: the volume is not needed open all the time — one press opens it
 
   if (!b) {
@@ -116,6 +122,11 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
                 <VmMarquee className="vm-np-title" text={trackTitle} />
                 {subtitle ? <div className="vm-np-artist vm-bdi">{subtitle}</div> : null}
               </>
+            ) : b.status === "unknown" || (b.online && !shown) ? (
+              // still connecting: nothing is said yet (a "Nothing playing" that turns into the song a moment later is a lie)
+              <div className="vm-np-title" aria-busy>
+                &nbsp;
+              </div>
             ) : (
               <div className="vm-np-title" style={{ color: "var(--vm-text2)" }}>{tr("Nothing playing")}</div>
             )}

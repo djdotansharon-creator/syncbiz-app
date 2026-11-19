@@ -458,6 +458,19 @@ export type { DeviceInfo };
 
 const PROACTIVE_REFRESH_INTERVAL_MS = 45_000;
 const AUTH_RETRY_BACKOFF_MS = 5000;
+/** a reconnect whose held token is older than this waits for a fresh one (the token lives 60 s) */
+const TOKEN_STALE_MS = 30_000;
+/**
+ * A reconnect (attempt > 0) whose held token is OLDER than TOKEN_STALE_MS, and whose own fresh token has not arrived yet, must wait for it — the held one is about to be (or already is) refused as "expired".
+ * The first attempt of a page (0) never waits; a token received for this very attempt never waits.
+ */
+export function mustWaitForFreshToken(a: { attempt: number; freshFor: number; tokenAgeMs: number }): boolean {
+  return a.attempt > 0 && a.freshFor !== a.attempt && a.tokenAgeMs > TOKEN_STALE_MS;
+}
+/** the first retry of an outage while the app is in front */
+const QUICK_RETRY_MS = 250;
+/** after the app comes back to the front: how long the server has to answer a small question before the socket is called dead */
+const RESUME_PROBE_MS = 1500;
 
 export function useRemoteController(options?: {
   onGuestRecommendation?: (recommendation: GuestRecommendationPayload) => void;
@@ -722,6 +735,19 @@ export function useRemoteOwner() {
   const reconnectSchedulerRef = useRef<ReturnType<typeof createReconnectScheduler> | null>(null);
   /** the last token request answered 401 (signed out) — nothing to retry until the person signs in again */
   const tokenUnauthorizedRef = useRef(false);
+  // 2026-11-19 (owner: "when I come back to the app there is a disconnect until it connects"): the phone's timers sleep in the background, so the token it holds is older than its 60 s life on return.
+  // The first reconnect used that old token → refused as "expired" → only the second try was real. Now a reconnect whose token is old waits for the fresh one of THIS attempt.
+  const tokenAtRef = useRef(0);
+  const freshForRef = useRef(-1);
+  const waitingTokenRef = useRef(false);
+  const [tokenGate, setTokenGate] = useState(0);
+  // what was last seen while connected — kept for a short time after a drop, so a screen can keep showing it instead of going blank while the socket comes back
+  const lastBranchesRef = useRef<BranchSummary[]>([]);
+  const lastStatesRef = useRef<Record<string, StationPlaybackState>>({});
+  const lastMsgAtRef = useRef(0);
+  const quickRetryUsedRef = useRef(false);
+  const lastProbeAtRef = useRef(0);
+  const [held, setHeld] = useState<{ branches: BranchSummary[]; states: Record<string, StationPlaybackState>; at: number } | null>(null);
   useEffect(() => {
     const scheduler = createReconnectScheduler({
       onFire: () => {
@@ -764,6 +790,7 @@ export function useRemoteOwner() {
 
   useEffect(() => {
     let cancelled = false;
+    const attempt = reconnectTrigger;
     if (process.env.NODE_ENV === "development") {
       console.info("[SyncBiz WS client] token refresh requested", { role: "owner" });
     }
@@ -787,7 +814,15 @@ export function useRemoteOwner() {
         .then((data: { token?: string } | undefined) => {
           if (cancelled) return;
           const token = data?.token ?? null;
+          if (token) {
+            tokenAtRef.current = Date.now();
+            freshForRef.current = attempt;
+          }
           setWsToken(token);
+          if (token && waitingTokenRef.current) {
+            waitingTokenRef.current = false;
+            setTokenGate((g) => g + 1); // the reconnect that was waiting for this token can go now
+          }
           if (token) tokenUnauthorizedRef.current = false;
           // no token and not because we are signed out (a network blip / a 5xx): ask again with backoff
           else if (!tokenUnauthorizedRef.current) reconnectSchedulerRef.current?.scheduleRetry();
@@ -816,6 +851,11 @@ export function useRemoteOwner() {
       }
       return;
     }
+    // a reconnect with an OLD token (its life is 60 s; the page's timers sleep in the background) waits for the fresh one of this attempt — else the first try is refused as "expired" and only the second is real
+    if (mustWaitForFreshToken({ attempt: reconnectTrigger, freshFor: freshForRef.current, tokenAgeMs: Date.now() - tokenAtRef.current })) {
+      waitingTokenRef.current = true;
+      return;
+    }
 
     let intentionalClose = false;
     const ws = new globalThis.WebSocket(url);
@@ -837,10 +877,13 @@ export function useRemoteOwner() {
     };
 
     ws.onmessage = (e) => {
+      lastMsgAtRef.current = Date.now(); // any word from the server = the socket is alive (the resume check below)
       try {
         const data = JSON.parse(e.data as string) as ServerMessage;
         if (data.type === "REGISTERED" || data.type === "BRANCH_LIST") {
           setStatus("connected");
+          setHeld(null);
+          quickRetryUsedRef.current = false;
           lastAuthFailureAtRef.current = 0;
           reconnectSchedulerRef.current?.connected(); // accepted by the server → the backoff starts over
         }
@@ -853,9 +896,11 @@ export function useRemoteOwner() {
           return;
         }
         if (data.type === "BRANCH_LIST") {
+          lastBranchesRef.current = data.branches;
           setBranches(data.branches);
           setSelectedBranchId((prev) => (prev ? prev : data.branches[0]?.branchId ?? null));
         } else if (data.type === "STATE_UPDATE") {
+          lastStatesRef.current[data.deviceId] = data.state;
           setRemoteStateByDeviceId((prev) => ({ ...prev, [data.deviceId]: data.state }));
         } else if (data.type === "COMMAND_DELIVERY") {
           // Control Room broadcast: per-branch delivery result
@@ -870,14 +915,28 @@ export function useRemoteOwner() {
     };
 
     ws.onclose = (ev) => {
+      // an OLDER socket closing late (a dead one the phone was holding after the app was in the background) while a newer one is already in charge: its close says nothing about the live connection
+      if (wsRef.current !== null && wsRef.current !== ws) return;
       if (ev.code === 4005 || ev.code === 4004) tryAuthRecovery();
       // pending broadcast answers can no longer arrive on this socket
       for (const done of ackWaitersRef.current.values()) done({ delivered: false, reason: "not_connected" });
       ackWaitersRef.current.clear();
+      // what was seen is kept (with the moment of the first drop) so a screen can keep showing it while the socket comes back
+      if (lastBranchesRef.current.length) setHeld((prev) => prev ?? { branches: lastBranchesRef.current, states: { ...lastStatesRef.current }, at: Date.now() });
       setStatus("disconnected");
       setBranches([]);
       setRemoteStateByDeviceId({});
       if (!intentionalClose) reconnectSchedulerRef.current?.scheduleRetry(); // server restart / network loss: back on its own (backoff, forever)
+      // …and the FIRST retry of an outage, while the app is in front, is quick (a blink, not 1-2 s). The backoff timer above stays armed as the fallback; a quick success cancels it (`connected()`).
+      if (!intentionalClose && !quickRetryUsedRef.current && typeof document !== "undefined" && document.visibilityState === "visible") {
+        quickRetryUsedRef.current = true;
+        setTimeout(() => {
+          const cur = wsRef.current;
+          if (cur && (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING)) return;
+          if (waitingTokenRef.current) return; // a reconnect is already on its way (waiting for its fresh token) — a second one would only cancel it
+          setReconnectTrigger((k) => k + 1);
+        }, QUICK_RETRY_MS);
+      }
       if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
         console.info("[SyncBiz WS client] disconnected owner", ev.code ? { code: ev.code } : {});
       }
@@ -889,7 +948,7 @@ export function useRemoteOwner() {
       ws.close();
       wsRef.current = null;
     };
-  }, [reconnectTrigger, !!wsToken]);
+  }, [reconnectTrigger, !!wsToken, tokenGate]);
 
   useEffect(() => {
     if (status !== "connected" || !wsToken) return;
@@ -902,6 +961,7 @@ export function useRemoteOwner() {
         .then((r) => r.ok ? r.json() : null)
         .then((data: { token?: string } | null) => {
           if (data?.token) {
+            tokenAtRef.current = Date.now();
             setWsToken(data.token);
             if (process.env.NODE_ENV === "development") {
               console.info("[SyncBiz WS client] token refreshed (no reconnect)", { role: "owner" });
@@ -915,12 +975,38 @@ export function useRemoteOwner() {
 
   useEffect(() => {
     if (typeof document === "undefined" || typeof window === "undefined") return;
-    const onVisible = () => {
-      if (document.visibilityState === "visible") tryReconnect();
+    // The app comes back to the front: a socket that LOOKS open may have been dead for a while (iOS kills it in the background and says nothing for a long time). Ask the server something small;
+    // if nothing at all comes back in a moment, the socket is replaced at once — instead of staying "connected" on stale data until the phone finally notices.
+    const probe = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (now - lastProbeAtRef.current < 1000) return;
+      lastProbeAtRef.current = now;
+      try {
+        ws.send(JSON.stringify({ type: "BRANCH_LIST_REQUEST" } as ClientMessage));
+      } catch {
+        /* the check below decides */
+      }
+      setTimeout(() => {
+        if (wsRef.current === ws && lastMsgAtRef.current < now) setReconnectTrigger((k) => k + 1);
+      }, RESUME_PROBE_MS);
     };
-    const onFocus = () => tryReconnect();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        tryReconnect();
+        probe();
+      }
+    };
+    const onFocus = () => {
+      tryReconnect();
+      probe();
+    };
     const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) tryReconnect();
+      if (e.persisted) {
+        tryReconnect();
+        probe();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
@@ -998,6 +1084,8 @@ export function useRemoteOwner() {
     remoteState,
     /** Control Room: last STATE_UPDATE per MASTER device (all authorised branches) — read-only view of existing state. */
     remoteStateByDeviceId,
+    /** what was last seen while connected, kept from the first drop until the socket is back (null = connected, or nothing was ever seen) — a screen may keep showing it for a short time */
+    held,
     status,
     sendCommand,
     sendCommandTo,

@@ -14,6 +14,7 @@ import { useRemoteOwner, type ConnectionStatus } from "@/lib/remote-control/ws-c
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import type { UnifiedSource } from "@/lib/source-types";
+import { warmTone } from "@/lib/cover-tone";
 import {
   beginTransition,
   decideUserCommand,
@@ -80,6 +81,8 @@ export type FleetDisplay = {
 
 export type FleetValue = {
   connection: ConnectionStatus;
+  /** the live connection dropped a moment ago and is coming back: the last-seen branches and states are still drawn (a picture, nothing is sent from it) — so a short drop does not blank the screen */
+  holding: boolean;
   /** the branch list has been read from the database at least once */
   loaded: boolean;
   loadError: boolean;
@@ -158,6 +161,8 @@ function slimState(s: StationPlaybackState): StationPlaybackState {
 }
 /** the connected-station list is only sent on request — ask again so a station that drops shows Offline (same cadence as the Control Room) */
 const LIVE_REFRESH_MS = 10_000;
+/** how long the last-seen branches stay drawn after the live connection drops (owner 2026-11-19: "when I connect again there is a disconnect until it connects") — a long outage then shows the truth */
+const HOLD_MS = 10_000;
 
 function statusOf(online: boolean, hasStation: boolean, liveKnown: boolean, state: StationPlaybackState | null): FleetStatus {
   if (!online && !hasStation) return "install";
@@ -228,14 +233,25 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     };
   }, [owner.status]);
 
-  const liveKnown = owner.status === "connected";
+  // the live connection dropped a moment ago: what it showed stays drawn for HOLD_MS (the timer runs from the first drop, not from every failed try)
+  const held = owner.held;
+  const [holdOver, setHoldOver] = useState<number | null>(null);
+  useEffect(() => {
+    if (!held) return;
+    const t = setTimeout(() => setHoldOver(held.at), Math.max(0, HOLD_MS - (Date.now() - held.at)));
+    return () => clearTimeout(t);
+  }, [held]);
+  const holding = !!held && owner.status !== "connected" && holdOver !== held.at;
+  const liveBranches = holding && held ? held.branches : owner.branches;
+  const liveStates = holding && held ? held.states : owner.remoteStateByDeviceId;
+  const liveKnown = owner.status === "connected" || holding;
 
   const branches: FleetBranch[] = useMemo(() => {
-    const liveById = new Map(owner.branches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
+    const liveById = new Map(liveBranches.map((b) => [b.canonicalBranchId || b.branchId, b] as const));
     const out: FleetBranch[] = (db ?? []).map((b) => {
       const live = liveById.get(b.id) ?? null;
       liveById.delete(b.id);
-      const state = live ? owner.remoteStateByDeviceId[live.masterDeviceId] ?? null : null;
+      const state = live ? liveStates[live.masterDeviceId] ?? null : null;
       const hasStation = b.hasStation !== false;
       return {
         id: b.id,
@@ -252,7 +268,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     });
     // a connected station whose branch is not in the list (legacy id) — still shown, never hidden
     for (const live of liveById.values()) {
-      const state = owner.remoteStateByDeviceId[live.masterDeviceId] ?? null;
+      const state = liveStates[live.masterDeviceId] ?? null;
       out.push({
         id: live.canonicalBranchId || live.branchId,
         rawId: live.branchId,
@@ -267,7 +283,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       });
     }
     return out.sort((a, b) => RANK[a.status] - RANK[b.status] || a.name.localeCompare(b.name));
-  }, [db, owner.branches, owner.remoteStateByDeviceId, liveKnown]);
+  }, [db, liveBranches, liveStates, liveKnown]);
 
   // the chosen branch: the last one used on this phone, else the one playing, else the first online, else the first.
   // An AUTOMATIC choice waits for the live list (else the first launch would lock onto an offline branch before the player's state arrives) and
@@ -430,6 +446,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       });
       transitionRef.current = t;
       setTransitionState(t);
+      warmTone(source.cover); // the song's colour is read while the station starts it — ready when the song appears
       send("PLAY_SOURCE", { source: unifiedSourceToPayload(source) });
     },
     [captureHeld, send, target],
@@ -489,6 +506,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
   const value: FleetValue = useMemo(
     () => ({
       connection: owner.status,
+      holding,
       loaded: db !== null,
       loadError,
       branches,
@@ -512,7 +530,7 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
       interrupt,
       toggleBranch,
     }),
-    [owner.status, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
+    [owner.status, holding, db, loadError, branches, selected, select, display, play, pause, stop, next, prev, playSource, queueNext, seek, setVolume, setShuffle, setAutoMix, setRepeat, interrupt, toggleBranch],
   );
 
   return <FleetContext.Provider value={value}>{children}</FleetContext.Provider>;
