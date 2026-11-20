@@ -11,7 +11,7 @@ import { useMobileRole } from "@/lib/mobile-role-context";
 import { VmNowPlaying } from "@/components/vm/vm-now-playing";
 import { VmCover, VmEq, VmMarquee, branchLine } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
-import { IconCheck, IconLibrary, IconNext, IconPause, IconPerson, IconPlay, IconSearch, IconStore, IconSwap, IconWifiOff } from "@/components/vm/vm-icons";
+import { IconCheck, IconHome, IconNext, IconPause, IconPerson, IconPlay, IconSearch, IconStore, IconSwap, IconWifiOff } from "@/components/vm/vm-icons";
 
 /* ───────────────────────────── the phone app's own UI state ───────────────────────────── */
 
@@ -210,7 +210,7 @@ function BranchPicker({ open, onClose }: { open: boolean; onClose: () => void })
 
 const TABS = [
   { href: "/mobile/home", label: "Branches", icon: <IconStore /> },
-  { href: "/mobile/library", label: "Library", icon: <IconLibrary /> },
+  { href: "/mobile/library", label: "Home", icon: <IconHome /> },
   { href: "/mobile/search", label: "Search", icon: <IconSearch /> },
   { href: "/mobile/account", label: "Account", icon: <IconPerson /> },
 ] as const;

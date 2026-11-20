@@ -8,6 +8,7 @@ import { useVmUi } from "@/components/vm/vm-ui";
 import { VmCover, VmEq, fmtTime } from "@/components/vm/vm-parts";
 import { useOpenActions, type VmActionSpec } from "@/components/vm/vm-actions";
 import { IconChevronForward, IconMore, IconPause, IconPlay, IconUpNext } from "@/components/vm/vm-icons";
+import { recordRecent } from "@/lib/mobile-recent";
 import { getPlaylistTracks, type Playlist } from "@/lib/playlist-types";
 import type { UnifiedSource } from "@/lib/source-types";
 
@@ -58,6 +59,7 @@ export function useSendSource() {
       playNow: (source: UnifiedSource) => {
         if (!guard()) return;
         fRef.current.playSource(source);
+        recordRecent(source); // the Home screen's "Played lately" (ids only, on this phone only)
         ui.toast(tr("Playing on {name}", { name: fRef.current.selected!.name }));
       },
       playNext: (source: UnifiedSource) => {

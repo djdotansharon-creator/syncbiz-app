@@ -84,13 +84,15 @@
 .vm-list { display: flex; flex-direction: column; gap: 10px; padding-inline: 14px; }
 
 /* ── a branch card ── */
-.vm-card { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 12px 12px 12px; border-radius: 22px; background: var(--vm-card); transition: background 160ms ease, transform 180ms var(--vm-ease), opacity 200ms ease; }
-.vm-card:has(.vm-card-link:active) { transform: scale(0.985); background: var(--vm-card-hi); }
+/* NO FRAME (owner 2026-11-20: "why does the branch have a frame?"): a branch is a row like a library row — the cover at the same edge (16px), nothing drawn around it; it is pressed like a row (a soft wash) */
+.vm-list:has(> .vm-card) { gap: 2px; }
+.vm-card { position: relative; display: flex; align-items: center; gap: 14px; width: calc(100% + 12px); margin-inline: -6px; padding: 6px 8px; border-radius: 18px; background: transparent; transition: background 160ms ease, box-shadow 260ms var(--vm-ease), transform 260ms var(--vm-ease), opacity 200ms ease; }
+.vm-card:has(.vm-card-link:active) { background: rgba(255, 255, 255, 0.07); }
 .vm-card-link { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
 .vm-card[data-status="offline"], .vm-card[data-status="install"] { opacity: 0.62; }
 /* a branch that plays is LIFTED off the screen — a lighter surface and a soft shadow, no frame, no "Playing" label (its live bars already say so) */
 .vm-card[data-status="playing"] { background: linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.055)); box-shadow: 0 16px 32px -14px rgba(0, 0, 0, 0.85), 0 3px 10px rgba(0, 0, 0, 0.35); transform: translateY(-1px); }
-.vm-card[data-status="playing"]:has(.vm-card-link:active) { transform: translateY(-1px) scale(0.985); }
+.vm-card[data-status="playing"]:has(.vm-card-link:active) { transform: translateY(-1px); }
 .vm-card-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .vm-card-name { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vm-card-line { font-size: 14px; line-height: 1.3; color: var(--vm-text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
@@ -516,7 +518,8 @@ html[data-sb-fx="lite"] .vm-bar[data-on], html[data-sb-fx="lite"] .vm-tabs { box
 }
 
 /* THE NEXT SONG + THE FOLDED VOLUME on the song screen (owner 2026-11-19: just the next song, not a list; the volume opens on a press) */
-.vm-np-next { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 8px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.08); min-width: 0; }
+/* NO FRAME (owner 2026-11-20: "why does the next song have a frame?"): the cover and two lines, nothing drawn around them */
+.vm-np-next { display: flex; align-items: center; gap: 12px; margin-top: 20px; min-width: 0; }
 .vm-np-next-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .vm-np-next-text small { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--vm-text3); }
 .vm-np-next-text span { font-size: 16px; font-weight: 500; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -535,3 +538,37 @@ html[data-sb-fx="lite"] .vm-bar[data-on], html[data-sb-fx="lite"] .vm-tabs { box
 
 /* opening the app: the song's colours appear at once — the glide (above) is only for a song changing (owner 2026-11-19) */
 .vm[data-boot] :is(.vm-flow, .vm-np[data-tone], .vm-mini[data-tone], .vm-sheet--np) { transition: none !important; }
+
+/* ══ HOME (owner 2026-11-20: "give a home like Spotify, instead of the library") ══
+   Shelves of covers: a picture and its name under it — nothing drawn around it. Each shelf scrolls sideways (the end of the row is the end of the shelf in Hebrew too: logical
+   properties only), "See all" opens the whole list. The colour of what plays now is a soft glow behind the top of the page (the same colours as the player; they glide). ══ */
+.vm-page:has(.vm-home-glow) { position: relative; }
+.vm-home-glow { position: absolute; inset-inline: 0; top: 0; height: 460px; z-index: -1; pointer-events: none; background: linear-gradient(180deg, var(--vm-t1) 0%, transparent 100%); opacity: 0.62; transition: --vm-t1 800ms ease, --vm-t2 800ms ease; }
+.vm-shelf { margin-top: 28px; --hc: 148px; }
+.vm-shelf[data-wide] { --hc: 172px; }
+.vm-shelf-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-inline: 20px; margin-bottom: 12px; }
+.vm-shelf-h h2 { margin: 0; min-width: 0; font-size: 22px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-shelf-all { flex: none; display: inline-flex; align-items: center; gap: 1px; font-size: 14px; font-weight: 600; color: var(--vm-text2); transition: opacity 140ms ease; }
+.vm-shelf-all svg { font-size: 15px; }
+.vm-shelf-all:active { opacity: 0.55; }
+.vm-shelf-row { display: flex; gap: 14px; padding-inline: 20px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding-inline: 20px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.vm-shelf-row::-webkit-scrollbar { display: none; }
+.vm-hc { flex: none; width: var(--hc); display: flex; flex-direction: column; text-align: start; scroll-snap-align: start; transition: transform 200ms var(--vm-ease), opacity 160ms ease; }
+.vm-hc:active { transform: scale(0.965); opacity: 0.85; }
+.vm-hc-art { width: var(--hc); height: var(--hc); font-size: calc(var(--hc) * 0.3); box-shadow: 0 14px 26px -16px rgba(0, 0, 0, 0.85); transition: transform 260ms var(--vm-ease), box-shadow 260ms var(--vm-ease); }
+/* what plays now is LIFTED off the screen (the same lift as a library row and a branch that plays) — and says so with the live bars */
+.vm-hc[data-active] .vm-hc-art { transform: translateY(-3px); box-shadow: 0 22px 34px -14px rgba(0, 0, 0, 0.9), 0 4px 12px rgba(0, 0, 0, 0.4); }
+.vm-hc-title { margin-top: 10px; font-size: 15px; font-weight: 600; line-height: 1.3; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.vm-hc-title .vm-eq { display: inline-flex; margin-inline-end: 7px; vertical-align: -1px; }
+.vm-hc-sub { margin-top: 2px; font-size: 13px; color: var(--vm-text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-hc-skel { flex: none; width: var(--hc); animation: vm-pulse 1.4s ease-in-out infinite; }
+.vm-hc-skel i { display: block; width: var(--hc); height: var(--hc); border-radius: 14px; background: var(--vm-card); }
+.vm-hc-skel b { display: block; height: 11px; width: 78%; margin-top: 10px; border-radius: 6px; background: var(--vm-card); }
+.vm-hc-skel b + b { width: 44%; margin-top: 7px; height: 9px; }
+.vm-hc-skel-h { display: block; width: 150px; height: 20px; border-radius: 8px; background: var(--vm-card); animation: vm-pulse 1.4s ease-in-out infinite; }
+/* the whole list, always one tap away */
+.vm-home-foot { display: flex; align-items: center; gap: 14px; margin: 30px 8px 0; padding-inline: 12px; min-height: 56px; border-radius: 18px; font-size: 17px; font-weight: 600; transition: background 140ms ease; }
+.vm-home-foot:active { background: rgba(255, 255, 255, 0.07); }
+.vm-home-foot > svg:first-child { font-size: 24px; color: var(--vm-text2); flex: none; }
+.vm-home-foot .vm-chev { margin-inline-start: auto; flex: none; font-size: 18px; color: var(--vm-text3); }
+

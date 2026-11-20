@@ -46,9 +46,9 @@ export default function MobilePlaylistPage() {
   });
 
   const back = (
-    <Link href="/mobile/library" className="vm-icobtn vm-back" aria-label={tr("Library")}>
+    <Link href="/mobile/library" className="vm-icobtn vm-back" aria-label={tr("Home")}>
       <IconChevronBack />
-      <span>{tr("Library")}</span>
+      <span>{tr("Home")}</span>
     </Link>
   );
 
