@@ -28,6 +28,7 @@ import {
   MAX_CONSECUTIVE_FAILURES, type TransitionObservation, type TransitionOrigin, type UrlTransition,
 } from "@/lib/url-transition-intent";
 import { fetchUnifiedSourcesWithFallback } from "@/lib/unified-sources-client";
+import { isLibraryLocalSource } from "@/lib/library-display-classification";
 import { playbackToStationState } from "@/lib/remote-control/playback-to-state";
 import type { RemoteCommand, PlaySourcePayload, StationPlaybackState, DeviceMode, GuestRecommendationPayload } from "@/lib/remote-control/types";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -476,8 +477,10 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   // isLocalExecActive here: that also gates on currentSourceIsLocal, which could flap during reconnect.)
   const canLocalExecRef = useRef(canLocalExec);
   canLocalExecRef.current = canLocalExec;
-  // Authoritative source classification (NOT an empty-url heuristic): the provider source type is "local".
-  const currentSourceIsLocal = currentSource?.type === "local";
+  // Authoritative source classification: ANY desktop-playback LOCAL source — a bare "local" leaf, a folder-scan
+  // "local_playlist", winamp, or a local:// / local-file-path url — via the shared isLibraryLocalSource. (Was
+  // type==="local" only, which wrongly excluded a local folder/playlist on a designated station.)
+  const currentSourceIsLocal = currentSource ? isLibraryLocalSource(currentSource) : false;
   const currentSourceIsLocalRef = useRef(currentSourceIsLocal); // P0 Gate 2d (read in the MAIN status listener)
   currentSourceIsLocalRef.current = currentSourceIsLocal;
 
@@ -1321,7 +1324,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: an explicit LOCAL / local-transport selection clears any URL intent
         playSource(source, trackIndex ?? 0);
-      } else if (canLocalExec && source?.type === "local") {
+      } else if (canLocalExec && source && isLibraryLocalSource(source)) {
         // Designated-MASTER machine + LOCAL source → drive local audio via the renderer's existing engine
         // (provider → existing desktop dispatch → mpvPlayUrl IPC → co-located MAIN orchestrator). The MAIN
         // session metadata is kept in sync by the effect below (local paths never travel over WS).
