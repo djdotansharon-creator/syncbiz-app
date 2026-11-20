@@ -10,7 +10,7 @@ import { VmNowPlaying } from "@/components/vm/vm-now-playing";
 import { useNowTone } from "@/components/vm/vm-tone";
 import { VmCover } from "@/components/vm/vm-parts";
 import { Rise, VmFlow, VmFlowSection, VmFold, VmKv } from "@/components/vm/vm-flow";
-import { VmDayBoard } from "@/components/vm/vm-day-board";
+import { VmSchedule } from "@/components/vm/vm-schedule";
 import { useBranchPeople } from "@/components/control-room/branch-people";
 import { useSongIdAvailable } from "@/lib/use-song-id-available";
 import { canRenameBranch, renameBranch, useBranchDetails } from "@/lib/use-branch-details";
@@ -188,7 +188,7 @@ export default function MobileBranchPage() {
           </Rise>
         </VmFlowSection>
 
-        {/* page 4 — the schedule: the day as a board, the date can be changed */}
+        {/* page 4 — the schedule: a week strip, the day as a bar and the blocks in order; blocks are added / changed / removed here (owner 2026-11-20) */}
         <VmFlowSection tall fill label={tr("Schedule")}>
           <Rise>
             <h2 className="vm-fl-h1">{tr("Schedule")}</h2>
@@ -199,7 +199,7 @@ export default function MobileBranchPage() {
             </Rise>
           </div>
           <Rise fill>
-            <VmDayBoard branchId={branch?.id ?? null} />
+            <VmSchedule branchId={branch?.id ?? null} />
           </Rise>
         </VmFlowSection>
 

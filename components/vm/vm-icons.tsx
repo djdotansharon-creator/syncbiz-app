@@ -236,3 +236,9 @@ export const IconPin = (p: SVGProps<SVGSVGElement>) => (
     <circle cx="12" cy="10" r="2.4" />
   </Svg>
 );
+/** a moon — a quiet block (no music) */
+export const IconMoon = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z" />
+  </Svg>
+);
