@@ -526,7 +526,21 @@ html[data-sb-fx="lite"] .vm-bar[data-on], html[data-sb-fx="lite"] .vm-tabs { box
 .vm-volfold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 280ms var(--vm-ease); }
 .vm-volfold[data-open] { grid-template-rows: 1fr; }
 .vm-volfold-in { overflow: hidden; min-height: 0; }
+.vm-volfold { scroll-margin-bottom: 30px; }
 .vm-volfold-in .vm-vol { margin-top: 10px; }
+/* PLAY MODE (owner 2026-11-20): one button opens three choices in the volume bar's place; the chosen one is lit (white + glow, like the other lit buttons), a line under them says what it does.
+   The three icons stand on top of each other and cross-fade — the one of the current mode is seen. */
+.vm-mi { position: relative; display: inline-block; width: 1em; height: 1em; flex: none; }
+.vm-mode .vm-mi { font-size: 24px; letter-spacing: 0; }
+.vm-mi svg { position: absolute; inset: 0; opacity: 0; transform: scale(0.78); transition: opacity 200ms ease, transform 240ms var(--vm-ease); }
+.vm-mi[data-m="list"] svg:nth-child(1), .vm-mi[data-m="mix"] svg:nth-child(2), .vm-mi[data-m="shuffle"] svg:nth-child(3) { opacity: 1; transform: none; }
+.vm-pick { display: flex; justify-content: center; gap: 10px; margin-top: 10px; }
+.vm-pick-opt { flex: 0 0 104px; width: 104px; height: 62px; padding-inline: 4px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 16px; color: var(--vm-text3); font-size: 26px; white-space: nowrap; transition: color 180ms ease, transform 160ms var(--vm-ease), background 180ms ease; }
+.vm-pick-opt span:last-child { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+.vm-pick-opt:active { transform: scale(0.92); }
+.vm-pick-opt[data-on] { color: #fff; background: rgba(255, 255, 255, 0.1); filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.35)); }
+.vm-pick-opt[disabled] { opacity: 0.3; pointer-events: none; }
+.vm-pick-note { margin: 8px 0 0; text-align: center; font-size: 13px; line-height: 1.4; color: var(--vm-text2); }
 
 /* THE ACTIONS AS SQUARES (owner 2026-11-19) */
 .vm-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-inline: 16px; }
