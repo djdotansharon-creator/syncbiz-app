@@ -63,6 +63,12 @@ export async function validateScheduleTarget(
       if (!(await contentBranchesEquivalent(workspaceId, playlistBranch, bid))) {
         return { ok: false, error: "Playlist belongs to a different branch" };
       }
+      // A LOCAL / winamp playlist plays on a designated station via MAIN/mpv (local files on that machine). Its file
+      // paths never reach the server (CLAUDE.md §12), so the server can never see an HTTP url and must NOT reject it
+      // as "catalog-only" — the station checks playability at play time. Non-local playlists still require an HTTP url.
+      if (playlist.type === "local" || playlist.type === "winamp") {
+        return { ok: true };
+      }
       if (!playlistHasHttpPlayableUrl(playlist)) {
         return {
           ok: false,
