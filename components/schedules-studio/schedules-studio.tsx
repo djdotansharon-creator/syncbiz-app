@@ -246,17 +246,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   // jingles (owner 2026-11-12): the Jingles screen keeps its own schedule in this browser (per branch); the studio only SHOWS it — a small bell on the timeline at the jingle's time
   const stationBranch = useStationBranchId() ?? stationBranchIdNow() ?? "default";
-  // A STATION bound to a real branch sees + creates for ITS OWN branch only: default the branch filter to this
-  // station's branch once it is known (still switchable). HQ / Control Room without a real station branch
-  // ("default") keep the all-branches management view. One-time — never re-applied after the operator changes it.
-  const branchDefaultedRef = useRef(false);
-  useEffect(() => {
-    if (branchDefaultedRef.current) return;
-    if (stationBranch && stationBranch !== "default" && branches.some((b) => b.id === stationBranch)) {
-      branchDefaultedRef.current = true;
-      setBranchFilter(stationBranch);
-    }
-  }, [stationBranch, branches]);
   const [jingles, setJingles] = useState<JingleLike[]>([]);
   const [showJingles, setShowJingles] = useState(true);
   // how the blocks look (owner 2026-11-12): colour from the cover or shades of one colour, where the picture / text sit, the hours, the length
