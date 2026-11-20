@@ -1,10 +1,7 @@
 /**
- * THE DAY BOARD's pure rules (components/vm/vm-day-board.tsx) — no React, so a test can run them: the dates the board moves between and where a block is drawn.
+ * THE PHONE'S SCHEDULE — the date rules (components/vm/vm-schedule.tsx): a local date as a key, the day after / before. No React, so a test can run them.
+ * (2026-11-20: the pixel-per-minute board that used to live here was replaced by the week strip + the list of blocks — lib/mobile-schedule.ts.)
  */
-import type { Scene } from "@/lib/schedules-timeline";
-
-/** pixels per minute: an hour is 54 px (a half-hour block is still readable) */
-export const PX_PER_MIN = 0.9;
 
 export const pad2 = (n: number): string => String(n).padStart(2, "0");
 
@@ -25,11 +22,3 @@ export function parseDateKey(s: string): Date | null {
 export function shiftDay(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12, 0, 0);
 }
-
-export type BoardBlock = { scene: Scene; top: number; height: number };
-
-/** pure: where every block is drawn (a minimum height so a short block can still be read and pressed) */
-export function boardLayout(scenes: readonly Scene[], ppm: number = PX_PER_MIN): BoardBlock[] {
-  return scenes.map((scene) => ({ scene, top: scene.start * ppm, height: Math.max(26, (scene.end - scene.start) * ppm - 4) }));
-}
-

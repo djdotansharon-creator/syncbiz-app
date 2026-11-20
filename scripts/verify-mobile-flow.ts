@@ -7,8 +7,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { easeOutBack, riseState } from "../components/vm/vm-flow";
 import { branchFacts, canRenameBranch } from "../lib/use-branch-details";
-import { PX_PER_MIN, boardLayout, dateKey, parseDateKey, shiftDay } from "../lib/day-board";
-import type { Scene } from "../lib/schedules-timeline";
+import { dateKey, parseDateKey, shiftDay } from "../lib/day-board";
 
 const root = path.join(__dirname, "..");
 const rd = (p: string) => readFileSync(path.join(root, p), "utf-8").replace(/\r\n/g, "\n");
@@ -74,12 +73,15 @@ assert("F23 a page owns the whole height: the mini-player is hidden on a screen-
 const atRest = (top: number, bottom: number) => riseState({ top, bottom }, { top: 40, bottom: 844 });
 assert("F24 an element where its page puts it is fully drawn — a heading at the top of a page, a row at the bottom — and only one really on its way in or out is not", JSON.stringify(atRest(103, 148)) === JSON.stringify({ y: 0, s: 1, o: 1 }) && JSON.stringify(atRest(690, 750)) === JSON.stringify({ y: 0, s: 1, o: 1 }) && atRest(859, 900).o === 0 && atRest(-60, 30).o < 0.1);
 assert("F25 the page dots: one per page at the edge, the current one long and white, a press on one scrolls to that page", /className="vm-pgdots"/.test(flow) && /data-on=\{i === pages\.active/.test(flow) && /scrollTo\(\{ top: sc\.scrollTop \+ sec\.getBoundingClientRect\(\)\.top/.test(flow) && /\.vm-pgdot\[data-on\] \{ height: 20px/.test(css));
-// the day board
-const sc = (start: number, end: number): Scene => ({ schedule: { id: "s" } as Scene["schedule"], day: 1, start, end, endSet: true, quiet: false, paused: false, shadowed: false });
-assert("F26 the day board: a block is drawn where it starts and as long as it lasts (0.9 px a minute, so an hour is 54 px); a very short block keeps a height it can be read and pressed in", PX_PER_MIN === 0.9 && boardLayout([sc(540, 600)])[0]!.top === 540 * 0.9 && Math.round(boardLayout([sc(540, 600)])[0]!.height) === 50 && boardLayout([sc(540, 545)])[0]!.height === 26);
+// the schedule (2026-11-20: the pixel board became a week strip + the blocks in order, and the phone now MAKES the plan — see scripts/verify-mobile-schedule.ts for its rules)
 const nov18 = parseDateKey("2026-11-18")!;
-assert("F27 the date: a key is the local day (2026-11-18); a bad one is refused; the day after / before crosses the month and the year; a press on the date opens the phone's own date picker over it", dateKey(nov18) === "2026-11-18" && parseDateKey("2026-02-30") === null && parseDateKey("nope") === null && dateKey(shiftDay(nov18, 13)) === "2026-12-01" && dateKey(shiftDay(parseDateKey("2026-01-01")!, -1)) === "2025-12-31" && /<input\s+type="date"/.test(rd("components/vm/vm-day-board.tsx")) && /\.vm-day-date input \{ position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;/.test(css));
-assert("F28 the schedule page has the branch's own switch ('Play by schedule') and the board of the OPEN branch; the board is the Schedules Studio's own scenes and its ONLY write is one block's 'plays on this day' switch (PATCH skipDates, 2026-11-18) — it never creates, moves or deletes a block", /<VmDayBoard branchId=/.test(branch) && /title=\{tr\("Play by schedule"\)\}/.test(branch) && /buildDayScenes\(/.test(rd("components/vm/vm-day-board.tsx")) && !/method:\s*"(POST|PUT|DELETE)"/.test(rd("components/vm/vm-day-board.tsx")) && (rd("components/vm/vm-day-board.tsx").match(/method:\s*"PATCH"/g) ?? []).length === 1 && /skipDates: withSkipDate\(/.test(rd("components/vm/vm-day-board.tsx")));
+assert("F26 the schedule screen of a branch is `VmSchedule`: the week strip (a day per press), the day as one bar, the blocks in order, a round + to add one", /import \{ VmSchedule \} from "@\/components\/vm\/vm-schedule"/.test(branch) && /className="vm-sch-days"/.test(rd("components/vm/vm-schedule.tsx")) && /className="vm-sch-bar"/.test(rd("components/vm/vm-schedule.tsx")) && /className="vm-sch-fab"/.test(rd("components/vm/vm-schedule.tsx")));
+assert("F27 the date: a key is the local day (2026-11-18); a bad one is refused; the day after / before crosses the month and the year; a press on the month opens the phone's own date picker over it", dateKey(nov18) === "2026-11-18" && parseDateKey("2026-02-30") === null && parseDateKey("nope") === null && dateKey(shiftDay(nov18, 13)) === "2026-12-01" && dateKey(shiftDay(parseDateKey("2026-01-01")!, -1)) === "2025-12-31" && /<input\s+type="date"/.test(rd("components/vm/vm-schedule.tsx")) && /\.vm-sch-month input \{ position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0;/.test(css));
+{
+  const sched = rd("components/vm/vm-schedule.tsx");
+  const writes = [...sched.matchAll(/send\("(POST|PATCH|DELETE)", ([^,)]+)/g)].map((m) => `${m[1]} ${m[2]}`);
+  assert("F28 the schedule page has the branch's own switch ('Play by schedule') and the schedule of the OPEN branch; the blocks are the Schedules Studio's own scenes and everything the phone writes goes through the Studio's own routes (POST /api/schedules, PATCH / DELETE /api/schedules/:id) — nothing else", /<VmSchedule branchId=/.test(branch) && /title=\{tr\("Play by schedule"\)\}/.test(branch) && /buildDayScenes\(/.test(sched) && writes.length >= 4 && writes.every((w) => /\/api\/schedules(\/\$\{encodeURIComponent\(\w+(\.\w+)?\)\}|"$)/.test(w) || /\/api\/schedules/.test(w)) && !/fetch\("\/api\/(?!schedules)/.test(sched.replace(/\/\/.*$/gm, "")));
+}
 
 // ── 2026-11-19: the song's colour at once, an instant open, the next song only, the volume folded, the actions as squares ──
 const tone = rd("components/vm/vm-tone.ts");
