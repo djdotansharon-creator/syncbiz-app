@@ -31,6 +31,12 @@ export const IconStore = (p: SVGProps<SVGSVGElement>) => (
     <path d="M10 20v-4.5h4V20" />
   </Svg>
 );
+export const IconHome = (p: SVGProps<SVGSVGElement>) => (
+  <Svg {...p}>
+    <path d="M3.8 11.2 12 4l8.2 7.2" />
+    <path d="M6 9.6V19a1 1 0 0 0 1 1h3.4v-5.2h3.2V20H17a1 1 0 0 0 1-1V9.6" />
+  </Svg>
+);
 export const IconLibrary = (p: SVGProps<SVGSVGElement>) => (
   <Svg {...p}>
     <path d="M9 18V6.2l10-2V16" />
