@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMobileFleet } from "@/lib/mobile-fleet";
 import { useTr } from "@/lib/i18n/use-tr";
-import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconRepeatOne, IconShuffle, IconVolumeHigh, IconVolumeLow, IconWifiOff } from "@/components/vm/vm-icons";
+import { IconChevronDown, IconMix, IconNext, IconPause, IconPlay, IconPrev, IconRepeat, IconShuffle, IconVolumeHigh, IconVolumeLow, IconWifiOff } from "@/components/vm/vm-icons";
 import { VmCover, VmEq, VmMarquee, VmSlider, fmtTime, useLivePosition } from "@/components/vm/vm-parts";
 import { useNowTone } from "@/components/vm/vm-tone";
 import { warmTone } from "@/lib/cover-tone";
+import { PLAY_MODES, modeCommands, playModeOf, type PlayMode } from "@/lib/mobile-play-mode";
+
+/** the three play modes, in words: the name on the button and one line that says what it does */
+const MODE_TEXT: Record<PlayMode, { label: string; note: string }> = {
+  list: { label: "List", note: "In order, and again from the start" },
+  mix: { label: "Auto mix", note: "In order, the songs blend into each other" },
+  shuffle: { label: "Shuffle", note: "Random order" },
+};
 
 export type UpNextItem = { id: string; title: string; cover: string | null; tag: string };
 
@@ -77,7 +85,27 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
   useEffect(() => {
     warmTone(nextCover);
   }, [nextCover]);
-  const [volOpen, setVolOpen] = useState(false); // owner 2026-11-19: the volume is not needed open all the time — one press opens it
+  // ONE fold under the buttons (owner 2026-11-19: the volume is not needed open all the time — one press opens it; 2026-11-20: the three play modes open in the same place) — the volume bar OR the modes, never both
+  const [fold, setFold] = useState<"vol" | "mode" | null>(null);
+  // a mode that was just chosen stays on screen until the station says it back (never snaps to the old one and forward again); it lets go after 4 s if the station never does
+  const [held, setHeld] = useState<PlayMode | null>(null);
+  const heldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // a fold that opens at the bottom of the sheet is brought fully into view once it has unfolded (the sheet scrolls; the choices must never be half off the screen)
+  const foldEls = useRef<Record<"vol" | "mode", HTMLDivElement | null>>({ vol: null, mode: null });
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (heldTimer.current) clearTimeout(heldTimer.current);
+      if (scrollTimer.current) clearTimeout(scrollTimer.current);
+    },
+    [],
+  );
+  const toggleFold = (which: "vol" | "mode") => {
+    const open = fold !== which;
+    setFold(open ? which : null);
+    if (scrollTimer.current) clearTimeout(scrollTimer.current);
+    if (open) scrollTimer.current = setTimeout(() => foldEls.current[which]?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 300);
+  };
 
   if (!b) {
     // the branch list has not been read yet: nothing to say (a "No branch selected" for a moment is a lie)
@@ -91,7 +119,17 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
   }
 
   const can = f.canControl;
-  const repeat = shown?.repeatMode ?? "playlist";
+  const mode = held ?? playModeOf(shown);
+  const pickMode = (m: PlayMode) => {
+    setHeld(m);
+    if (heldTimer.current) clearTimeout(heldTimer.current);
+    heldTimer.current = setTimeout(() => setHeld(null), 4000);
+    for (const c of modeCommands(m, shown?.repeatMode)) {
+      if (c.cmd === "shuffle") f.setShuffle(c.value);
+      else if (c.cmd === "autoMix") f.setAutoMix(c.value);
+      else f.setRepeat(c.value);
+    }
+  };
   const vol = typeof shown?.volume === "number" ? shown.volume : 80;
   const idle = !shown || shown.status === "idle" || shown.status === "stopped";
 
@@ -161,38 +199,46 @@ export function VmNowPlaying({ onPickBranch, hideWho }: { onPickBranch?: () => v
           </div>
 
           <div className="vm-modes">
-            <button type="button" className="vm-mode" data-on={volOpen ? "" : undefined} onClick={() => setVolOpen((v) => !v)} aria-expanded={volOpen} aria-label={tr("Volume")}>
+            <button type="button" className="vm-mode" data-on={fold === "vol" ? "" : undefined} onClick={() => toggleFold("vol")} aria-expanded={fold === "vol"} aria-label={tr("Volume")}>
               {vol <= 0 ? <IconVolumeLow /> : <IconVolumeHigh />}
               <span>{`${Math.round(vol)}%`}</span>
             </button>
-            <button type="button" className="vm-mode" data-on={shown?.shuffle ? "" : undefined} onClick={() => f.setShuffle(!shown?.shuffle)} disabled={!can} aria-pressed={!!shown?.shuffle}>
-              <IconShuffle />
-              <span>{tr("Shuffle")}</span>
-            </button>
-            <button type="button" className="vm-mode" data-on={shown?.autoMix ? "" : undefined} onClick={() => f.setAutoMix(!shown?.autoMix)} disabled={!can} aria-pressed={!!shown?.autoMix}>
-              <IconMix />
-              <span>{tr("Auto mix")}</span>
-            </button>
-            <button
-              type="button"
-              className="vm-mode"
-              data-on={repeat !== "off" ? "" : undefined}
-              onClick={() => f.setRepeat(repeat === "playlist" ? "track" : repeat === "track" ? "off" : "playlist")}
-              disabled={!can}
-              aria-label={tr("Repeat")}
-            >
-              {repeat === "track" ? <IconRepeatOne /> : <IconRepeat />}
-              <span>{repeat === "track" ? tr("Song") : repeat === "off" ? tr("Off") : tr("List")}</span>
+            <button type="button" className="vm-mode" data-on={fold === "mode" ? "" : undefined} onClick={() => toggleFold("mode")} aria-expanded={fold === "mode"} aria-label={tr("Play mode")} disabled={!can}>
+              {/* the three icons stand on top of each other and cross-fade (no remount, no pop) */}
+              <span className="vm-mi" data-m={mode} aria-hidden>
+                <IconRepeat />
+                <IconMix />
+                <IconShuffle />
+              </span>
+              <span>{tr(MODE_TEXT[mode].label)}</span>
             </button>
           </div>
 
-          <div className="vm-volfold" data-open={volOpen ? "" : undefined}>
-            <div className="vm-volfold-in" inert={!volOpen}>
+          <div className="vm-volfold" data-open={fold === "vol" ? "" : undefined} ref={(el) => { foldEls.current.vol = el; }}>
+            <div className="vm-volfold-in" inert={fold !== "vol"}>
               <div className="vm-vol">
                 <IconVolumeLow />
                 <VmSlider value={vol} max={100} onLive={(v) => f.setVolume(v)} onCommit={(v) => f.setVolume(v)} label={tr("Volume")} disabled={!can} />
                 <IconVolumeHigh />
               </div>
+            </div>
+          </div>
+
+          <div className="vm-volfold" data-open={fold === "mode" ? "" : undefined} ref={(el) => { foldEls.current.mode = el; }}>
+            <div className="vm-volfold-in" inert={fold !== "mode"}>
+              <div className="vm-pick" role="radiogroup" aria-label={tr("Play mode")}>
+                {PLAY_MODES.map((m) => (
+                  <button key={m} type="button" role="radio" aria-checked={mode === m} className="vm-pick-opt" data-on={mode === m ? "" : undefined} onClick={() => pickMode(m)} disabled={!can}>
+                    <span className="vm-mi" data-m={m} aria-hidden>
+                      <IconRepeat />
+                      <IconMix />
+                      <IconShuffle />
+                    </span>
+                    <span>{tr(MODE_TEXT[m].label)}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="vm-pick-note">{tr(MODE_TEXT[mode].note)}</p>
             </div>
           </div>
 
