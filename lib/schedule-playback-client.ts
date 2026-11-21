@@ -3,7 +3,7 @@
 import type { Playlist } from "@/lib/playlist-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { firstHttpUrlFromPlaylist, playlistHasHttpPlayableUrl } from "@/lib/playlist-playability";
-import { unifiedPlaylistSourceId } from "@/lib/playlist-utils";
+import { derivePlaylistUnifiedCoverArt, unifiedPlaylistSourceId } from "@/lib/playlist-utils";
 import { radioToUnified } from "@/lib/radio-utils";
 import type { RadioStream, UnifiedSource } from "@/lib/source-types";
 import { sourceToUnified } from "@/lib/playback-provider";
@@ -98,6 +98,27 @@ export async function runSchedulePlayback(
       return false;
     }
     if (!playlistHasHttpPlayableUrl(playlist)) {
+      // 2026-11-21 — a LOCAL / winamp playlist (files on the station's own disk; the server accepts it since PR #222 and says "the station checks playability at
+      // play time") used to be refused HERE for every window, so a scheduled block of it never started and nothing said why. Only the designated station's own
+      // window may start it — exactly a manual library click (`start()` → queue + the accepted LOCAL path; LOCAL never needs the cloud; the current music is not
+      // stopped first). Every other window (browser, phone, a non-designated desktop) cannot play the station's files (CLAUDE.md §12) and keeps the old refusal.
+      if (route.kind === "station" && (playlist.type === "local" || playlist.type === "winamp")) {
+        const localTracks = getPlaylistTracks(playlist);
+        const localUrl = (playlist.url ?? "").trim() || (localTracks.find((t) => (t?.url ?? "").trim())?.url ?? "").trim();
+        if (localUrl) {
+          const localUnified: UnifiedSource = {
+            id: unifiedPlaylistSourceId(playlist.id),
+            title: playlist.name,
+            genre: playlist.genre || "Mixed",
+            cover: derivePlaylistUnifiedCoverArt(playlist),
+            type: playlist.type as UnifiedSource["type"],
+            url: localUrl,
+            origin: "playlist",
+            playlist,
+          };
+          return start(localUnified, 0);
+        }
+      }
       setLastMessage(
         "הפלייליסט נשמר רק כמעטפת קטלוג (local) בלי קישורי YouTube/HTTP. פתח את הפלייליסט בספרייה והוסף שירים, או בחר פלייליסט עם קישורים ישירים — ניגון אוטומטי בדפדפן דורש כתובת https.",
       );
