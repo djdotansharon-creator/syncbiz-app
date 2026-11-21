@@ -463,6 +463,22 @@ export async function searchYouTubePlaylists(
 
 const YT_DLP_TIMEOUT_MS = 10000;
 
+/**
+ * DIAGNOSTIC (2026-11-21, read-only): why did a yt-dlp lookup fail? PROD logged 97 "fetch failed" with no reason (this file used to
+ * swallow the error). Returns ONE short line: yt-dlp's own `ERROR:` line when it has one, else the first non-empty line of the error.
+ * Never throws; never includes anything but the error text (no cookies / headers / env), cut to 240 characters.
+ */
+export function describeYtDlpFailure(e: unknown): string {
+  try {
+    const raw = e instanceof Error ? e.message : typeof e === "string" ? e : String(e);
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const line = lines.find((l) => /^ERROR:/i.test(l)) ?? lines.find((l) => /ERROR:/i.test(l)) ?? lines[0] ?? "(no message)";
+    return line.length > 240 ? `${line.slice(0, 240)}…` : line;
+  } catch {
+    return "(unreadable error)";
+  }
+}
+
 /** Fetch view count and duration for a single YouTube URL via yt-dlp. Returns undefined if unavailable. */
 export async function fetchYouTubeMetadataByYtDlp(
   url: string
@@ -474,7 +490,10 @@ export async function fetchYouTubeMetadataByYtDlp(
 
   try {
     const wrap = await getYtDlp();
-    if (!wrap) return undefined;
+    if (!wrap) {
+      console.warn("[yt-dlp] metadata lookup skipped: no yt-dlp binary is available");
+      return undefined;
+    }
 
     const stdout = await wrap.execPromise(
       [url, "--dump-json", "--no-warnings", "--no-download"],
@@ -482,14 +501,26 @@ export async function fetchYouTubeMetadataByYtDlp(
       controller.signal
     );
     const firstLine = (stdout || "").split("\n").find((l) => l.trim());
-    if (!firstLine) return undefined;
+    if (!firstLine) {
+      console.warn("[yt-dlp] metadata lookup: yt-dlp answered with nothing");
+      return undefined;
+    }
     const obj = JSON.parse(firstLine) as { view_count?: number; duration?: number };
     const meta: YouTubeMetadata = {};
     if (typeof obj.view_count === "number") meta.viewCount = obj.view_count;
     if (typeof obj.duration === "number")
       meta.durationSeconds = Math.round(obj.duration);
-    return Object.keys(meta).length > 0 ? meta : undefined;
-  } catch {
+    if (Object.keys(meta).length === 0) {
+      console.warn("[yt-dlp] metadata lookup: the answer had no view count and no duration");
+      return undefined;
+    }
+    return meta;
+  } catch (e) {
+    // The reason used to be swallowed here. `apiKeyConfigured` is only a yes/no — the key itself is never printed.
+    const apiKeyConfigured = Boolean(process.env.YOUTUBE_API_KEY && process.env.YOUTUBE_API_KEY.trim());
+    console.warn(
+      `[yt-dlp] metadata lookup failed (${controller.signal.aborted ? "timeout" : "error"}, apiKeyConfigured=${apiKeyConfigured}): ${describeYtDlpFailure(e)}`,
+    );
     return undefined;
   } finally {
     clearTimeout(timeoutId);
