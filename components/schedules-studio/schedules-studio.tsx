@@ -26,6 +26,7 @@ import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handler
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { canReadLocalLengths, learnLocalLengths, localTracksMissingLength } from "@/lib/local-track-length";
+import { blockBranchFor, laneBranchIds } from "@/lib/schedules-lanes";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
@@ -729,6 +730,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const ids = Array.from(new Set(items.map((s) => (s.branchId ?? "default").trim() || "default")));
     return ids.sort((a, b) => branchName(a).localeCompare(branchName(b)));
   }, [items, branchName]);
+  // the rows of the day view / the entries of the branch filter: the branches that have blocks AND this window's own branch (owner 2026-11-22: there must always be a row to schedule this computer's branch on)
+  const laneIds = useMemo(() => laneBranchIds({ blockBranches: branchIds, stationBranch, knownBranchIds: branches.map((b) => b.id), nameOf: branchName }), [branchIds, stationBranch, branches, branchName]);
 
   // ── the music the owner can schedule ──
   const [blockColors, setBlockColors] = useState<Record<string, number>>({});
@@ -918,9 +921,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     );
   }, [shownItems, musicMinutes, weekDates, floatingId]);
   const dayRows = useMemo(() => {
-    const ids = branchFilter !== "all" ? [branchFilter] : branchIds.length > 0 ? branchIds : [branches[0]?.id ?? "default"];
+    const ids = branchFilter !== "all" ? [branchFilter] : laneIds.length > 0 ? laneIds : [branches[0]?.id ?? "default"];
     return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes, floatingId) }));
-  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes, floatingId]);
+  }, [branchFilter, laneIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes, floatingId]);
   const nowMin = clock.getHours() * 60 + clock.getMinutes();
   const hoursBranches = useMemo(() => {
     const ids = Array.from(new Set([...branches.map((b) => b.id), ...branchIds]));
@@ -1060,8 +1063,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       }
       const created = await createFromBody({
         name: item.targetType === "SILENCE" ? "Quiet" : item.name,
-        // a quiet block belongs to the branch whose row / filter it was added in
-        branchId: item.targetType === "SILENCE" || item.targetType === "BANK" ? branchId ?? quietBranch : item.branchId,
+        // a quiet block belongs to the branch whose row / filter it was added in; so does a PLAYLIST dropped on a row (owner 2026-11-22 — the server decides whether it may play there)
+        branchId: blockBranchFor({ targetType: item.targetType, laneBranch: branchId, itemBranch: item.branchId ?? "default", quietBranch }),
         targetType: item.targetType,
         targetId: item.targetId,
         sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
@@ -1939,10 +1942,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             {focus !== null && !isTodayInView ? <button type="button" className="ss-pill ss-today" onClick={() => setFocus(null)}>{tr("Today")}</button> : null}
           </div>
           <div className="ss-toolbar-end">
-            {branchIds.length > 1 ? (
+            {laneIds.length > 1 ? (
               <select className="ss-select ss-select--sm" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} aria-label={tr("Branch")}>
                 <option value="all">{tr("All branches")}</option>
-                {branchIds.map((id) => <option key={id} value={id}>{branchName(id)}</option>)}
+                {laneIds.map((id) => <option key={id} value={id}>{branchName(id)}</option>)}
               </select>
             ) : null}
             {clip ? (

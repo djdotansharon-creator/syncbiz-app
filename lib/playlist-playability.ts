@@ -22,3 +22,16 @@ export function firstHttpUrlFromPlaylist(playlist: Playlist): string {
   }
   return "";
 }
+
+/**
+ * True when the playlist plays files that exist ONLY on one computer: a local / winamp playlist, or any track whose address is not http(s) (a path on a disk).
+ * Such a playlist belongs to the computer — and so the branch — that built it (owner 2026-11-22: "the music exists only on the computer where we built it").
+ */
+export function playlistHasLocalFiles(playlist: Playlist): boolean {
+  if (playlist.type === "local" || playlist.type === "winamp") return true;
+  for (const t of getPlaylistTracks(playlist)) {
+    const u = (t?.url ?? "").trim();
+    if (u && !u.startsWith("http://") && !u.startsWith("https://")) return true;
+  }
+  return false;
+}

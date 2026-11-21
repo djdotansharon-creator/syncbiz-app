@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
   }
   shadowAuthorize("schedules:POST", { userId: user.id, workspaceId: user.tenantId }, "schedule.edit", [branchId]); // Gate 3A shadow: log only, never blocks
 
-  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""), user.tenantId);
+  const validation = await validateScheduleTarget(branchId, targetType, targetId || (data.sourceId ?? ""), user.tenantId, (b) => hasBranchAccess(user.id, b, user.tenantId));
   if (!validation.ok) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }

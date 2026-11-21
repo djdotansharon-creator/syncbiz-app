@@ -94,7 +94,7 @@ export async function PATCH(
 
   if (data.targetType !== undefined || data.targetId !== undefined || data.sourceId !== undefined) {
     const branchId = (data.branchId ?? existing!.branchId ?? "default").trim() || "default";
-    const validation = await validateScheduleTarget(branchId, targetType, targetId || existing!.targetId, user.tenantId);
+    const validation = await validateScheduleTarget(branchId, targetType, targetId || existing!.targetId, user.tenantId, (b) => hasBranchAccess(user.id, b, user.tenantId));
     if (!validation.ok) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }

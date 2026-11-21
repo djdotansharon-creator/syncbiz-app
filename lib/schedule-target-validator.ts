@@ -8,7 +8,8 @@
  */
 
 import { db } from "@/lib/store";
-import { playlistHasHttpPlayableUrl } from "@/lib/playlist-playability";
+import { playlistHasHttpPlayableUrl, playlistHasLocalFiles } from "@/lib/playlist-playability";
+import { decidePlaylistBranchUse } from "@/lib/schedule-branch-use";
 import { getPlaylist } from "@/lib/playlist-store";
 import { getRadioStation } from "@/lib/radio-store";
 import { resolveMediaBranchId } from "@/lib/media-scope-helpers";
@@ -31,6 +32,8 @@ export async function validateScheduleTarget(
   targetType: ScheduleTargetType,
   targetId: string,
   workspaceId?: string | null,
+  /** 2026-11-22: may the caller use this branch (its content)? When given, a playlist of URLs from ANOTHER branch of the same business is allowed (lib/schedule-branch-use.ts). Omitted = the old strict rule. */
+  callerCanUseBranch?: (branchId: string) => Promise<boolean>,
 ): Promise<TargetValidationResult> {
   const bid = (branchId ?? "").trim() || "default";
   // a quiet block has no music to look up (it only stops the music at its start)
@@ -60,9 +63,18 @@ export async function validateScheduleTarget(
         return { ok: false, error: "Playlist not found" };
       }
       const playlistBranch = resolveMediaBranchId(playlist);
-      if (!(await contentBranchesEquivalent(workspaceId, playlistBranch, bid))) {
-        return { ok: false, error: "Playlist belongs to a different branch" };
+      const sameBranch = await contentBranchesEquivalent(workspaceId, playlistBranch, bid);
+      const hasLocalFiles = playlistHasLocalFiles(playlist);
+      let callerCanUsePlaylistBranch: boolean | null = null;
+      if (!sameBranch && !hasLocalFiles && callerCanUseBranch) {
+        try {
+          callerCanUsePlaylistBranch = await callerCanUseBranch(playlistBranch);
+        } catch {
+          callerCanUsePlaylistBranch = false; // cannot tell → the old strict rule
+        }
       }
+      const use = decidePlaylistBranchUse({ sameBranch, hasLocalFiles, callerCanUsePlaylistBranch });
+      if (!use.ok) return use;
       // A LOCAL / winamp playlist plays on a designated station via MAIN/mpv (local files on that machine). Its file
       // paths never reach the server (CLAUDE.md §12), so the server can never see an HTTP url and must NOT reject it
       // as "catalog-only" — the station checks playability at play time. Non-local playlists still require an HTTP url.
