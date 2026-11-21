@@ -4,6 +4,7 @@
 
 import type { Playlist } from "@/lib/playlist-types";
 import { titleFromLocalPath } from "@/lib/local-audio-path";
+import { learnLocalLengths } from "@/lib/local-track-length";
 import type { UnifiedSource } from "@/lib/source-types";
 import { unifiedFoundationHints } from "@/lib/source-types";
 
@@ -52,6 +53,7 @@ export async function createUnifiedPlaylistFromLocalScan(
   });
   if (!res.ok) return null;
   const created = (await res.json()) as Playlist;
+  void learnLocalLengths(created); // every song loaded from this computer is saved with its real length (numbers only reach the server)
   return unifiedSourceFromFetchedPlaylist(created, defaultGenre);
 }
 
@@ -95,5 +97,6 @@ export async function createUnifiedPlaylistFromLocalFile(
   });
   if (!res.ok) return null;
   const created = (await res.json()) as Playlist;
+  void learnLocalLengths(created); // every song loaded from this computer is saved with its real length (numbers only reach the server)
   return unifiedSourceFromFetchedPlaylist(created, defaultGenre);
 }
