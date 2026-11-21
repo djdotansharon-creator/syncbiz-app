@@ -40,7 +40,7 @@ export type SchedulePlaybackHandlers = {
 type AppRouterLike = { push: (href: string) => void };
 
 /**
- * Same rules as ScheduleCard "Play now": playlist / radio / source, embedded → /player, else in-app or play-local.
+ * Same rules as ScheduleCard "Play now": playlist / radio / source, embedded → /player, else in-app (a local file is played by the Player itself — its path is never sent to the server).
  * Playlist/radio paths use setQueue(..., { force: true }) so a scheduled block always preempts whatever was playing.
  * Playlist payload uses GET /api/playlists/:id (disk) only — no localStorage merge.
  * @returns whether playback was started or navigation was triggered successfully
@@ -216,19 +216,10 @@ export async function runSchedulePlayback(
   if (target.startsWith("http://") || target.startsWith("https://")) {
     return true;
   }
-  const res = await fetch("/api/commands/play-local", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      target,
-      browserPreference: src.browserPreference ?? "default",
-    }),
-  });
-  if (res.ok) {
-    setLastMessage("Local playback command sent");
-    return true;
-  }
-  const data = await res.json().catch(() => ({}));
-  setLastMessage(data?.error ? `Failed: ${data.error}` : "Playback failed.");
-  return false;
+  // A LOCAL target (a file / folder / playlist file on THIS computer) was already handed to the Player by playSource() above — on the designated station that is the
+  // accepted LOCAL path (MAIN / MPV), exactly as a library click. 2026-11-21 (audit F2, CLAUDE.md §12): it used to ALSO POST the path to /api/commands/play-local, a route
+  // retired since Gate 3B-4a that only ever answers 410. So (1) the local path left the machine, and (2) the 410 made this return false, the block was never marked
+  // started, and the next 30 s poll played the song again from its start — over and over. The path now stays here and the start counts as handed over (a start that goes
+  // nowhere is repeated into silence a few times at most, by lib/schedule-start-retry.ts).
+  return true;
 }
