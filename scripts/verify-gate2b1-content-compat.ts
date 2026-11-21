@@ -170,8 +170,8 @@ const data = { label: "L", url: "/api/jingles/audio/x", color: null, bellStyle: 
     /: new Set\(await expandLegacyBranchEquivalents\(workspaceId, \[DEFAULT_BRANCH_ID\]\)\)/.test(read("lib", "playlist-access.ts")));
   const val = read("lib", "schedule-target-validator.ts");
   assert("schedule validator: all 3 target types alias-aware (no exact !==)", (val.match(/contentBranchesEquivalent\(workspaceId, /g) ?? []).length === 3 && !/Branch !== bid/.test(val));
-  assert("schedule routes pass the caller workspace", /validateScheduleTarget\([^\n]*, user\.tenantId\);/.test(read("app", "api", "schedules", "route.ts")) &&
-    /validateScheduleTarget\([^\n]*, user\.tenantId\);/.test(read("app", "api", "schedules", "[id]", "route.ts")));
+  assert("schedule routes pass the caller workspace", /validateScheduleTarget\([^\n]*, user\.tenantId[,)]/.test(read("app", "api", "schedules", "route.ts")) &&
+    /validateScheduleTarget\([^\n]*, user\.tenantId[,)]/.test(read("app", "api", "schedules", "[id]", "route.ts")));
 
   // ── scope guards ───────────────────────────────────────────────────────────────────────────────────────────
   assert("content resolver mode unchanged (shadow)", /export const BRANCH_RESOLUTION_RUNTIME_MODE: BranchResolutionMode = "shadow";/.test(read("lib", "branch-resolver.ts")));
