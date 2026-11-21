@@ -20,6 +20,7 @@ import { clearScheduleDriven } from "@/lib/schedule-driven";
 import { clearQuietStopTries, noteQuietStopTry, peekQuietStopTries, quietStopFinished, waitForQuiet } from "@/lib/schedule-quiet-stop";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
 import { scheduleScopeNote } from "@/lib/schedule-branch-scope";
+import { cachedCopyMayDecide } from "@/lib/schedule-fetch-fallback";
 import type { PlayStatus } from "@/lib/schedule-start-retry";
 import type { Schedule, Source } from "@/lib/types";
 
@@ -136,7 +137,13 @@ export function ScheduleAutoPlayer() {
             credentials: "include",
             cache: "no-store",
           });
-          if (!res.ok || cancelled) return;
+          if (cancelled) return;
+          if (!res.ok) {
+            // 2026-11-21: the server answered with "I cannot tell right now" (restarting 5xx, session 401, 408, 429): the last copy decides, exactly as for a down network (lib/schedule-fetch-fallback.ts).
+            // Any other error answer (403 / 404 / 400) is a real "no" and still does nothing.
+            if (!cachedCopyMayDecide(res.status)) return;
+            throw new Error(`schedules answered ${res.status}`);
+          }
           enabled = res.headers.get("x-schedule-enabled") !== "0";
           schedules = (await res.json()) as Schedule[];
           // which branch's schedule this station follows, written to the log when it changes (audit F2: a block of another branch silently never starts here)
