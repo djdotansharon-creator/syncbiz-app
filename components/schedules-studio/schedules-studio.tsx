@@ -25,6 +25,7 @@ import { fetchScheduleSwitch, saveScheduleSwitch } from "@/lib/schedule-switch-c
 import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handlers";
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
+import { canReadLocalLengths, learnLocalLengths, localTracksMissingLength } from "@/lib/local-track-length";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
@@ -275,6 +276,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [learned, setLearned] = useState<Record<string, number>>({});
   // one length lookup per playlist at a time, shared by everyone who asks (a drag that has only just begun, the drop, a paste)
   const lengthLookups = useRef<Map<string, Promise<number | null>>>(new Map());
+  const playlistsRef = useRef(playlists); // the lookup (a stable callback) reads the current list from here: a playlist of local files is read by THIS station
+  useEffect(() => {
+    playlistsRef.current = playlists;
+  });
   // a song dropped on the day whose length is still being looked up: a dashed spot holds its place until the block can be drawn at its true length
   const [pending, setPending] = useState<{ day: number; min: number; branchId?: string } | null>(null);
   const HOUR_H = hourH;
@@ -1005,7 +1010,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   );
 
   // The length of a playlist that has none stored is asked for (YouTube) — once, shared: the drag already asks when it begins, the drop waits for the answer (owner 2026-11-16: a new song
-  // must not be drawn at a guessed length, "the minutes can be loaded when I drop it, before it is shown"). Where it cannot be looked up here (a local file, no YouTube) the answer is null.
+  // must not be drawn at a guessed length, "the minutes can be loaded when I drop it, before it is shown"). Where it cannot be looked up here (no YouTube, and not the desktop that owns the local
+  // files) the answer is null. A playlist of LOCAL files is read by the station that owns them (its real length, numbers only go to the server — owner 2026-11-21) and takes as long as the files need:
+  // the drop draws the block at once and the true length comes in later (`learnLength`).
   const lookupLength = useCallback((item: LibItem): Promise<number | null> => {
     if (item.dur && item.dur > 0) return Promise.resolve(item.dur);
     if (item.targetType !== "PLAYLIST") return Promise.resolve(null);
@@ -1021,6 +1028,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         }
       } catch {
         /* its length cannot be looked up here */
+      }
+      const pl = playlistsRef.current.find((x) => x.id === item.targetId);
+      if (pl && canReadLocalLengths() && localTracksMissingLength(pl).length > 0) {
+        const sec = await learnLocalLengths(pl);
+        if (typeof sec === "number" && sec > 0) {
+          setLearned((prev) => ({ ...prev, [item.targetId]: sec }));
+          return sec;
+        }
       }
       return null;
     })();
@@ -1729,7 +1744,8 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   // TRIMMING a block (owner 2026-11-12): a strip on each edge — the far edge cuts from the end, the near edge from the start. Both snap to 5 minutes. A block can be cut shorter
-  // and stretched back, but never beyond the music's own length (when it is known; when it is not, the strips only cut). "Until the next block" is the card's choice.
+  // and stretched back, but never beyond the music's own length (when it is known; when it is NOT known the strips stretch freely, like a live station's — owner 2026-11-21: "I can only
+  // shorten, and once shortened I cannot stretch it back"). "Until the next block" is the card's choice.
   const maxLenOf = (s: Schedule): number => fitMinutes(libFor(s)?.dur);
   const onTrimPointerDown = (e: React.PointerEvent<HTMLElement>, sc: Scene, orient: Orient, side: "start" | "end") => {
     if (e.button !== 0) return;
@@ -1742,7 +1758,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const perMin = orient === "v" ? HOUR_H / 60 : (track.getBoundingClientRect().width / SPAN) * (isRtl() ? -1 : 1);
     const begin = startMinutes(sc.schedule);
     const maxLen = maxLenOf(sc.schedule);
-    const live = sc.schedule.targetType === "RADIO" || sc.schedule.targetType === "BANK" || sc.schedule.targetType === "SILENCE"; // a live station (24/7) or a music bank has no length of its own: its strips stretch to any length the person wants
+    // no known length (a live station / music bank has none of its own; a song or playlist whose length could not be had yet): its strips stretch to any length the person wants
     const base = items.find((x) => x.id === baseId(sc.schedule.id)) ?? sc.schedule;
     const ownEnd = explicitEndMinutes(base);
     const naturalEnd = Math.min(sc.end, DAY_MINUTES - 1);
@@ -1758,16 +1774,11 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
         // a strip never stretches a block past the last hour shown (Active hours = the business's own hours)
         const capEnd = Math.min(END_MAX, LAST_H * 60);
         if (Number.isFinite(maxLen)) last = Math.min(Math.max(begin + minLen, m), begin + maxLen, capEnd);
-        else if (live) last = LAST_H * 60 >= END_MAX ? (m >= END_MAX ? null : Math.max(begin + minLen, m)) : Math.min(Math.max(begin + minLen, m), capEnd);
-        else {
-          // the music's length is not known: the strip only CUTS — it never takes the block past where it ends now (the card's "Ends at" sets any time exactly)
-          const cut = Math.min(m, from);
-          last = ownEnd === null && cut >= from ? null : Math.max(begin + minLen, cut);
-        }
+        else last = LAST_H * 60 >= END_MAX ? (m >= END_MAX ? null : Math.max(begin + minLen, m)) : Math.min(Math.max(begin + minLen, m), capEnd); // the music's length is not known: stretch or cut to any length (up to the end of the day)
         setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: begin, end: last === null ? "23:59:00" : minutesToTimeLocal(last) });
       } else {
         const endNow = ownEnd ?? musicEnd;
-        const lo = Number.isFinite(maxLen) ? Math.max(FIRST_H * 60, endNow - maxLen) : live ? FIRST_H * 60 : begin; // unknown length: only cut, never earlier than it starts now (a live station stretches freely)
+        const lo = Number.isFinite(maxLen) ? Math.max(FIRST_H * 60, endNow - maxLen) : FIRST_H * 60; // unknown length: it stretches freely, earlier too (like a live station)
         last = Math.min(Math.max(lo, m), endNow - minLen);
         setDrag({ id: baseId(sc.schedule.id), day: sc.day, start: last });
       }

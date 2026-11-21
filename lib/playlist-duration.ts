@@ -38,3 +38,37 @@ export function totalToStore(tracks: readonly TrackLike[], explicit: number | nu
 export function tracksMissingLength<T extends TrackLike>(tracks: readonly T[]): T[] {
   return tracks.filter((t) => !known(t.durationSeconds));
 }
+
+/**
+ * LENGTHS A STATION READS FROM ITS OWN FILES (owner 2026-11-21: "every song from the computer must be saved with how long it is"). A local file's path never leaves its machine
+ * (CLAUDE.md §12), so the station that owns the file reads its real length and reports ONLY numbers keyed by track id — never a path.
+ */
+export const MAX_REPORTED_TRACK_SECONDS = 12 * 3600;
+export const MAX_REPORTED_TRACKS = 2000;
+
+/** the lengths a client reports (track id → seconds): only whole, plausible figures are kept (1 second … 12 hours), at most {@link MAX_REPORTED_TRACKS} of them */
+export function sanitizeTrackDurations(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  let n = 0;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (n >= MAX_REPORTED_TRACKS) break;
+    if (!id || id.length > 200) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 1 || v > MAX_REPORTED_TRACK_SECONDS) continue;
+    out[id] = Math.round(v);
+    n++;
+  }
+  return out;
+}
+
+/** put the reported lengths on the songs that have none yet — a length that is already known is never overwritten; `applied` = how many songs got one */
+export function applyTrackDurations<T extends TrackLike & { id: string }>(tracks: readonly T[], durations: Readonly<Record<string, number>>): { tracks: T[]; applied: number } {
+  let applied = 0;
+  const next = tracks.map((t) => {
+    const sec = durations[t.id];
+    if (known(t.durationSeconds) || !known(sec)) return t;
+    applied++;
+    return { ...t, durationSeconds: Math.round(sec) };
+  });
+  return { tracks: next, applied };
+}

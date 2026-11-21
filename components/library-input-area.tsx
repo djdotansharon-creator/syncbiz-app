@@ -52,6 +52,7 @@ import {
   titleFromLocalPath,
 } from "@/lib/local-audio-path";
 import { createUnifiedPlaylistFromLocalScan } from "@/lib/local-music-library-playlist";
+import { learnLocalLengths } from "@/lib/local-track-length";
 import { M3uYoutubeResolveModal } from "@/components/m3u-youtube-resolve-modal";
 import {
   buildM3uYoutubeResolveContext,
@@ -1064,6 +1065,7 @@ export function LibraryInputArea({
               });
               if (res.ok) {
                 const created = (await res.json()) as Playlist;
+                void learnLocalLengths(created); // every song loaded from this computer is saved with its real length (numbers only reach the server)
                 onAdd({
                   id: `pl-${created.id}`,
                   title: created.name,
@@ -1105,6 +1107,7 @@ export function LibraryInputArea({
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;
+            void learnLocalLengths(created); // the song's real length is saved with it (numbers only reach the server)
             onAdd({
               id: `pl-${created.id}`,
               title: created.name,
