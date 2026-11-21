@@ -26,7 +26,7 @@ import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handler
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { canReadLocalLengths, learnLocalLengths, localTracksMissingLength } from "@/lib/local-track-length";
-import { blockBranchFor, laneBranchIds } from "@/lib/schedules-lanes";
+import { blockBranchFor, studioItems } from "@/lib/schedules-lanes";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
@@ -107,6 +107,8 @@ type Props = {
   radioStations: RadioRow[];
   devices: Device[];
   branches: BranchRow[];
+  /** the business's canonical branch for the legacy key "default" (null = none) */
+  defaultBranchId?: string | null;
 };
 type LibItem = {
   key: string;
@@ -221,7 +223,7 @@ function holdCursor(kind: "ew-resize" | "ns-resize" | "grabbing"): () => void {
   return () => document.documentElement.classList.remove(cls);
 }
 
-export function SchedulesStudio({ initialSchedules, playlists, sources, radioStations, devices, branches }: Props) {
+export function SchedulesStudio({ initialSchedules, playlists, sources, radioStations, devices, branches, defaultBranchId = null }: Props) {
   const router = useRouter();
   const tr = useTr();
   const { t } = useTranslations();
@@ -229,8 +231,19 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const { locale } = useLocale();
   const { setLastMessage, stop, stopScheduled, setQueue, playSource, route } = useSchedulePlaybackHandlers();
 
-  const [items, setItems] = useState<Schedule[]>(initialSchedules);
-  useEffect(() => setItems(initialSchedules), [initialSchedules]);
+  // THIS computer's schedule only (owner 2026-11-22): the Studio loads what this window's branch runs — the engine's own rule — and stamps new blocks with this branch. `?branches=all` brings the old all-branches view back.
+  const ownBranchRaw = useStationBranchId(); // null while the desktop has not said which branch this computer is
+  const [showAllBranches, setShowAllBranches] = useState(false);
+  useEffect(() => {
+    try { setShowAllBranches(new URLSearchParams(window.location.search).get("branches") === "all"); } catch { /* the scoped view stays */ }
+  }, []);
+  const scopeOf = useCallback(
+    (all: Schedule[]) => studioItems({ all, ownBranch: ownBranchRaw, canonicalDefaultBranchId: defaultBranchId, knownBranchIds: branches.map((b) => b.id), showAllBranches }),
+    [ownBranchRaw, defaultBranchId, branches, showAllBranches],
+  );
+  const scoped = scopeOf(initialSchedules).scoped;
+  const [items, setItems] = useState<Schedule[]>(() => scopeOf(initialSchedules).items);
+  useEffect(() => setItems(scopeOf(initialSchedules).items), [initialSchedules, scopeOf]);
   const [now, setNow] = useState<Date | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [view, setView] = useState<"week" | "day">("day");
@@ -730,8 +743,6 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const ids = Array.from(new Set(items.map((s) => (s.branchId ?? "default").trim() || "default")));
     return ids.sort((a, b) => branchName(a).localeCompare(branchName(b)));
   }, [items, branchName]);
-  // the rows of the day view / the entries of the branch filter: the branches that have blocks AND this window's own branch (owner 2026-11-22: there must always be a row to schedule this computer's branch on)
-  const laneIds = useMemo(() => laneBranchIds({ blockBranches: branchIds, stationBranch, knownBranchIds: branches.map((b) => b.id), nameOf: branchName }), [branchIds, stationBranch, branches, branchName]);
 
   // ── the music the owner can schedule ──
   const [blockColors, setBlockColors] = useState<Record<string, number>>({});
@@ -765,7 +776,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const libFor = useCallback((s: Schedule) => libMap.get(scheduleTargetKey(s.targetType, (s.targetId || s.sourceId || "").trim())) ?? null, [libMap]);
   // "Quiet — no music": a block that stops the music at its start (the engine's SILENCE target). It lives in the music list as the first row.
   const quietItem = useMemo<LibItem>(() => ({ key: scheduleTargetKey("SILENCE", "silence"), targetType: "SILENCE", targetId: "silence", name: tr("Quiet"), cover: null, kind: "quiet", sub: tr("No music"), branchId: "", ci: 17, dur: null }), [tr]);
-  const quietBranch = branchFilter !== "all" ? branchFilter : branchIds[0] ?? branches[0]?.id ?? "default";
+  const quietBranch = branchFilter !== "all" ? branchFilter : scoped && ownBranchRaw ? ownBranchRaw : branchIds[0] ?? branches[0]?.id ?? "default";
   // The branch's SCHEDULE switch (owner 2026-11-16): "the schedule of THIS player is on / off", kept with the branch on the server — whoever can edit the branch's schedules flips it, from anywhere, and
   // the branch's player obeys. It belongs to the branch you are looking at (the filter), else to this window's own branch. null = not read yet.
   const switchBranch = branchFilter !== "all" ? branchFilter : stationBranch;
@@ -921,14 +932,15 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     );
   }, [shownItems, musicMinutes, weekDates, floatingId]);
   const dayRows = useMemo(() => {
-    const ids = branchFilter !== "all" ? [branchFilter] : laneIds.length > 0 ? laneIds : [branches[0]?.id ?? "default"];
+    const ids = branchFilter !== "all" ? [branchFilter] : branchIds.length > 0 ? branchIds : [branches[0]?.id ?? "default"];
     return ids.map((id) => ({ id, name: branchName(id), scenes: buildDayScenes(viewItems.filter((s) => ((s.branchId ?? "default").trim() || "default") === id), focusDay, weekDates, musicMinutes, floatingId) }));
-  }, [branchFilter, laneIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes, floatingId]);
+  }, [branchFilter, branchIds, branches, branchName, viewItems, focusDay, weekDates, musicMinutes, floatingId]);
   const nowMin = clock.getHours() * 60 + clock.getMinutes();
   const hoursBranches = useMemo(() => {
+    if (scoped && ownBranchRaw) return [{ id: ownBranchRaw, name: branchName(ownBranchRaw) }]; // this computer's own hours only
     const ids = Array.from(new Set([...branches.map((b) => b.id), ...branchIds]));
     return (ids.length ? ids : ["default"]).map((id) => ({ id, name: branchName(id) }));
-  }, [branches, branchIds, branchName]);
+  }, [branches, branchIds, branchName, scoped, ownBranchRaw]);
   const editing = editor?.kind === "edit" ? items.find((s) => s.id === editor.id) ?? null : null;
 
   useEffect(() => {
@@ -1064,7 +1076,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       const created = await createFromBody({
         name: item.targetType === "SILENCE" ? "Quiet" : item.name,
         // a quiet block belongs to the branch whose row / filter it was added in; so does a PLAYLIST dropped on a row (owner 2026-11-22 — the server decides whether it may play there)
-        branchId: blockBranchFor({ targetType: item.targetType, laneBranch: branchId, itemBranch: item.branchId ?? "default", quietBranch }),
+        branchId: blockBranchFor({ targetType: item.targetType, laneBranch: branchId, scopeBranch: scoped && ownBranchRaw ? ownBranchRaw : undefined, itemBranch: item.branchId ?? "default", quietBranch }),
         targetType: item.targetType,
         targetId: item.targetId,
         sourceId: item.targetType === "SOURCE" ? item.targetId : undefined,
@@ -1084,7 +1096,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (created && !(dur && dur > 0)) void learnRef.current(item, created); // a late answer still gives the block its true length
       return created;
     },
-    [createFromBody, quietBranch, lookupLength],
+    [createFromBody, quietBranch, lookupLength, scoped, ownBranchRaw],
   );
   // a block drawn at the provisional length takes the music's own length when the answer comes (an end the person set in the meantime is theirs)
   const learnLength = useCallback(
@@ -1942,10 +1954,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
             {focus !== null && !isTodayInView ? <button type="button" className="ss-pill ss-today" onClick={() => setFocus(null)}>{tr("Today")}</button> : null}
           </div>
           <div className="ss-toolbar-end">
-            {laneIds.length > 1 ? (
+            {branchIds.length > 1 ? (
               <select className="ss-select ss-select--sm" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} aria-label={tr("Branch")}>
                 <option value="all">{tr("All branches")}</option>
-                {laneIds.map((id) => <option key={id} value={id}>{branchName(id)}</option>)}
+                {branchIds.map((id) => <option key={id} value={id}>{branchName(id)}</option>)}
               </select>
             ) : null}
             {clip ? (

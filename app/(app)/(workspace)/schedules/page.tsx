@@ -7,6 +7,8 @@ export const dynamic = "force-dynamic";
 import type { Playlist } from "@/lib/playlist-types";
 import type { Device, Schedule, Source } from "@/lib/types";
 import { SchedulesStudio } from "@/components/schedules-studio/schedules-studio";
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { getCanonicalLegacyBranchId } from "@/lib/branch-resolver";
 
 async function getData(): Promise<{
   schedules: Schedule[];
@@ -67,6 +69,14 @@ async function getData(): Promise<{
 
 export default async function SchedulesPage() {
   const { schedules, devices, sources, playlists, radioStations, branches } = await getData();
+  // the legacy key "default" is this business's canonical branch when it has one — the Studio needs it to show exactly what a computer of that branch runs (lib/schedules-lanes.ts)
+  let defaultBranchId: string | null = null;
+  try {
+    const user = await getCurrentUserFromCookies();
+    defaultBranchId = user?.tenantId ? await getCanonicalLegacyBranchId(user.tenantId) : null;
+  } catch {
+    defaultBranchId = null;
+  }
   // Schedules Studio (owner 2026-11-10): the whole screen is one calendar of what plays when, with the owner's music on the side
   return (
     <SchedulesStudio
@@ -76,6 +86,7 @@ export default async function SchedulesPage() {
       radioStations={radioStations}
       devices={devices}
       branches={branches}
+      defaultBranchId={defaultBranchId}
     />
   );
 }
