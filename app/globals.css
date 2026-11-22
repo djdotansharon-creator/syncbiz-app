@@ -7911,6 +7911,17 @@ html[data-sb-display="white"] .sb-alb-classic { color: rgba(28, 28, 30, 0.5); }
 html[data-sb-display="white"] .sb-alb-classic:hover, html[data-sb-display="white"] .sb-alb-classic:focus-visible { color: rgba(28, 28, 30, 0.9); }
 html[data-sb-display="white"] .sb-alb-row[data-active="1"] { background: rgba(0, 0, 0, 0.06); }
 html[data-sb-display="white"] .sb-alb-row[data-active="1"] .sb-alb-n b { color: #1c1c1e; }
+/* The ⋯ at the end of a song's row (owner 2026-11-22: horizontal dots, at the side) — it appears on hover / focus, always on touch; the row leaves room for it. */
+.sb-alb-pl .sb-alb-list > li { position: relative; }
+.sb-alb-pl .sb-alb-row { padding-inline-end: 64px; }
+.sb-alb-more { position: absolute; inset-inline-end: 14px; top: calc(50% - 19px); display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, 0.72); cursor: pointer; opacity: 0; transition: opacity 180ms ease, background-color 160ms ease, color 160ms ease; }
+.sb-alb-more svg { width: 20px; height: 20px; }
+.sb-alb-list > li:hover .sb-alb-more, .sb-alb-more:focus-visible, .sb-alb-more.is-open { opacity: 1; }
+.sb-alb-more:hover, .sb-alb-more.is-open { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.sb-alb-more:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: -2px; }
+@media (hover: none) { .sb-alb-more { opacity: 0.8; } }
+html[data-sb-display="white"] .sb-alb-more { color: rgba(28, 28, 30, 0.7); }
+html[data-sb-display="white"] .sb-alb-more:hover, html[data-sb-display="white"] .sb-alb-more.is-open { background: rgba(0, 0, 0, 0.08); color: #1c1c1e; }
 /* ── Radio in the library (owner 2026-10-23): stations as SQUARES under a "Radio" heading in the chip row.
    Flat translucent surfaces only — NO backdrop-filter / blur layers on purpose (a GPU-heavy glass pass made the library flicker on some Windows machines). ── */
 .sb-rad { display: flex; flex-direction: column; gap: 36px; color: #f5f5f7; padding: 6px 2px 28px; }

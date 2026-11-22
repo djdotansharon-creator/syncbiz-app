@@ -3863,6 +3863,10 @@ function SourcesManagerInner({
                   }}
                   onPlayItem={playAlbumViewItem}
                   onClassicView={() => setPlaylistView("classic")}
+                  onAddToPlaylist={handleAddLeafToPlaylist}
+                  deleteContextFor={getItemDeleteContext}
+                  canDeleteFromLibrary={(it) => libraryRowEligibleForLibraryDelete(it, displaySources)}
+                  onDeleteFromLibrary={deleteLibraryItem}
                 />
               ) : sourceOpenContext && sourceDetailItems ? (
                 <div className="space-y-8">
