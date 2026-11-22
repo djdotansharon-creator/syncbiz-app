@@ -52,6 +52,8 @@ import {
   DEFAULT_BIZ_HOURS,
   DEFAULT_DISPLAY,
   closingMinutes,
+  closedSpans,
+  bizEdges,
   parseBizHours,
   viewRange,
   familyShade,
@@ -1743,6 +1745,31 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   // the empty slot a carried block will land in once a neighbour has stepped aside for it: a dashed outline exactly its size
+  // ── CLOSED time (owner 2026-11-22): the hours the business is closed (from the Day-hours dialog) drawn UNDER the blocks — a quiet diagonal hatch with no frame, a thin red line where the
+  // business closes and a thin green one where it opens. Drawing only: it creates and changes no block; nothing is drawn until the hours are set; a click on it passes through. ──
+  const bizBand = (d: number, orient: Orient) => {
+    if (!biz || biz.h24) return null;
+    const lo = orient === "v" ? FIRST_H * 60 : winA;
+    const hi = orient === "v" ? LAST_H * 60 : winB;
+    const at = (m: number) => (orient === "v" ? topOf(m) : pct(m));
+    const edge = (m: number, kind: "close" | "open") => (
+      <div key={`${kind}${m}`} className={`ss-edge ss-edge--${orient} ss-edge--${kind}`} style={orient === "v" ? { top: at(m) } : { insetInlineStart: `${at(m)}%` }} aria-hidden />
+    );
+    const edges = bizEdges(biz, d);
+    return (
+      <>
+        {closedSpans(biz, d).map(([s0, t0]) => {
+          const from = Math.max(s0, lo);
+          const to = Math.min(t0, hi);
+          if (to <= from) return null;
+          return <div key={`c${s0}`} className={`ss-closed ss-closed--${orient}`} style={orient === "v" ? { top: at(from), height: at(to) - at(from) } : { insetInlineStart: `${at(from)}%`, width: `${at(to) - at(from)}%` }} aria-hidden />;
+        })}
+        {edges.closes.filter((m) => m > lo && m < hi).map((m) => edge(m, "close"))}
+        {edges.opens.filter((m) => m > lo && m < hi).map((m) => edge(m, "open"))}
+      </>
+    );
+  };
+
   const slotFor = (day: number, orient: Orient, rowId?: string) => {
     let box: { start: number; len: number } | null = null;
     let waiting = false;
@@ -1866,7 +1893,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       orient === "v"
         ? { top: topOf(sc.start), height: vHeight }
         : { insetInlineStart: `${pct(sc.start)}%`, width: `calc(${Math.max(1.2, pct(end) - pct(sc.start))}% - 4px)` };
-    const cls = `ss-block ss-block--${orient}${drag?.preview && drag.preview.id === baseId(sc.schedule.id) ? " is-making-room" : ""}${ghost ? " is-ghost" : ""}${!ghost && drag && drag.overDay !== undefined && drag.overDay !== drag.day && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-leaving" : ""}${sc.quiet ? " is-quiet" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
+    const cls = `ss-block ss-block--${orient}${drag?.preview && drag.preview.id === baseId(sc.schedule.id) ? " is-making-room" : ""}${ghost ? " is-ghost" : ""}${!ghost && drag && drag.overDay !== undefined && drag.overDay !== drag.day && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-leaving" : ""}${sc.quiet ? " is-quiet" : ""}${sc.quiet && sc.schedule.name === CLOSING_NAME ? " is-closing" : ""}${sc.endSet ? " has-end" : ""}${sc.paused ? " is-paused" : ""}${sc.shadowed ? " is-shadowed" : ""}${drag && drag.id === baseId(sc.schedule.id) && drag.day === sc.day ? " is-dragging" : ""}${editing?.id === sc.schedule.id && editor?.day === sc.day ? " is-selected" : ""}${menu?.id === sc.schedule.id && menu.day === sc.day ? " is-menu" : ""}${clip?.id === sc.schedule.id && (clipDay === undefined || clipDay === sc.day) ? " is-copied" : ""}`;
     const tall = orient === "v" && vHeight > 60;
     const plain = sc.paused || sc.quiet;
     const tone = plain ? null : toneOf(sc.schedule);
@@ -1950,7 +1977,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   };
 
   return (
-    <div className="ss" data-schedule={scheduleOn ? "on" : "off"} data-carry={drag ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style}>
+    <div className="ss" data-schedule={scheduleOn ? "on" : "off"} data-carry={drag ? "1" : undefined} data-panel={panelOpen ? "open" : "closed"} data-pos={display.pos} data-content={display.content} data-style={display.style} data-bizband={biz && !biz.h24 ? "1" : undefined}>
       <div className="ss-main">
         <header className="ss-top">
           <div className="ss-titles">
@@ -2043,6 +2070,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       onDragLeave={() => setHover(null)}
                       onDrop={(e) => void trackDrop(e, d, "h")}
                     >
+                      {bizBand(d, "h")}
                       {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "h"))}
                       {ghostFor(d, "h")}
                       {slotFor(d, "h")}
@@ -2091,6 +2119,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                     onDragLeave={() => setHover(null)}
                     onDrop={(e) => void trackDrop(e, d, "v")}
                   >
+                    {bizBand(d, "v")}
                     {(weekScenes[d] ?? []).map((sc) => renderBlock(sc, "v"))}
                     {ghostFor(d, "v")}
                     {slotFor(d, "v")}
@@ -2127,6 +2156,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                       onDragLeave={() => setHover(null)}
                       onDrop={(e) => void trackDrop(e, focusDay, "h", dayRows.length > 1 ? row.id : undefined)}
                     >
+                      {bizBand(focusDay, "h")}
                       {row.scenes.map((sc) => renderBlock(sc, "h"))}
                       {slotFor(focusDay, "h", row.id)}
                       {row.id === stationBranch || dayRows.length === 1 ? jinglePins(focusDay, focusKey, "h") : null}
