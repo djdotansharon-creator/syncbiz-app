@@ -55,6 +55,7 @@ import { PlaylistAiShellMenu } from "@/components/playlist-ai-shell-menu";
 import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
 import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { AlbumWorkspacePanel } from "@/components/album-workspace-panel";
+import { PlaylistWorkspacePanel, preloadPlaylistCovers } from "@/components/playlist-workspace-panel";
 import { RadioLibraryPanel } from "@/components/radio-library-panel";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
@@ -885,6 +886,23 @@ function SourcesManagerInner({
   const { t } = useTranslations();
   const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  /** An OPENED playlist shows in the album look (1, 2, 3 …) by default; "classic" = the previous cards / rows view, kept one click away (owner 2026-11-22). Remembered per device. */
+  const [playlistView, setPlaylistViewState] = useState<"album" | "classic">("album");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("vono-playlist-view-v1") === "classic") setPlaylistViewState("classic");
+    } catch {
+      /* only a preference */
+    }
+  }, []);
+  const setPlaylistView = useCallback((v: "album" | "classic") => {
+    setPlaylistViewState(v);
+    try {
+      localStorage.setItem("vono-playlist-view-v1", v);
+    } catch {
+      /* only a preference */
+    }
+  }, []);
   const [genreFilter, setGenreFilter] = useState("");
   /* Workspace rail 3-state collapse (lg+). Both open by default; a collapsed rail becomes a
      40px handle strip and the center monitor (minmax(0,1fr)) owns the remaining width. State
@@ -1665,6 +1683,30 @@ function SourcesManagerInner({
     [playCollectionSelection]
   );
 
+  /**
+   * Open a playlist from its card. In the album look the screen is shown only AFTER its first pictures are loaded (never longer than 300 ms), so it swaps in complete and
+   * the entrance effect plays on a finished screen (owner 2026-11-22). Last click wins: another selection made meanwhile cancels the pending open.
+   */
+  const playlistOpenSeqRef = useRef(0);
+  useEffect(() => {
+    playlistOpenSeqRef.current += 1;
+  }, [selection]);
+  const openPlaylistEntity = useCallback(
+    (subtype: LibraryCollectionSubtype, key: string) => {
+      const target: LibrarySelection = { type: "collection_container", subtype, key };
+      if (playlistView !== "album" || (subtype !== "syncbiz_playlist" && subtype !== "external_playlist")) {
+        setSelection(target);
+        return;
+      }
+      const seq = ++playlistOpenSeqRef.current;
+      const urls = [collectionContextByKey.get(key)?.cover ?? null, ...resolveSourcesForSelection(subtype, key).slice(0, 11).map((s) => s.cover)];
+      void preloadPlaylistCovers(urls).then(() => {
+        if (playlistOpenSeqRef.current === seq) setSelection(target);
+      });
+    },
+    [playlistView, collectionContextByKey, resolveSourcesForSelection, setSelection]
+  );
+
   const handleDjHubPlaylistDragStart = useCallback(
     (e: DragEvent<HTMLElement>, s: UnifiedSource) => {
       const key = `syncbiz:${s.id}`;
@@ -2391,6 +2433,21 @@ function SourcesManagerInner({
       else playSource(item, ti);
     },
     [activePlaylistKey, sources, playlistItemAssignments, setQueue, playSourceOverride, playSource],
+  );
+
+  /** An opened playlist in the album look — except a playlist with scheduled contributor blocks, which keeps the classic view (it has the Contributors section the album look does not carry). */
+  const playlistAlbumOn =
+    playlistView === "album" &&
+    selection.type === "collection_container" &&
+    (selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist") &&
+    !(compositeScheduleBlocks != null && compositeScheduleBlocks.length > 0);
+  /** Play a song of the opened playlist — the SAME call the classic view makes for that kind of playlist. */
+  const playAlbumViewItem = useCallback(
+    (item: UnifiedSource) => {
+      if (selection.type === "collection_container" && selection.subtype === "syncbiz_playlist") playSyncbizPlaylistExpandedItem(item);
+      else playSourceForLibraryCard(item);
+    },
+    [selection, playSyncbizPlaylistExpandedItem, playSourceForLibraryCard],
   );
 
   const removeItemFromPlaylistOnly = useCallback((playlistKey: string, sourceId: string) => {
@@ -3703,7 +3760,7 @@ function SourcesManagerInner({
                   </div>
                 </header>
               ) : null}
-              {collectionOpenContext ? (
+              {collectionOpenContext && !playlistAlbumOn ? (
                 <header className="library-list-shell rounded-2xl px-4 py-3">
                   <div className="flex items-start gap-3">
                     <button
@@ -3734,6 +3791,13 @@ function SourcesManagerInner({
                       <h2 className="library-text-title truncate text-lg font-semibold">{collectionOpenContext.title}</h2>
                       <p className="library-text-subtitle mt-0.5 text-xs">{collectionOpenContext.subtitle}</p>
                       <p className="library-card-meta mt-1 text-xs">{collectionOpenContext.count} items</p>
+                      {selection.type === "collection_container" &&
+                      (selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist") &&
+                      !(compositeScheduleBlocks != null && compositeScheduleBlocks.length > 0) ? (
+                        <button type="button" onClick={() => setPlaylistView("album")} className="library-nav-link mt-1 rounded-lg px-2 py-1 text-[11px]">
+                          {locale === "he" ? "תצוגת אלבום" : "Album view"}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </header>
@@ -3787,6 +3851,23 @@ function SourcesManagerInner({
               ) : null}
               {selection.type === "library_view" && selection.id === "radio" ? (
                 <RadioLibraryPanel />
+              ) : playlistAlbumOn && collectionOpenContext ? (
+                <PlaylistWorkspacePanel
+                  title={collectionOpenContext.title}
+                  cover={collectionOpenContext.cover}
+                  items={visibleSources}
+                  activeId={isMaster ? null : masterState?.currentSource?.id ?? null}
+                  onBack={() => setSelection({ type: "library_view", id: "playlists" })}
+                  onPlayAll={() => {
+                    if (selection.type === "collection_container") playCollectionSelection(selection.subtype, selection.key);
+                  }}
+                  onPlayItem={playAlbumViewItem}
+                  onClassicView={() => setPlaylistView("classic")}
+                  onAddToPlaylist={handleAddLeafToPlaylist}
+                  deleteContextFor={getItemDeleteContext}
+                  canDeleteFromLibrary={(it) => libraryRowEligibleForLibraryDelete(it, displaySources)}
+                  onDeleteFromLibrary={deleteLibraryItem}
+                />
               ) : sourceOpenContext && sourceDetailItems ? (
                 <div className="space-y-8">
                   <section className="space-y-3">
@@ -4036,11 +4117,7 @@ function SourcesManagerInner({
                                     )
                                   : undefined
                               }
-                              onPlaylistEntityOpen={
-                                pe
-                                  ? () => setSelection({ type: "collection_container", subtype: pe.subtype, key: pe.key })
-                                  : undefined
-                              }
+                              onPlaylistEntityOpen={pe ? () => openPlaylistEntity(pe.subtype, pe.key) : undefined}
                               onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
                               onSchedulePress={
                                 pe && source.playlist?.id
@@ -4115,11 +4192,7 @@ function SourcesManagerInner({
                                   )
                                 : undefined
                             }
-                            onPlaylistEntityOpen={
-                              pe
-                                ? () => setSelection({ type: "collection_container", subtype: pe.subtype, key: pe.key })
-                                : undefined
-                            }
+                            onPlaylistEntityOpen={pe ? () => openPlaylistEntity(pe.subtype, pe.key) : undefined}
                             onPlaylistEntityPlay={pe ? () => playCollectionSelection(pe.subtype, pe.key) : undefined}
                             onSchedulePress={
                               pe && source.playlist?.id
