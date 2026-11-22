@@ -169,6 +169,7 @@ export async function POST(req: NextRequest) {
       thumbnail,
       branchId,
       tenantId: user.tenantId,
+      createdByUserId: user.id, // the signed-in person made it (the body is never trusted for this)
       viewCount,
       durationSeconds,
       ...(catalogItemId ? { catalogItemId } : {}),

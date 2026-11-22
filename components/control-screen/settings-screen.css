@@ -43,3 +43,18 @@
 .sb-set-tab { border: 0; border-radius: 999px; padding: 8px 18px; background: rgba(255, 255, 255, 0.08); color: #f5f5f7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.15s; }
 .sb-set-tab:hover { background: rgba(255, 255, 255, 0.16); }
 .sb-set-tab[aria-selected="true"] { background: rgba(255, 255, 255, 0.94); color: #0a0a0a; }
+
+/* "Your VONO ID" — the person's name#1234 and a copy button (owner 2026-11-22). Flat: no blur, no filter. */
+.sb-vid { min-width: 0; }
+.sb-vid-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sb-vid-id { display: inline-block; min-width: 9ch; padding: 9px 16px; border-radius: 12px; background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.95); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 17px; font-weight: 600; letter-spacing: 0.01em; user-select: all; }
+.sb-vid-id--wait { height: 40px; width: 11ch; background: rgba(255, 255, 255, 0.05); }
+.sb-vid-none { font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+.sb-vid-copy { padding: 8px 16px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-vid-copy:hover { background: rgba(255, 255, 255, 0.2); }
+.sb-vid-copy:active { transform: scale(0.96); }
+.sb-vid > p { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: rgba(255, 255, 255, 0.45); }
+html[data-sb-display="white"] .sb-vid-id { background: rgba(0, 0, 0, 0.06); color: #1c1c1e; }
+html[data-sb-display="white"] .sb-vid-copy { background: rgba(0, 0, 0, 0.08); color: #1c1c1e; }
+html[data-sb-display="white"] .sb-vid-copy:hover { background: rgba(0, 0, 0, 0.14); }
+html[data-sb-display="white"] .sb-vid > p, html[data-sb-display="white"] .sb-vid-none { color: rgba(28, 28, 30, 0.55); }
