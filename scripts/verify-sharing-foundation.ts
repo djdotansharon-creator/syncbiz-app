@@ -36,9 +36,9 @@ const walk = (dir: string, out: string[] = []): string[] => {
   return out;
 };
 const files = [...walk(path.join(root, "lib")), ...walk(path.join(root, "app")), ...walk(path.join(root, "components")), ...walk(path.join(root, "server"))];
-// Phase B (this branch) puts the ID and the creator credit to use — ON PURPOSE. What must STILL be dormant is the sharing itself: nothing may use the PlaylistShare table or its enums yet.
-const users = files.filter((f) => /prisma\.playlistShare|PlaylistShareTargetKind|PlaylistShareStatus/.test(readFileSync(f, "utf-8")));
-assert("N1 the SHARING itself is still dormant: no application file uses the PlaylistShare table or its enums (phase B only adds the VONO ID and the creator credit)", users.length === 0, users.map((f) => path.relative(root, f)).join(", "));
+// Phases B and C put the ID, the credit and the SHARES to use — ON PURPOSE. What must stay true: the PlaylistShare table is touched ONLY by the share store (every query fenced to a workspace) — no route or screen talks to it directly.
+const users = files.filter((f) => /prisma\.playlistShare/.test(readFileSync(f, "utf-8")));
+assert("N1 only the share store (lib/playlist-share-store.ts) touches the PlaylistShare table — no route, no screen, no other lib reads or writes it directly", users.length === 1 && users[0]!.endsWith(path.join("lib", "playlist-share-store.ts")), users.map((f) => path.relative(root, f)).join(", "));
 assert("N2 the ID helpers (lib/user-handle.ts) are pure (no store, no fetch, no prisma)", !/fetch\(|prisma|require\(|import /.test(rd("lib/user-handle.ts").replace(/\/\*[\s\S]*?\*\//g, "")));
 
 // the ID helpers

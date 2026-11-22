@@ -57,6 +57,9 @@ import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { AlbumWorkspacePanel } from "@/components/album-workspace-panel";
 import { PlaylistWorkspacePanel, preloadPlaylistCovers } from "@/components/playlist-workspace-panel";
 import { libraryForBranch } from "@/lib/library-branch-scope";
+import { usePlaylistShares } from "@/lib/use-playlist-shares";
+import { PlaylistSharePill, PlaylistShareRequests } from "@/components/playlist-share-requests";
+import { SharedPlaylistsPanel } from "@/components/shared-playlists-panel";
 import { useStationBranchId } from "@/lib/station-branch";
 import { RadioLibraryPanel } from "@/components/radio-library-panel";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
@@ -147,6 +150,7 @@ type LibraryViewId =
   | "sources"
   | "saved_sources"
   | "radio"
+  | "shared"
   | "dj_ai";
 type CollectionGroupId = "curated_masters" | "dayparts_hours" | "client_specific";
 type LibrarySelection =
@@ -1192,6 +1196,16 @@ function SourcesManagerInner({
   // changes: `sources` (playback, queues, the schedule) is untouched, and a window whose branch is not known yet shows everything as before.
   const viewBranch = useStationBranchId();
   const displaySources = useMemo(() => libraryForBranch(sources, viewBranch, defaultBranchId), [sources, viewBranch, defaultBranchId]);
+
+  // playlists SHARED INTO this branch (owner 2026-11-22, sharing phase C): what waits for an answer + what was accepted. A branch with no real id (the legacy "default" of a business that has no canonical
+  // branch) cannot receive shares, so nothing is asked and nothing new shows.
+  const shareBranchId = useMemo(() => {
+    const v = (viewBranch ?? "").trim();
+    if (!v) return null;
+    return v === "default" ? defaultBranchId : v;
+  }, [viewBranch, defaultBranchId]);
+  const shares = usePlaylistShares(shareBranchId, (n) => (locale === "he" ? (n === 1 ? "שותף איתכם פלייליסט חדש" : `שותפו איתכם ${n} פלייליסטים`) : n === 1 ? "A playlist was shared with you" : `${n} playlists were shared with you`));
+  const [requestsOpen, setRequestsOpen] = useState(false);
   /** Unfiltered — use for playlist shells, drops, and composite metadata so genre filter cannot hide the active playlist. */
   const sourcesById = useMemo(
     () => new Map(sources.map((s) => [s.id, s] as const)),
@@ -2467,6 +2481,17 @@ function SourcesManagerInner({
     [selection, playSyncbizPlaylistExpandedItem, playSourceForLibraryCard],
   );
 
+  /** Play a song of a playlist SHARED into this branch: the queue is the playlist's playable songs (a file on another computer is left out), started at the pressed one — the same primitives as `playSourceForLibraryCard`. */
+  const playSharedLeaf = useCallback(
+    (leaf: UnifiedSource, all: UnifiedSource[]) => {
+      if (all.length > 0) setQueue(all, { force: true });
+      const ti = leaf.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(leaf) : 0;
+      if (playSourceOverride) playSourceOverride(leaf, ti);
+      else playSource(leaf, ti);
+    },
+    [setQueue, playSourceOverride, playSource],
+  );
+
   const removeItemFromPlaylistOnly = useCallback((playlistKey: string, sourceId: string) => {
     setPlaylistItemAssignments((prev) => {
       const nextItems = (prev[playlistKey] ?? []).filter((id) => id !== sourceId);
@@ -3353,6 +3378,7 @@ function SourcesManagerInner({
                 { id: "external_playlists", label: "Imported", count: containers.external.length },
                 { id: "sources", label: "Sources", count: containers.sources.length },
                 { id: "radio", label: "Radio", count: 0 },
+                ...(shares.accepted.length + shares.pending.length > 0 ? [{ id: "shared" as const, label: "Shared", count: shares.accepted.length }] : []),
                 { id: "favorites", label: "Favorites", count: favoriteIds.length },
               ] as Array<{ id: LibraryViewId; label: string; count: number }>
             ).map((c) => {
@@ -3378,6 +3404,7 @@ function SourcesManagerInner({
                 </button>
               );
             })}
+            <PlaylistSharePill count={shares.pending.length} onClick={() => setRequestsOpen(true)} />
             {/* Selected view's count — ONE number, big and proud on the right */}
             {(() => {
               const chipsData: Array<{ id: LibraryViewId; count: number }> = [
@@ -3871,6 +3898,18 @@ function SourcesManagerInner({
               ) : null}
               {selection.type === "library_view" && selection.id === "radio" ? (
                 <RadioLibraryPanel />
+              ) : selection.type === "library_view" && selection.id === "shared" ? (
+                <SharedPlaylistsPanel
+                  shares={shares.accepted}
+                  activeId={isMaster ? null : masterState?.currentSource?.id ?? null}
+                  onPlayLeaf={playSharedLeaf}
+                  onPlayAll={(all) => {
+                    if (all[0]) playSharedLeaf(all[0], all);
+                  }}
+                  onLeave={async (id) => {
+                    await shares.answer(id, "leave");
+                  }}
+                />
               ) : playlistAlbumOn && collectionOpenContext ? (
                 <PlaylistWorkspacePanel
                   title={collectionOpenContext.title}
@@ -4684,6 +4723,9 @@ function SourcesManagerInner({
           setAddToPlaylistLeaf(null);
         }}
       />
+      {requestsOpen && shares.pending.length > 0 ? (
+        <PlaylistShareRequests pending={shares.pending} onAnswer={shares.answer} onClose={() => setRequestsOpen(false)} />
+      ) : null}
     </div>
   );
 }
@@ -5013,6 +5055,7 @@ function SourceRow({
       <ShareModal
         item={unifiedSourceToShareable(source)}
         fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+        vonoPlaylistId={source.origin === "playlist" && source.playlist?.tenantId ? source.playlist.id : undefined}
         fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
         onClose={() => setShareOpen(false)}
       />

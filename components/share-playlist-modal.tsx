@@ -15,6 +15,7 @@ export function SharePlaylistModal({ playlist, onClose }: Props) {
     <ShareModal
       item={item}
       fallbackPlaylistId={playlist.id}
+      vonoPlaylistId={playlist.tenantId ? playlist.id : undefined}
       onClose={onClose}
     />
   );

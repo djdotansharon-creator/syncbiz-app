@@ -10,7 +10,7 @@
  * The classic view stays one click away ("Classic view") and is remembered. Styles: the album's own `.sb-alb*` in globals.css (+ `.sb-alb-classic`, `.sb-alb-more`, `data-active`).
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "@/lib/locale-context";
 import { LIBRARY_CARD_FALLBACK_GENRE, type UnifiedSource } from "@/lib/source-types";
@@ -21,6 +21,7 @@ const HE = {
   songs: (n: number) => (n === 0 ? "אין שירים" : n === 1 ? "שיר אחד" : `${n} שירים`),
   by: "נוצר על ידי",
   back: "חזרה לפלייליסטים",
+  backToCard: "חזרה לכרטיס",
   playAll: "נגן את הפלייליסט",
   classic: "תצוגה קלאסית",
   classicTitle: "חזרה לתצוגה הקודמת - כרטיסים עם כל הפעולות",
@@ -34,6 +35,7 @@ const EN = {
   songs: (n: number) => (n === 0 ? "No songs" : n === 1 ? "1 song" : `${n} songs`),
   by: "created by",
   back: "Back to playlists",
+  backToCard: "Back to the card",
   playAll: "Play playlist",
   classic: "Classic view",
   classicTitle: "Back to the previous view - cards with every action",
@@ -100,6 +102,10 @@ export function PlaylistWorkspacePanel({
   deleteContextFor,
   canDeleteFromLibrary,
   onDeleteFromLibrary,
+  mode = "library",
+  unavailable,
+  onUnavailable,
+  extra,
 }: {
   title: string;
   cover: string | null;
@@ -113,15 +119,28 @@ export function PlaylistWorkspacePanel({
   onPlayItem: (item: UnifiedSource) => void;
   onClassicView: () => void;
   /** the library's own "add to playlist" for a song (opens its picker, or adds straight to a playlist being built) */
-  onAddToPlaylist: (item: UnifiedSource) => void;
+  onAddToPlaylist?: (item: UnifiedSource) => void;
   /** what removing this song means here (the classic card's own rule) */
-  deleteContextFor: (item: UnifiedSource) => LibraryItemDeleteContext;
-  canDeleteFromLibrary: (item: UnifiedSource) => boolean;
-  onDeleteFromLibrary: (item: UnifiedSource) => void | Promise<void>;
+  deleteContextFor?: (item: UnifiedSource) => LibraryItemDeleteContext;
+  canDeleteFromLibrary?: (item: UnifiedSource) => boolean;
+  onDeleteFromLibrary?: (item: UnifiedSource) => void | Promise<void>;
+  /**
+   * "library" = the owner's own opened playlist (every action).
+   * "shared" = a playlist shared INTO this branch (owner 2026-11-22): play it, nothing else — no ⋯ menu, no classic view.
+   * "preview" = a look inside a share request: nothing plays, nothing can be changed.
+   */
+  mode?: "library" | "shared" | "preview";
+  /** a song that cannot play here (a local file that lives on another computer): drawn grey; a click says so instead of playing */
+  unavailable?: (item: UnifiedSource) => boolean;
+  onUnavailable?: (item: UnifiedSource) => void;
+  /** a small line under the song count (who shared it, "stop following" …) */
+  extra?: ReactNode;
 }): ReactElement {
   const { locale } = useLocale();
   const he = locale === "he";
   const t = he ? HE : EN;
+  const showMenu = mode === "library" && !!onAddToPlaylist && !!deleteContextFor && !!canDeleteFromLibrary && !!onDeleteFromLibrary;
+  const canPlay = mode !== "preview";
 
   const [menu, setMenu] = useState<SongMenu | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -199,7 +218,7 @@ export function PlaylistWorkspacePanel({
     [he, menu, menuOpen],
   );
 
-  const delCtx = delFor ? deleteContextFor(delFor) : null;
+  const delCtx = delFor && deleteContextFor ? deleteContextFor(delFor) : null;
 
   return (
     <div dir={he ? "rtl" : "ltr"} className="sb-alb sb-alb-pl min-h-0 w-full flex-1">
@@ -215,21 +234,31 @@ export function PlaylistWorkspacePanel({
             </p>
           ) : null}
           <p className="sb-alb-count">{t.songs(items.length)}</p>
-          <button type="button" className="sb-alb-classic" onClick={onClassicView} title={t.classicTitle}>
-            {t.classic}
-          </button>
+          {extra ? <div className="sb-alb-extra">{extra}</div> : null}
+          {mode === "library" ? (
+            <button type="button" className="sb-alb-classic" onClick={onClassicView} title={t.classicTitle}>
+              {t.classic}
+            </button>
+          ) : null}
         </div>
-        {items.length > 0 ? (
+        {items.length > 0 && canPlay ? (
           <button type="button" className="sb-alb-play" onClick={onPlayAll} aria-label={t.playAll} title={t.playAll}>
             <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" aria-hidden>
               <path d="M8.5 5.5v13l10.5-6.5L8.5 5.5z" />
             </svg>
           </button>
         ) : null}
-        <button type="button" className="sb-wz-x" onClick={onBack} aria-label={t.back} title={t.back}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-            <path d="M7 7l10 10M17 7L7 17" />
-          </svg>
+        <button type="button" className={`sb-wz-x${mode === "preview" ? " sb-alb-backbtn" : ""}`} onClick={onBack} aria-label={mode === "preview" ? t.backToCard : t.back} title={mode === "preview" ? t.backToCard : t.back}>
+          {mode === "preview" ? (
+            // a look inside a share request: the way out is BACK to the card (the dialog has its own ✕)
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+              <path d="M7 7l10 10M17 7L7 17" />
+            </svg>
+          )}
         </button>
       </header>
       {items.length === 0 ? (
@@ -239,9 +268,22 @@ export function PlaylistWorkspacePanel({
           {items.map((it, i) => {
             const meta = [genreOf(it), mmss(it.leafDurationSeconds)].filter(Boolean).join(" · ");
             const isOpen = menuOpen && menu?.item.id === it.id;
+            const off = !!unavailable?.(it);
             return (
               <li key={it.id} style={{ ["--d" as string]: `${Math.min(i, 14) * 38}ms` } as CSSProperties}>
-                <button type="button" className="sb-alb-row" data-active={activeId === it.id ? "1" : undefined} onClick={() => onPlayItem(it)} title={it.title}>
+                <button
+                  type="button"
+                  className="sb-alb-row"
+                  data-active={activeId === it.id ? "1" : undefined}
+                  data-off={off ? "1" : undefined}
+                  data-ro={mode === "preview" ? "1" : undefined}
+                  onClick={() => {
+                    if (mode === "preview") return;
+                    if (off) onUnavailable?.(it);
+                    else onPlayItem(it);
+                  }}
+                  title={it.title}
+                >
                   <span className="sb-alb-n">
                     <b>{i + 1}</b>
                   </span>
@@ -256,6 +298,7 @@ export function PlaylistWorkspacePanel({
                     {meta ? <span className="sb-alb-meta">{meta}</span> : null}
                   </span>
                 </button>
+                {showMenu ? (
                 <button
                   type="button"
                   className={`sb-alb-more${isOpen ? " is-open" : ""}`}
@@ -271,6 +314,7 @@ export function PlaylistWorkspacePanel({
                     <circle cx="19" cy="12" r="1.8" />
                   </svg>
                 </button>
+                ) : null}
               </li>
             );
           })}
@@ -309,7 +353,7 @@ export function PlaylistWorkspacePanel({
                 className="sb-card-menu-item"
                 onClick={() => {
                   setMenuOpen(false);
-                  onAddToPlaylist(menu.item);
+                  onAddToPlaylist?.(menu.item);
                 }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -347,13 +391,13 @@ export function PlaylistWorkspacePanel({
           onDeleteFromLibrary={async () => {
             setDeleting(true);
             try {
-              await onDeleteFromLibrary(delFor);
+              await onDeleteFromLibrary?.(delFor);
             } finally {
               setDeleting(false);
             }
           }}
           loading={deleting}
-          showDeleteFromLibrary={canDeleteFromLibrary(delFor)}
+          showDeleteFromLibrary={canDeleteFromLibrary ? canDeleteFromLibrary(delFor) : false}
         />
       ) : null}
     </div>

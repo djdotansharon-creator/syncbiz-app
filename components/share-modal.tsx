@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import { useTranslations } from "@/lib/locale-context";
 import { GlassModal } from "@/components/glass-modal";
+import { PlaylistShareDialog } from "@/components/playlist-share-dialog";
+import { useLocale } from "@/lib/locale-context";
 import {
   getShareableSourceUrl,
   shareMedia,
@@ -14,6 +16,8 @@ type Props = {
   item: ShareableItem;
   fallbackPlaylistId?: string;
   fallbackRadioId?: string;
+  /** the saved playlist's own id (not the library's "pl-…" source id): when given, "Share inside VONO" is offered */
+  vonoPlaylistId?: string;
   /** Web URL for social sharers when resolved URL is syncbiz:// */
   shareUrlWeb?: string;
   onClose: () => void;
@@ -72,11 +76,14 @@ export function ShareModal({
   item,
   fallbackPlaylistId,
   fallbackRadioId,
+  vonoPlaylistId,
   shareUrlWeb,
   onClose,
 }: Props) {
   const { t } = useTranslations();
+  const { locale } = useLocale();
   const [copied, setCopied] = useState(false);
+  const [vonoOpen, setVonoOpen] = useState(false); // "Share inside VONO" (to branches of this business) — only for a saved playlist
 
   const { url: shareUrl, isFallback } = useMemo(
     () => getShareableSourceUrl(item, fallbackPlaylistId, fallbackRadioId),
@@ -102,8 +109,14 @@ export function ShareModal({
 
   // 2026-10-16 (owner): the share dialog is the design line's centred glass panel (blurred, slightly darkened
   // backdrop) — everything fits at once, nothing scrolls: the link with a copy button, then four share tiles.
+  if (vonoOpen && vonoPlaylistId) return <PlaylistShareDialog playlistId={vonoPlaylistId} onClose={() => setVonoOpen(false)} />;
   return (
     <GlassModal title={t.share ?? "Share"} subtitle={item.title} width={460} onClose={onClose}>
+      {vonoPlaylistId ? (
+        <button type="button" className="sb-shr-vono" onClick={() => setVonoOpen(true)}>
+          <span>{locale === "he" ? "שיתוף בתוך VONO — לסניפים שלי" : "Share inside VONO — to my branches"}</span>
+        </button>
+      ) : null}
       <label className="sb-wz-label">{t.originalSourceUrl ?? "Link"}</label>
       <div className="sb-wz-linkrow">
         <input type="text" readOnly value={shareUrl} className="sb-wz-input" onFocus={(e) => e.currentTarget.select()} />

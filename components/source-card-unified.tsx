@@ -498,6 +498,8 @@ export function SourceCard({
     ) {
       return;
     }
+    // a click inside a dialog of this card (the share dialog is a portal child of the card) bubbles up the React tree but is NOT a click on the card — it must not open the playlist under the dialog
+    if (tgt && articleRef.current && !articleRef.current.contains(tgt)) return;
     if (openClickTimerRef.current) clearTimeout(openClickTimerRef.current);
     openClickTimerRef.current = setTimeout(() => {
       onPlaylistEntityOpen();
@@ -507,6 +509,7 @@ export function SourceCard({
 
   function handleCardDoubleClickPlay(e: React.MouseEvent) {
     if (!onPlaylistEntityPlay) return;
+    if (articleRef.current && !articleRef.current.contains(e.target as Node)) return; // a double-click inside a dialog of this card is not a double-click on the card
     e.preventDefault();
     if (openClickTimerRef.current) {
       clearTimeout(openClickTimerRef.current);
@@ -773,6 +776,7 @@ export function SourceCard({
         <ShareModal
           item={unifiedSourceToShareable(source)}
           fallbackPlaylistId={source.origin === "playlist" ? source.id : undefined}
+          vonoPlaylistId={source.origin === "playlist" && source.playlist?.tenantId ? source.playlist.id : undefined}
           fallbackRadioId={source.origin === "radio" && source.radio ? source.radio.id : undefined}
           onClose={() => setShareOpen(false)}
         />

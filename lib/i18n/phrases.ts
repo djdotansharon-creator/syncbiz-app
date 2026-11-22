@@ -353,6 +353,7 @@ export const HE_PHRASES: Record<string, string> = {
   "People find you by this exact ID, to share playlists with you or to add you to a business.": "אנשים מוצאים אותך לפי המזהה המדויק הזה, כדי לשתף איתך פלייליסטים או להוסיף אותך לעסק.",
   "Your VONO ID is not available right now.": "מזהה ה-VONO שלך לא זמין כרגע.",
   "created by": "נוצר על ידי",
+  "Shared": "משותפים",
   "Default": "ברירת מחדל",
   "Day": "יום",
   "Week": "שבוע",
