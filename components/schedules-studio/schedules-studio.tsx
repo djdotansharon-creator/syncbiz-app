@@ -51,7 +51,7 @@ import {
   COLOUR_FAMILIES,
   DEFAULT_BIZ_HOURS,
   DEFAULT_DISPLAY,
-  closingPlan,
+  closingMinutes,
   closedSpans,
   bizEdges,
   parseBizHours,
@@ -1381,12 +1381,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // ── Day hours: a closing time per day = one weekly quiet block named "Closing" for each distinct time (days that share a time share a block) ──
   // New blocks are created first, then the old ones that are no longer wanted are removed, so a failure never leaves a day without its closing.
   const saveClosing = useCallback(
-    async (branchId: string, desired: (number | null)[]): Promise<boolean> => {
+    async (branchId: string, desired: number[][]): Promise<boolean> => {
       const inBranch = (x: Schedule) => ((x.branchId ?? "default").trim() || "default") === branchId;
       const existing = items.filter((x) => isSilenceBlock(x) && x.name === CLOSING_NAME && x.recurrence !== "one_off" && inBranch(x));
       const groups = new Map<number, number[]>();
-      desired.forEach((m, d) => {
-        if (m !== null) groups.set(m, [...(groups.get(m) ?? []), d]);
+      desired.forEach((minutes, d) => {
+        for (const m of minutes) groups.set(m, [...(groups.get(m) ?? []), d]);
       });
       const keep = new Set<string>();
       const toCreate: { m: number; days: number[] }[] = [];
@@ -2297,7 +2297,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
           onSave={async (branchId, next) => {
             setBiz(next);
             try { localStorage.setItem(HOURS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-            return saveClosing(branchId, closingPlan(next));
+            return saveClosing(branchId, closingMinutes(next));
           }}
         />
       ) : null}
