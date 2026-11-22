@@ -27,6 +27,8 @@ export type SourcesManagerClientProps = {
   pageSubtitle?: string;
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
+  /** the canonical branch id of the legacy key "default" (null = the business has none) */
+  defaultBranchId?: string | null;
 };
 
 type ManagerComponent = ComponentType<SourcesManagerClientProps>;
