@@ -17,7 +17,8 @@ Status: **DESIGN + DORMANT DB FOUNDATION (migration file in a branch, not applie
 - enums `PlaylistShareTargetKind (BRANCH, USER)`, `PlaylistShareStatus (PENDING, ACCEPTED, DECLINED, REVOKED)`.
 - table `PlaylistShare (id, playlistId, fromUserId, targetKind, targetBranchId?, targetUserId?, status, createdAt, decidedAt?, revokedAt?)` with indexes on playlist, sender, (target user, status), (target branch, status); FKs cascade on delete of the playlist / users.
 - Only `ADD COLUMN`, `CREATE TYPE/TABLE/INDEX`, `ADD FOREIGN KEY`. No `DROP`, no `ALTER COLUMN`, no data change. Checked: the whole migration chain applies on an empty database and the resulting database equals the schema (empty `prisma migrate diff`).
-- **Merging this to `main` deploys to PROD, and PROD applies migrations on deploy → a PROD migration needs the owner's explicit word.**
+- **ORDER MATTERS — Railway does NOT run migrations** (build = `next build`, start = `next start`), and the Prisma client SELECTs every column of the schema. So: **(1) migrate the PROD database FIRST** (this migration is additive and nullable, so the OLD code keeps working with it), **(2) only then merge / deploy.** Deploying first would break every Playlist and User read on PROD. Touching the PROD database needs the owner's explicit word, a backup first, and row counts before/after (see the pre-merge checklist, item 4).
+- While dormant there is no reason to do either now: do the PROD migration + merge together, right before phase B ships.
 
 ## The security-critical part (phase D)
 Playlists are tenant-walled (`playlistTenantMatches`, `gatePlaylistAccess`). A live share across businesses is a deliberate, narrow **read-only** window through that wall: the receiver cannot edit, cannot see anything else of the owner, the owner can revoke at any moment, and when the owner deletes the playlist the receiver sees "no longer available" (copies stay). It needs its own audit before any code.
