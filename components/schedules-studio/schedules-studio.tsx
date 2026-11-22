@@ -27,6 +27,8 @@ import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { canReadLocalLengths, learnLocalLengths, localTracksMissingLength } from "@/lib/local-track-length";
 import { blockBranchFor, studioItems } from "@/lib/schedules-lanes";
+import { shouldOfferLocalMove } from "@/lib/local-playlist-branch";
+import { playlistHasLocalFiles } from "@/lib/playlist-playability";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
@@ -290,6 +292,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const [learned, setLearned] = useState<Record<string, number>>({});
   // one length lookup per playlist at a time, shared by everyone who asks (a drag that has only just begun, the drop, a paste)
   const lengthLookups = useRef<Map<string, Promise<number | null>>>(new Map());
+  const movedLocal = useRef<Set<string>>(new Set()); // playlists of local files already moved to this computer's branch in this session (the page's own copy of the list is not refreshed)
   const playlistsRef = useRef(playlists); // the lookup (a stable callback) reads the current list from here: a playlist of local files is read by THIS station
   useEffect(() => {
     playlistsRef.current = playlists;
@@ -507,7 +510,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   const alive = useRef(true);
   const [jmenu, setJmenu] = useState<{ item: JingleLike; day: number; min: number; rect: Rect } | null>(null);
   const [clipDay, setClipDay] = useState<number | undefined>(undefined);
-  const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; undo?: () => void; action?: { label: string; run: () => void } } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollObs = useRef<ResizeObserver | null>(null);
   const scrollNode = useCallback((el: HTMLDivElement | null) => {
@@ -707,10 +710,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
 
   const undoRef = useRef<() => void>(() => {});
   /** `undo` = the toast offers Undo, which is the same step as Cmd/Ctrl+Z (see "UNDO" below) */
-  const showToast = useCallback((msg: string, undo?: boolean) => {
-    setToast({ msg, undo: undo ? () => undoRef.current() : undefined });
+  const showToast = useCallback((msg: string, undo?: boolean, action?: { label: string; run: () => void }) => {
+    setToast({ msg, undo: undo ? () => undoRef.current() : undefined, action });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), undo ? 7000 : 4200);
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 12000 : undo ? 7000 : 4200);
   }, []);
   const togglePanel = () => {
     setPanelOpen((v) => {
@@ -1063,7 +1066,38 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   }, []);
 
   const create = useCallback(
-    async (item: LibItem, day: number, min: number, branchId?: string) => {
+    async (item: LibItem, day: number, min: number, branchId?: string): Promise<Schedule | null> => {
+      // A playlist of LOCAL music files from another branch cannot play on this computer's schedule until it belongs to this computer's branch (owner 2026-11-22). Nothing is moved by itself:
+      // the drop adds nothing and a toast offers "Move and add" — one click moves the playlist (the server checks access) and then adds the very same block. Only in the desktop app.
+      if (item.targetType === "PLAYLIST" && scoped && ownBranchRaw && !movedLocal.current.has(item.targetId)) {
+        const pl = playlistsRef.current.find((x) => x.id === item.targetId);
+        if (
+          pl &&
+          shouldOfferLocalMove({
+            hasLocalFiles: playlistHasLocalFiles(pl),
+            playlistBranch: pl.branchId ?? item.branchId,
+            ownBranch: ownBranchRaw,
+            canonicalDefaultBranchId: defaultBranchId,
+            isDesktop: typeof window !== "undefined" && typeof window.syncbizDesktop?.getConfig === "function",
+          })
+        ) {
+          showToast(`${tr("This playlist plays music files that exist only on one computer, and it is saved in another branch.")} ${tr("Move it to this computer's branch")} (${branchName(ownBranchRaw)})?`, false, {
+            label: tr("Move and add"),
+            run: () => {
+              void (async () => {
+                try {
+                  await api("POST", `/api/playlists/${encodeURIComponent(item.targetId)}/move-to-branch`, { branchId: ownBranchRaw });
+                  movedLocal.current.add(item.targetId);
+                  await createRef.current(item, day, min, branchId);
+                } catch (e) {
+                  showToast(`${tr("Couldn't save the change")} — ${e instanceof Error ? e.message : ""}`);
+                }
+              })();
+            },
+          });
+          return null;
+        }
+      }
       let dur = item.dur;
       if (item.targetType === "PLAYLIST" && !(dur && dur > 0)) {
         // the length first, THEN the block: a dashed spot holds the place for the moment it takes (never longer than LOOKUP_WAIT_MS)
@@ -1096,8 +1130,12 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       if (created && !(dur && dur > 0)) void learnRef.current(item, created); // a late answer still gives the block its true length
       return created;
     },
-    [createFromBody, quietBranch, lookupLength, scoped, ownBranchRaw],
+    [createFromBody, quietBranch, lookupLength, scoped, ownBranchRaw, defaultBranchId, showToast, tr, branchName],
   );
+  const createRef = useRef(create);
+  useEffect(() => {
+    createRef.current = create;
+  }, [create]);
   // a block drawn at the provisional length takes the music's own length when the answer comes (an end the person set in the meantime is theirs)
   const learnLength = useCallback(
     async (item: LibItem, created: Schedule) => {
@@ -2237,6 +2275,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
       <div className={`ss-toast${toast ? " is-on" : ""}`} role="status" aria-live="polite">
         <span>{toast?.msg}</span>
         {toast?.undo ? <button type="button" onClick={() => { toast.undo?.(); setToast(null); }}>{tr("Undo")}</button> : null}
+        {toast?.action ? <button type="button" onClick={() => { toast.action?.run(); setToast(null); }}>{toast.action.label}</button> : null}
       </div>
     </div>
   );
