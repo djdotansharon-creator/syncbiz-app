@@ -240,6 +240,8 @@ export async function updatePlaylist(id: string, data: Partial<Playlist>): Promi
   if (data.thumbnail !== undefined) updateData.thumbnail = data.thumbnail;
   if (data.viewCount !== undefined) updateData.viewCount = data.viewCount;
   if (data.durationSeconds !== undefined) updateData.durationSeconds = data.durationSeconds;
+  // 2026-11-22 — only the dedicated move route passes a branch (a playlist of local files moving to the computer that holds the files); the PUT route never copies one from its body.
+  if (data.branchId !== undefined && data.branchId) updateData.branchId = await canonicalContentBranchForWrite(existing.workspaceId, data.branchId);
   if (data.adminNotes !== undefined) updateData.adminNotes = data.adminNotes;
   if (data.useCase !== undefined) updateData.useCase = data.useCase ?? null;
   if (data.useCases !== undefined) updateData.useCases = data.useCases ?? [];

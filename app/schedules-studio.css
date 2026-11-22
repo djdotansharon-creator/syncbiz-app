@@ -434,7 +434,7 @@ html[data-sb-display="white"] .ss-menu-item.is-danger { color: #d70015; }
 
 .ss-toast { display: flex; align-items: center; gap: 14px; position: fixed; inset-inline: 0; bottom: 22px; margin: 0 auto; width: max-content; max-width: min(92vw, 560px); padding: 10px 16px; border-radius: 14px; background: #2a2a2e; color: #f5f5f7; font-size: 13px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity 220ms ease, transform 260ms var(--ss-ease); z-index: 2147482600; }
 .ss-toast.is-on { opacity: 1; transform: none; pointer-events: auto; }
-.ss-toast button { border: 0; background: transparent; color: #ffd60a; font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; }
+.ss-toast button { border: 0; background: transparent; color: #ffd60a; font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; flex: none; white-space: nowrap; }
 
 @media (max-width: 1023px) {
   .ss { flex-direction: column; height: auto; }

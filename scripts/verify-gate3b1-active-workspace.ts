@@ -181,7 +181,7 @@ const mem = (workspaceId: string, role: string, ownerId: string, createdAt = T0,
     "app/api/schedules/route.ts", "app/api/schedules/[id]/route.ts", "app/api/admin/branch-master/route.ts", "app/api/branches/route.ts",
   ];
   const calls = sites.flatMap((f) => read(...f.split("/")).split("\n").filter((l) => /(hasBranchAccess|getAssignedBranchIdsForUser|getAccessTypeForUser|isOwner)\(/.test(l) && !/import /.test(l) && !/^\s*(\/\/|\*)/.test(l)));
-  assert("every route call site passes the session tenantId", calls.length === 20 && calls.every((l) => /\.tenantId\)/.test(l)), `${calls.length} calls`);
+  assert("every route call site passes the session tenantId", calls.length === 22 && calls.every((l) => /\.tenantId\)/.test(l)), `${calls.length} calls`); // 22 = the 20 before + the two schedule routes that now ask "may the caller use the playlist's branch" (PR #231, 2026-11-22) — every one still passes the session tenantId
   assert("WS server untouched", !/verifyWsTokenClaims|getCurrentUserFromApiRequest/.test(read("server", "index.ts")));
   assert("authz engine still SHADOW", /export const AUTHZ_RUNTIME_MODE: AuthzMode = "shadow";/.test(read("lib", "authz.ts")));
 

@@ -53,6 +53,7 @@ import {
 } from "@/lib/local-audio-path";
 import { createUnifiedPlaylistFromLocalScan } from "@/lib/local-music-library-playlist";
 import { learnLocalLengths } from "@/lib/local-track-length";
+import { postLocalPlaylist } from "@/lib/local-playlist-create";
 import { M3uYoutubeResolveModal } from "@/components/m3u-youtube-resolve-modal";
 import {
   buildM3uYoutubeResolveContext,
@@ -1051,17 +1052,13 @@ export function LibraryInputArea({
                 type: "local" as const,
                 url: filePath,
               }));
-              const res = await fetch("/api/playlists", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  name: scan.playlistName,
-                  url: scan.files[0]!,
-                  genre: tx.defaultGenreMixed,
-                  type: "local",
-                  thumbnail: "",
-                  tracks,
-                }),
+              const res = await postLocalPlaylist({
+                name: scan.playlistName,
+                url: scan.files[0]!,
+                genre: tx.defaultGenreMixed,
+                type: "local",
+                thumbnail: "",
+                tracks,
               });
               if (res.ok) {
                 const created = (await res.json()) as Playlist;
@@ -1094,16 +1091,12 @@ export function LibraryInputArea({
           }
 
           const name = titleFromLocalPath(localPath);
-          const res = await fetch("/api/playlists", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name,
-              url: localPath,
-              genre: tx.defaultGenreMixed,
-              type: "local",
-              thumbnail: "",
-            }),
+          const res = await postLocalPlaylist({
+            name,
+            url: localPath,
+            genre: tx.defaultGenreMixed,
+            type: "local",
+            thumbnail: "",
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;
