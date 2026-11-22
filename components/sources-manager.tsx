@@ -56,6 +56,8 @@ import { DjCreatorAiShell } from "@/components/dj-creator-ai-shell";
 import { GuestInboxWorkspacePanel } from "@/components/guest-inbox-drawer";
 import { AlbumWorkspacePanel } from "@/components/album-workspace-panel";
 import { PlaylistWorkspacePanel, preloadPlaylistCovers } from "@/components/playlist-workspace-panel";
+import { libraryForBranch } from "@/lib/library-branch-scope";
+import { useStationBranchId } from "@/lib/station-branch";
 import { RadioLibraryPanel } from "@/components/radio-library-panel";
 import { EditPlaylistForm } from "@/components/edit-playlist-form";
 import { EditSourceForm } from "@/components/edit-source-form";
@@ -262,6 +264,8 @@ type Props = {
   /** When true, center column can host route `workspaceRouteCenter` (non-library tabs). */
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
+  /** the canonical branch id of the legacy key "default" (null = none) */
+  defaultBranchId?: string | null;
 };
 
 /** Small chevron used by the workspace rail collapse/expand controls. */
@@ -358,6 +362,7 @@ export function SourcesManager({
   pageSubtitle,
   playerWorkspaceMode,
   workspaceRouteCenter,
+  defaultBranchId = null,
 }: Props) {
   const [effectiveSources, setEffectiveSources] = useState<UnifiedSource[]>(initialSources);
   const prevIdsRef = useRef<string>("");
@@ -399,6 +404,7 @@ export function SourcesManager({
         pageSubtitle={pageSubtitle}
         playerWorkspaceMode={playerWorkspaceMode}
         workspaceRouteCenter={workspaceRouteCenter}
+        defaultBranchId={defaultBranchId}
       />
     </SourcesPlaybackProvider>
   );
@@ -870,11 +876,13 @@ function SourcesManagerInner({
   pageSubtitle,
   playerWorkspaceMode,
   workspaceRouteCenter,
+  defaultBranchId = null,
 }: {
   pageTitle?: string;
   pageSubtitle?: string;
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
+  defaultBranchId?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
@@ -1180,7 +1188,10 @@ function SourcesManagerInner({
   /* The genre filter must NOT touch displaySources — that feeds the LIBRARY
      counts and BOTH rails (Your Playlists / tiles), which must stay put in every
      state. Genre scoping is applied ONLY to the center grid (sectionBuckets). */
-  const displaySources = sources;
+  // a playlist of LOCAL files belongs to the computer — and the branch — that holds the files: it is not offered in another branch's library (owner 2026-11-22; lib/library-branch-scope.ts). Only what is DRAWN
+  // changes: `sources` (playback, queues, the schedule) is untouched, and a window whose branch is not known yet shows everything as before.
+  const viewBranch = useStationBranchId();
+  const displaySources = useMemo(() => libraryForBranch(sources, viewBranch, defaultBranchId), [sources, viewBranch, defaultBranchId]);
   /** Unfiltered — use for playlist shells, drops, and composite metadata so genre filter cannot hide the active playlist. */
   const sourcesById = useMemo(
     () => new Map(sources.map((s) => [s.id, s] as const)),

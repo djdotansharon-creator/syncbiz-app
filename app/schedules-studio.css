@@ -481,6 +481,21 @@ html[data-sb-display="white"] .ss-endmode button.is-on { background: #1c1c1e; co
 .ss-block.is-quiet.is-copied { outline-color: var(--ss-fg); }
 .ss-cover--quiet { display: block; background-color: var(--ss-surface-2); background-image: repeating-linear-gradient(135deg, transparent 0, transparent 4px, var(--ss-faint) 4px, var(--ss-faint) 5.2px); box-shadow: inset 0 0 0 1.5px var(--ss-faint); }
 .ss-ag.is-quiet .ss-ag-name { color: var(--ss-dim); }
+/* ── CLOSED time (owner 2026-11-22, Dotan approved): quiet, no frame. After the red line and before the green one the BACKGROUND itself is a diagonal hatch at an equal distance (the same
+   hatch a quiet block has); a thin soft red line where the business closes, a thin soft green one where it opens. It sits under the blocks and lets every click through. ── */
+.ss-closed { position: absolute; pointer-events: none; background-image: repeating-linear-gradient(135deg, transparent 0, transparent 7px, var(--ss-line) 7px, var(--ss-line) 8.5px); }
+.ss-closed--h { inset-block: 0; }
+.ss-closed--v { inset-inline: 0; }
+.ss-edge { position: absolute; pointer-events: none; }
+.ss-edge--h { inset-block: 0; width: 1.5px; margin-inline-start: -0.75px; }
+.ss-edge--v { inset-inline: 0; height: 1.5px; margin-top: -0.75px; }
+.ss-edge--close { background: rgba(255, 105, 97, 0.5); }
+.ss-edge--open { background: rgba(48, 209, 88, 0.5); }
+html[data-sb-display="white"] .ss-edge--close { background: rgba(215, 0, 21, 0.38); }
+html[data-sb-display="white"] .ss-edge--open { background: rgba(36, 138, 61, 0.42); }
+/* once the hours are set the closed time is drawn by the hatch above — the quiet "Closing" block itself keeps its place, name and time but no longer paints a second, offset hatch over it */
+.ss[data-bizband="1"] .ss-block.is-quiet.is-closing { background: transparent; background-image: none; box-shadow: none; }
+.ss[data-bizband="1"] .ss-block.is-quiet.is-closing.is-selected { background-color: var(--ss-surface-2); }
 .ss-list--quiet { flex: none; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--ss-line); overflow: visible; }
 .ss-row--quiet .ss-row-sub { white-space: normal; line-height: 1.3; }
 

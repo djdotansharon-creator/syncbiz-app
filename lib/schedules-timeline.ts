@@ -456,6 +456,85 @@ export function closingPlan(biz: BizHours): (number | null)[] {
   return plan;
 }
 
+/**
+ * Every minute of every calendar day where the music must go quiet — the CLOSINGS the Business-hours dialog keeps as weekly quiet "Closing" blocks (owner 2026-11-22: "I set the hours — why does a
+ * closing at midnight do nothing?"). `closingPlan` above gives ONE minute per day, which is why a closing at 00:00 made no block at all (the last song played on all night) and why an overnight evening
+ * next to an ordinary one lost a closing; here a day may hold several:
+ *   · an ordinary evening closes on its own day at its closing minute;
+ *   · an evening that runs into the next morning closes on the NEXT day, at its closing minute;
+ *   · a close of 00:00 (midnight) is quiet from 00:00 of the NEXT calendar day — unless that day opens at 00:00;
+ *   · a closed day is quiet from midnight — or, when last night's hours still run into this morning, from the minute they end;
+ *   · round the clock has none.
+ * `closingPlan` is kept as it was (the old tests and callers); the Studio saves from this one.
+ */
+export function closingMinutes(biz: BizHours): number[][] {
+  const plan: number[][] = WEEK_DAYS.map(() => []);
+  if (biz.h24) return plan;
+  const add = (day: number, m: number) => {
+    const d = ((day % 7) + 7) % 7;
+    if (!plan[d]!.includes(m)) plan[d]!.push(m);
+  };
+  for (const d of WEEK_DAYS) {
+    const h = bizDay(biz, d);
+    if (h === null) {
+      const prev = bizDay(biz, (d + 6) % 7);
+      add(d, prev && isOvernight(prev) ? closeOf(prev) : 0);
+      continue;
+    }
+    const c = closeOf(h);
+    if (isOvernight(h)) add(d + 1, c);
+    else if (c < DAY_MINUTES) add(d, c);
+    else {
+      const next = bizDay(biz, (d + 1) % 7);
+      if (!(next && next.open === 0)) add(d + 1, 0);
+    }
+  }
+  for (const m of plan) m.sort((a, b) => a - b);
+  return plan;
+}
+
+/**
+ * The hours a calendar day is OPEN, as [from, to] minute pairs inside 0–1440 (owner 2026-11-22: the Studio draws the CLOSED time between them — a quiet hatch, a thin red line where
+ * the business closes, a thin green one where it opens). A night that runs past midnight is open on the next day's morning too; a closed day has none; round the clock is the whole day.
+ * Pure drawing data — it creates and changes no block.
+ */
+export function openSpans(biz: BizHours, d: number): [number, number][] {
+  if (biz.h24) return [[0, DAY_MINUTES]];
+  const raw: [number, number][] = [];
+  const prev = bizDay(biz, (d + 6) % 7);
+  if (prev && isOvernight(prev)) raw.push([0, closeOf(prev)]); // yesterday's night, still open this morning
+  const h = bizDay(biz, d);
+  if (h) raw.push(isOvernight(h) ? [h.open, DAY_MINUTES] : [h.open, closeOf(h)]);
+  raw.sort((x, y) => x[0] - y[0]);
+  const out: [number, number][] = [];
+  for (const sp of raw) {
+    if (sp[1] <= sp[0]) continue;
+    const last = out[out.length - 1];
+    if (last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]);
+    else out.push([sp[0], sp[1]]);
+  }
+  return out;
+}
+
+/** the CLOSED time of a calendar day: what is left of 0–1440 outside `openSpans` (a day with no hours set at all is closed the whole day). */
+export function closedSpans(biz: BizHours, d: number): [number, number][] {
+  const open = openSpans(biz, d);
+  const out: [number, number][] = [];
+  let at = 0;
+  for (const [a, b] of open) {
+    if (a > at) out.push([at, a]);
+    at = Math.max(at, b);
+  }
+  if (at < DAY_MINUTES) out.push([at, DAY_MINUTES]);
+  return out;
+}
+
+/** the minutes of a day where the business CLOSES (an open span ends before midnight) and where it OPENS (an open span starts after midnight). */
+export function bizEdges(biz: BizHours, d: number): { closes: number[]; opens: number[] } {
+  const open = openSpans(biz, d);
+  return { closes: open.filter(([, b]) => b < DAY_MINUTES).map(([, b]) => b), opens: open.filter(([a]) => a > 0).map(([a]) => a) };
+}
+
 /** the hours the timeline shows: [first, last] in whole hours (0–24). `starts` = the start minutes of the scheduled blocks, so nothing scheduled is ever hidden. */
 export function viewRange(mode: HoursMode, biz: BizHours | null, starts: number[], ends: number[] = []): { first: number; last: number } {
   if (mode === "day") return { first: 0, last: 24 };
