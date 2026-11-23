@@ -7940,6 +7940,18 @@ html[data-sb-display="white"] .sb-alb-extra, html[data-sb-display="white"] .sb-a
 .sb-shr-undo { flex: none; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.6); cursor: pointer; }
 .sb-shr-undo:hover { color: #fff; }
 .sb-shr-err { margin: 12px 0 0; font-size: 13px; color: #ff6961; }
+.sb-shr-person { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.sb-shr-person h4 { margin: 0 0 4px; font-size: 13px; font-weight: 650; letter-spacing: 0.01em; color: rgba(255, 255, 255, 0.88); }
+.sb-shr-idrow { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.sb-shr-idinput { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sb-shr-found { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 10px; padding: 11px 12px; border: 0; border-radius: 14px; background: rgba(48, 209, 88, 0.14); color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color 160ms ease; }
+.sb-shr-found:hover { background: rgba(48, 209, 88, 0.22); }
+.sb-shr-found .sb-shr-bname i, .sb-shr-brow .sb-shr-bname i { font-style: normal; font-weight: 500; font-size: 12.5px; color: rgba(255, 255, 255, 0.55); margin-inline-start: 4px; }
+.sb-shr-send { flex: none; font-size: 12.5px; font-weight: 650; color: #30d158; }
+html[data-sb-display="white"] .sb-shr-person { border-top-color: rgba(0, 0, 0, 0.1); }
+html[data-sb-display="white"] .sb-shr-person h4 { color: rgba(28, 28, 30, 0.88); }
+html[data-sb-display="white"] .sb-shr-found .sb-shr-bname i, html[data-sb-display="white"] .sb-shr-brow .sb-shr-bname i { color: rgba(28, 28, 30, 0.55); }
+html[data-sb-display="white"] .sb-shr-send { color: #1f8a3d; }
 .sb-shr-card { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 6px 0 10px; animation: sb-alb-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .sb-shr-art { position: relative; display: block; width: 188px; height: 188px; border-radius: 30px; overflow: hidden; background: rgba(255, 255, 255, 0.08); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34); }
 .sb-shr-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }

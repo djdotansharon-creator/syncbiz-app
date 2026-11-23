@@ -60,7 +60,11 @@ export type TenantAuditAction =
   | "role.delete"
   | "role.access_code_set"
   /** An existing member was given another of the owner's roles (target = the person). */
-  | "role.assign";
+  | "role.assign"
+  /** Playlist sharing (2026-11-23): a playlist was shared with a PERSON outside the business / the share was taken back / the person answered it (entityId = the share id, metadata = playlist + person). */
+  | "playlist.share_create"
+  | "playlist.share_revoke"
+  | "playlist.share_answer";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -88,6 +92,9 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "role.delete",
   "role.access_code_set",
   "role.assign",
+  "playlist.share_create",
+  "playlist.share_revoke",
+  "playlist.share_answer",
 ];
 
 /**
@@ -95,7 +102,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
  * mutation, but keeping this typed lets us add `branch`, `playlist`, etc.
  * later without a schema change.
  */
-export type TenantAuditEntity = "workspace_member" | "jingle" | "branch" | "device_enrollment" | "workspace";
+export type TenantAuditEntity = "workspace_member" | "jingle" | "branch" | "device_enrollment" | "workspace" | "playlist_share";
 
 export type TenantAuditInput = {
   action: TenantAuditAction;

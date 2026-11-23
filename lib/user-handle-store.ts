@@ -28,3 +28,11 @@ export async function getOrAssignUserHandle(userId: string): Promise<string | nu
   }
   return null;
 }
+
+const triedThisProcess = new Set<string>();
+/** Best-effort, ONCE per user per server process: a person who has no ID yet gets one the first time the app asks who they are, so they can be found by their exact ID. Never throws, never blocks. */
+export function ensureUserHandleOnce(userId: string): void {
+  if (triedThisProcess.has(userId)) return;
+  triedThisProcess.add(userId);
+  void getOrAssignUserHandle(userId).catch((e) => console.warn("[user-handle] could not assign an ID:", e instanceof Error ? e.message : String(e)));
+}

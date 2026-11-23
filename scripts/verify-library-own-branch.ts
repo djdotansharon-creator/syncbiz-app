@@ -1,10 +1,10 @@
 /**
- * THE LIBRARY SHOWS A LOCAL PLAYLIST ONLY IN ITS OWN BRANCH (owner 2026-11-22; Dotan: "it does not matter to us if playlists created on the Lenovo disappear from other computers — make the change and reset").
+ * THE LIBRARY SHOWS A PLAYLIST ONLY IN ITS OWN BRANCH (owner 2026-11-22/23; #237 hid the local-files ones, 2026-11-23 widened to every playlist — links reach other branches only through sharing).
  * Run: npx tsx scripts/verify-library-own-branch.ts
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { isLocalPlaylistOfAnotherBranch, libraryForBranch } from "../lib/library-branch-scope";
+import { isLocalPlaylistOfAnotherBranch, isPlaylistOfAnotherBranch, libraryForBranch } from "../lib/library-branch-scope";
 import type { UnifiedSource } from "../lib/source-types";
 
 let pass = 0, fail = 0;
@@ -28,18 +28,19 @@ const localLegacy = pl("local-legacy", "default", true);
 const localCanon = pl("local-canon", CANON, true);
 const localNoBranch = pl("local-nobranch", undefined, true);
 const urlOther = pl("url-other", "B2", false);
+const urlHere = pl("url-here", "B1", false);
 const radioish = { id: "r1", title: "r", genre: "x", cover: null, type: "youtube", url: "https://x.test", origin: "radio" } as unknown as UnifiedSource;
-const all = [localHere, localOther, localLegacy, localCanon, localNoBranch, urlOther, src("song"), radioish];
+const all = [localHere, localOther, localLegacy, localCanon, localNoBranch, urlOther, urlHere, src("song"), radioish];
 
 assert("L1 a window of branch B1 keeps ITS local playlist and hides the local playlists of other branches", !isLocalPlaylistOfAnotherBranch(localHere, "B1", null) && isLocalPlaylistOfAnotherBranch(localOther, "B1", null));
-assert("L2 a playlist of LINKS is never hidden (it stays visible everywhere until sharing exists), nor a plain source or a radio", !isLocalPlaylistOfAnotherBranch(urlOther, "B1", null) && !isLocalPlaylistOfAnotherBranch(src("song"), "B1", null) && !isLocalPlaylistOfAnotherBranch(radioish, "B1", null));
+assert("L2 (CHANGED ON PURPOSE 2026-11-23 — owner + Dotan: a playlist appears only in its branch or where it was shared) a playlist of LINKS of another branch is hidden too; a plain source and a radio are never hidden", isPlaylistOfAnotherBranch(urlOther, "B1", null) && !isPlaylistOfAnotherBranch(urlHere, "B1", null) && !isPlaylistOfAnotherBranch(src("song"), "B1", null) && !isPlaylistOfAnotherBranch(radioish, "B1", null) && !isLocalPlaylistOfAnotherBranch(urlOther, "B1", null) && isLocalPlaylistOfAnotherBranch(localOther, "B1", null));
 assert("L3 the legacy key 'default' and the business's canonical branch are ONE branch: with a canonical branch, a 'default' playlist belongs to a window of that canonical branch (and not to B1)", !isLocalPlaylistOfAnotherBranch(localLegacy, CANON, CANON) && !isLocalPlaylistOfAnotherBranch(localCanon, "default", CANON) && isLocalPlaylistOfAnotherBranch(localLegacy, "B1", CANON));
 assert("L4 a local playlist with no branch at all counts as 'default' (the accepted baseline): visible in a 'default' window, hidden in B1's", !isLocalPlaylistOfAnotherBranch(localNoBranch, "default", null) && isLocalPlaylistOfAnotherBranch(localNoBranch, "B1", null));
 assert("L5 a window whose branch is not known yet (the desktop has not answered) shows EVERYTHING, exactly as before — and so does an empty one", libraryForBranch(all, null, null) === all && libraryForBranch(all, "", null) === all && libraryForBranch(all, undefined, null) === all);
 const shown = libraryForBranch(all, "B1", CANON).map((s) => s.id);
-assert("L6 B1's library: its local playlist, the link playlist, the song and the radio — not the other branches' local playlists (including the old 'default' one when the business has a canonical branch)", JSON.stringify(shown) === JSON.stringify(["local-here", "url-other", "song", "r1"]), shown.join(","));
-const none = [localHere, urlOther, src("song")];
-assert("L7 nothing to hide → the SAME array comes back (no needless re-render); the input is never mutated", libraryForBranch(none, "B1", null) === none && all.length === 8);
+assert("L6 B1's library: ITS playlists (local and links), the song and the radio — not the other branches' playlists (links included; and not the old 'default' ones when the business has a canonical branch)", JSON.stringify(shown) === JSON.stringify(["local-here", "url-here", "song", "r1"]), shown.join(","));
+const none = [localHere, urlHere, src("song")];
+assert("L7 nothing to hide → the SAME array comes back (no needless re-render); the input is never mutated", libraryForBranch(none, "B1", null) === none && all.length === 9);
 assert("L8 an expanded song of a local playlist (it carries its parent playlist) is hidden with it", isLocalPlaylistOfAnotherBranch({ ...pl("x", "B2", true), id: "x:track:1" } as UnifiedSource, "B1", null));
 
 const sm = rd("components/sources-manager.tsx");

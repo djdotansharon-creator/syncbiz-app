@@ -64,3 +64,38 @@ export function copyableTracks<T extends { url?: string | null; type?: string | 
     return t.type !== "local" && t.type !== "winamp" && (u.startsWith("http://") || u.startsWith("https://"));
   });
 }
+
+// ── Sharing with a PERSON in another business (owner 2026-11-23, phase D) ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** hard caps, counted in the database (the in-memory limiter is only the soft layer) */
+export const MAX_OPEN_SHARES_PER_PERSON = 25; // open (pending / accepted) shares from ONE sender-business to ONE person
+export const MAX_PENDING_PER_PERSON = 100; // everything waiting for ONE person, from anyone
+
+export type PersonShareDecision = { ok: true } | { ok: false; status: 400 | 403 | 404 | 429; error: string };
+
+/**
+ * May this sender share with this person? Only an OWNER of the business may send a playlist OUT of it; the person must exist and be active — "no such person", "disabled" and "never had an ID" all answer the same 404, so the
+ * answer reveals nothing but "no person with this ID"; never to yourself (use a branch share); and neither the person nor the pair may be flooded.
+ */
+export function decidePersonShare(i: {
+  senderId: string;
+  senderIsOwner: boolean;
+  target: { id: string; active: boolean } | null;
+  openToTarget: number;
+  pendingForTarget: number;
+}): PersonShareDecision {
+  if (!i.senderIsOwner) return { ok: false, status: 403, error: "Only an owner of the business can share a playlist with a person outside it" };
+  if (!i.target || !i.target.active) return { ok: false, status: 404, error: "No person with this ID" };
+  if (i.target.id === i.senderId) return { ok: false, status: 400, error: "That is your own ID — to share inside your business use the branches" };
+  if (i.openToTarget >= MAX_OPEN_SHARES_PER_PERSON) return { ok: false, status: 429, error: "Too many shares are already open with this person" };
+  if (i.pendingForTarget >= MAX_PENDING_PER_PERSON) return { ok: false, status: 429, error: "This person has too many shares waiting right now" };
+  return { ok: true };
+}
+
+/** Who may do what to a share, by the role of the asker: the PERSON it was sent to answers it (accept / decline / copy / leave); only its SENDER takes it back. A share of one business can never be answered from another. */
+export type ShareActor = "recipient" | "sender" | "branch-member";
+export function actionAllowedFor(actor: ShareActor, kind: "BRANCH" | "USER", action: ShareAction): boolean {
+  if (action === "revoke") return actor === "sender";
+  if (kind === "USER") return actor === "recipient";
+  return actor === "branch-member";
+}

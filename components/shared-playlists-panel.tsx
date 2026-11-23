@@ -75,6 +75,7 @@ export function SharedPlaylistsPanel({
           <>
             <span>
               {t.sharedBy} {open.fromName ?? "—"}
+              {open.fromBusiness ? ` · ${open.fromBusiness}` : ""}
             </span>
             <button
               type="button"

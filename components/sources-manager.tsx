@@ -4724,7 +4724,7 @@ function SourcesManagerInner({
         }}
       />
       {requestsOpen && shares.pending.length > 0 ? (
-        <PlaylistShareRequests pending={shares.pending} onAnswer={shares.answer} onClose={() => setRequestsOpen(false)} />
+        <PlaylistShareRequests pending={shares.pending} onAnswer={shares.answer} onClose={() => setRequestsOpen(false)} copyBranchId={shareBranchId ?? "default"} />
       ) : null}
     </div>
   );

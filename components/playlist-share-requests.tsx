@@ -14,7 +14,7 @@ import type { ShareAnswer, ShareAnswerResult, ShareView } from "@/lib/use-playli
 
 const HE = {
   title: "שותף עם הסניף הזה",
-  from: (n: string | null) => (n ? `מאת ${n}` : "שיתוף חדש"),
+  from: (n: string | null, biz?: string | null) => (n ? `מאת ${n}${biz ? ` · ${biz}` : ""}` : "שיתוף חדש"),
   by: "נוצר על ידי",
   songs: (n: number) => (n === 1 ? "שיר אחד" : `${n} שירים`),
   look: "הצצה פנימה",
@@ -33,7 +33,7 @@ const HE = {
 };
 const EN = {
   title: "Shared with this branch",
-  from: (n: string | null) => (n ? `From ${n}` : "A new share"),
+  from: (n: string | null, biz?: string | null) => (n ? `From ${n}${biz ? ` · ${biz}` : ""}` : "A new share"),
   by: "created by",
   songs: (n: number) => (n === 1 ? "1 song" : `${n} songs`),
   look: "Look inside",
@@ -70,10 +70,13 @@ export function PlaylistShareRequests({
   pending,
   onAnswer,
   onClose,
+  copyBranchId,
 }: {
   pending: ShareView[];
-  onAnswer: (id: string, action: ShareAnswer, name?: string) => Promise<ShareAnswerResult>;
+  onAnswer: (id: string, action: ShareAnswer, name?: string, branchId?: string) => Promise<ShareAnswerResult>;
   onClose: () => void;
+  /** where a copy of a share sent to ME as a person lands (a branch of my own business) */
+  copyBranchId?: string | null;
 }): ReactElement | null {
   const { locale } = useLocale();
   const he = locale === "he";
@@ -111,7 +114,7 @@ export function PlaylistShareRequests({
     if (busy) return;
     setBusy(true);
     setError(null);
-    const r = await onAnswer(current.id, action, nameIn);
+    const r = await onAnswer(current.id, action, nameIn, current.kind === "USER" && copyBranchId ? copyBranchId : undefined);
     setBusy(false);
     if (!r.ok) {
       setError(r.error || t.noConn);
@@ -132,7 +135,7 @@ export function PlaylistShareRequests({
   return (
     <GlassModal
       title={pending.length > 1 ? `${t.title} · ${t.counter(1, pending.length)}` : t.title}
-      subtitle={t.from(current.fromName)}
+      subtitle={t.from(current.fromName, current.fromBusiness)}
       width={peek ? 600 : 460}
       onClose={onClose}
       footer={
