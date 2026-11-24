@@ -16,6 +16,7 @@ import { getLocale } from "@/lib/locale-server";
 import { trFor } from "@/lib/i18n/phrases";
 import { SettingsGate } from "@/components/management/management-gate";
 import { SettingsTabs } from "@/components/settings/settings-tabs";
+import { VonoIdCard } from "@/components/vono-id-card";
 import { PlayerDeviceOnly } from "@/components/remote-bar/player-device-only";
 import { OwnerControlPanel } from "@/components/owner-control-panel";
 import { WorkspaceBusinessProfileForm } from "@/components/workspace-business-profile-form";
@@ -104,6 +105,12 @@ async function SettingsContent({ tab }: { tab?: string }) {
       </header>
 
       <SettingsTabs initial={tab} business={business} remote={remote} general={<>
+
+      <Section icon={Icons.user} title={tr("Your VONO ID")} description={tr("Your name and number in VONO — it never changes.")}>
+        <div className="pb-6">
+          <VonoIdCard />
+        </div>
+      </Section>
 
       <Section icon={Icons.play} title={tr("Playback preferences")} description={tr("Theme and language for this browser.")}>
         <div className="pb-6">

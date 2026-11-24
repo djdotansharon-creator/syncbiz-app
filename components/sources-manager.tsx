@@ -1510,13 +1510,19 @@ function SourcesManagerInner({
       selection.subtype === "client_collection"
         ? visibleSources.length
         : found.count;
+    // "created by <name>" under a playlist's name (owner 2026-11-22) — only for a playlist, and only when the creator was recorded
+    const createdBy =
+      selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist"
+        ? resolvePlaylistShellByEntityKey(selection.key, sources)?.playlist?.createdByName ?? null
+        : null;
     return {
       title: found.label,
       subtitle: found.meta ?? "Collection destination",
       count,
       cover: found.cover ?? null,
+      createdBy,
     };
-  }, [selection, collectionContextByKey, visibleSources]);
+  }, [selection, collectionContextByKey, visibleSources, sources]);
 
   const sourceOpenContext = useMemo(() => {
     if (selection.type !== "source_channel") return null;
@@ -3801,6 +3807,9 @@ function SourcesManagerInner({
                     <div className="min-w-0 flex-1">
                       <h2 className="library-text-title truncate text-lg font-semibold">{collectionOpenContext.title}</h2>
                       <p className="library-text-subtitle mt-0.5 text-xs">{collectionOpenContext.subtitle}</p>
+                      {collectionOpenContext.createdBy ? (
+                        <p className="library-card-meta mt-0.5 text-xs">{tr("created by")} <b className="font-semibold">{collectionOpenContext.createdBy}</b></p>
+                      ) : null}
                       <p className="library-card-meta mt-1 text-xs">{collectionOpenContext.count} items</p>
                       {selection.type === "collection_container" &&
                       (selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist") &&
@@ -3866,6 +3875,7 @@ function SourcesManagerInner({
                 <PlaylistWorkspacePanel
                   title={collectionOpenContext.title}
                   cover={collectionOpenContext.cover}
+                  createdBy={collectionOpenContext.createdBy}
                   items={visibleSources}
                   activeId={isMaster ? null : masterState?.currentSource?.id ?? null}
                   onBack={() => setSelection({ type: "library_view", id: "playlists" })}

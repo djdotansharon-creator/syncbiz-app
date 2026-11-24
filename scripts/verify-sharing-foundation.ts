@@ -36,11 +36,10 @@ const walk = (dir: string, out: string[] = []): string[] => {
   return out;
 };
 const files = [...walk(path.join(root, "lib")), ...walk(path.join(root, "app")), ...walk(path.join(root, "components")), ...walk(path.join(root, "server"))];
-// (other tables already have their own createdByUserId — only the playlist code and the new table / enums / helpers are checked)
-const users = files.filter((f) => /prisma\.playlistShare|PlaylistShareTargetKind|PlaylistShareStatus|user-handle/.test(readFileSync(f, "utf-8")) && !f.endsWith("user-handle.ts"));
-const playlistCode = [...files.filter((f) => /[\\/]api[\\/]playlists[\\/]/.test(f)), path.join(root, "lib/playlist-store.ts")].filter((f) => /createdByUserId|createdBy\b/.test(readFileSync(f, "utf-8")));
-assert("N1 DORMANT: no application file uses the PlaylistShare table / its enums or imports the ID helpers, and no playlist code reads or writes Playlist.createdByUserId yet (User.handle is only declared in the schema)", users.length === 0 && playlistCode.length === 0, [...users, ...playlistCode].map((f) => path.relative(root, f)).join(", "));
-assert("N2 the ID helpers are pure (no store, no fetch, no prisma)", !/fetch\(|prisma|require\(|import /.test(rd("lib/user-handle.ts").replace(/\/\*[\s\S]*?\*\//g, "")));
+// Phase B (this branch) puts the ID and the creator credit to use — ON PURPOSE. What must STILL be dormant is the sharing itself: nothing may use the PlaylistShare table or its enums yet.
+const users = files.filter((f) => /prisma\.playlistShare|PlaylistShareTargetKind|PlaylistShareStatus/.test(readFileSync(f, "utf-8")));
+assert("N1 the SHARING itself is still dormant: no application file uses the PlaylistShare table or its enums (phase B only adds the VONO ID and the creator credit)", users.length === 0, users.map((f) => path.relative(root, f)).join(", "));
+assert("N2 the ID helpers (lib/user-handle.ts) are pure (no store, no fetch, no prisma)", !/fetch\(|prisma|require\(|import /.test(rd("lib/user-handle.ts").replace(/\/\*[\s\S]*?\*\//g, "")));
 
 // the ID helpers
 assert("H1 a name becomes the name part: lowercase Latin letters / digits / . _ -, accents folded, spaces → dots, ≤ 20 chars", slugifyHandleName("Dotan Sharon") === "dotan.sharon" && slugifyHandleName("José Álvarez") === "jose.alvarez" && slugifyHandleName("  DJ__Mike!! ") === "dj.mike" && slugifyHandleName("a".repeat(40)).length === 20);

@@ -132,6 +132,9 @@ export type Playlist = {
   branchId?: string;
   /** Workspace/account ownership. */
   tenantId?: string;
+  /** 2026-11-22: who made it (undefined = made before this was recorded — no credit). `createdByName` is that person's display name for the small "created by" line — never an email. */
+  createdByUserId?: string;
+  createdByName?: string;
   /** Optional link to centralized catalog row (Phase 1); playback still uses `url` / tracks. */
   catalogItemId?: string;
   /** View count (from YouTube etc.) – stored when adding from search. */

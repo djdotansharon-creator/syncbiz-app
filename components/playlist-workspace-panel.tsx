@@ -19,6 +19,7 @@ import type { LibraryItemDeleteContext } from "@/components/source-card-unified"
 
 const HE = {
   songs: (n: number) => (n === 0 ? "אין שירים" : n === 1 ? "שיר אחד" : `${n} שירים`),
+  by: "נוצר על ידי",
   back: "חזרה לפלייליסטים",
   playAll: "נגן את הפלייליסט",
   classic: "תצוגה קלאסית",
@@ -31,6 +32,7 @@ const HE = {
 };
 const EN = {
   songs: (n: number) => (n === 0 ? "No songs" : n === 1 ? "1 song" : `${n} songs`),
+  by: "created by",
   back: "Back to playlists",
   playAll: "Play playlist",
   classic: "Classic view",
@@ -87,6 +89,7 @@ export function preloadPlaylistCovers(urls: Array<string | null | undefined>, ma
 export function PlaylistWorkspacePanel({
   title,
   cover,
+  createdBy,
   items,
   activeId,
   onBack,
@@ -100,6 +103,8 @@ export function PlaylistWorkspacePanel({
 }: {
   title: string;
   cover: string | null;
+  /** who made the playlist (display name) — a small "created by" line under the name; none when it was not recorded */
+  createdBy?: string | null;
   items: UnifiedSource[];
   /** the song that is playing now (highlighted), if it is one of these */
   activeId: string | null;
@@ -204,6 +209,11 @@ export function PlaylistWorkspacePanel({
         </span>
         <div className="sb-alb-titles">
           <h2 title={title}>{title}</h2>
+          {createdBy ? (
+            <p className="sb-alb-by">
+              {t.by} <b>{createdBy}</b>
+            </p>
+          ) : null}
           <p className="sb-alb-count">{t.songs(items.length)}</p>
           <button type="button" className="sb-alb-classic" onClick={onClassicView} title={t.classicTitle}>
             {t.classic}

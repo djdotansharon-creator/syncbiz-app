@@ -11,8 +11,9 @@ import { canonicalContentBranchForWrite } from "./branch-resolver";
 import { enforceCanAddPlaylist } from "./entitlement-limits";
 import { normalizePlaylistForPersist, PlaylistPersistError } from "./playlist-persist-rules";
 import type { Playlist, PlaylistCreateInput, PlaylistTrack } from "./playlist-types";
+import { creatorDisplayName } from "./playlist-credit";
 
-type PlaylistRow = Prisma.PlaylistGetPayload<{ include: { items: true } }>;
+type PlaylistRow = Prisma.PlaylistGetPayload<{ include: typeof INCLUDE_ITEMS }>;
 
 export { PlaylistPersistError, isPlaylistPersistError } from "./playlist-persist-rules";
 
@@ -128,10 +129,13 @@ function rowToPlaylist(row: PlaylistRow): Playlist {
     isShared: row.isShared,
     sharedById: row.sharedById ?? undefined,
     publicationScope: row.publicationScope as Playlist["publicationScope"],
+    createdByUserId: row.createdByUserId ?? undefined,
+    createdByName: creatorDisplayName(row.createdBy),
   } as Playlist;
 }
 
-const INCLUDE_ITEMS = { items: true } as const;
+// the creator's name rides along (one small join) for the "created by" line — name fields only, never the email
+const INCLUDE_ITEMS = { items: true, createdBy: { select: { name: true, firstName: true, lastName: true } } } as const;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -202,6 +206,8 @@ export async function createPlaylist(input: PlaylistCreateInput): Promise<Playli
         ? (normalized.scheduleContributorBlocks as object)
         : undefined,
       isShared: false,
+      // who made it — set by the server route from the signed-in session, never from the request body
+      createdByUserId: input.createdByUserId ?? null,
       items: {
         create: tracks.map((t, idx) => ({
           trackId: t.id,
