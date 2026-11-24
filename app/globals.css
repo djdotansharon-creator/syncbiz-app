@@ -8352,6 +8352,28 @@ html[data-sb-arrived] .workspace-rail-grid > aside { transition: opacity 460ms e
 /* the header's own rule makes every picture inside the cover absolute (they would pile up); the quarters sit in the grid */
 .sb-alb-cover .sb-mosaic img { position: static; inset: auto; width: 100%; height: 100%; }
 
+/* ── The library's first load, its empty message, and ONE surface (owner 2026-11-24) ───────────────────────────────────────────────────────────────────────────────────────────────── */
+/* while the first list is on its way: a soft glow that breathes behind a thin spinning ring — in place of the old "no sources yet" box flashing before the songs arrive */
+.library-loading { position: relative; display: flex; align-items: center; justify-content: center; min-height: 260px; color: var(--lib-text-muted, rgba(255, 255, 255, 0.55)); }
+.library-loading-glow { position: absolute; width: 150px; height: 150px; border-radius: 999px; background: radial-gradient(circle, currentColor 0%, transparent 70%); opacity: 0.22; filter: blur(22px); animation: sb-lib-breathe 2.4s ease-in-out infinite; }
+.library-loading-ring { position: relative; width: 34px; height: 34px; border-radius: 999px; border: 2.5px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: currentColor; animation: sb-lib-spin 0.85s linear infinite; }
+@keyframes sb-lib-spin { to { transform: rotate(360deg); } }
+@keyframes sb-lib-breathe { 0%, 100% { transform: scale(0.85); opacity: 0.14; } 50% { transform: scale(1.1); opacity: 0.28; } }
+@media (prefers-reduced-motion: reduce) { .library-loading-ring { animation-duration: 2.4s; } .library-loading-glow { animation: none; } }
+/* "no sources yet" is text on the background — no box, no frame, no plate (all three looks) */
+html .library-empty-state { border: 0; background: none; box-shadow: none; }
+html .library-empty-icon-plate { border: 0; background: none; box-shadow: none; }
+/* while the search results are open they sit over the library: nothing of it (the message, the loader) may show through them */
+body:has(.sb-search-panel) :is(.library-empty-state, .library-loading) { visibility: hidden; }
+
+/* ONE surface: the library zone is not a gradient panel of its own on top of the page, and the top zone casts no edge (shadow / border) onto it. In every look (black / white / transparent) the two meet in ONE soft
+   hairline that does not reach the edges and fades out at both ends. */
+html[data-sb-display] .library-theme.library-page-shell { background: none; }
+html[data-sb-display="white"]:root header.sticky { background-color: #eceef1 !important; }
+html[data-sb-display]:root header.sticky { box-shadow: none !important; border-bottom-color: transparent !important; }
+html[data-sb-display] header.sticky::after { content: ""; position: absolute; inset-inline: 7%; bottom: 0; height: 1px; pointer-events: none; z-index: 1; background: linear-gradient(90deg, transparent 0%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 24%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 76%, transparent 100%); }
+html[data-sb-display="white"] header.sticky::after { --sb-seam: rgba(0, 0, 0, 0.13); }
+
 /* ── 2026-11-24 (owner) WHITE look: the clip keeps its natural colours ───────────────────────────────────────────────────────────────────
    In the white look two pale layers sit over the WHOLE deck, clip included: the shell's slate tint (a Tailwind gradient on .player-hero-shell)
    and the milky sheet (.sb-deck-glass::after, white at 55%). Over the clip they wash every colour to pastel grey. While a clip is really showing
