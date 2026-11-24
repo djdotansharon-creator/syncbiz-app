@@ -12,11 +12,13 @@
  * `localStorage syncbiz:autoplayNext = "off"`. A song never repeats within the last 40. Renders null.
  * 2026-10-23 (owner): with LOOP off, the LAST song of a list (album / playlist with tracks) is treated like a single song too.
  * 2026-10-27 (owner): OFF BY DEFAULT — VONO never lines up a song the business did not choose. A list / a single song
- * starts again at its end instead (getPlaybackRepeatMode). Enabled only by an explicit `localStorage syncbiz:autoplayNext = "on"`;
- * while off, a recommendation still waiting from before is taken out of Play Next so it never plays.
+ * starts again at its end instead (getPlaybackRepeatMode). While off, a recommendation still waiting from before is taken out of Play Next so it never plays.
+ * 2026-11-25 (owner: "bring it back"): ON by default in a BROWSER (the gear menu has a "Next song: Auto / Off" row); the DESKTOP app (the pilot station) keeps the 2026-10-27 default until the owner decides.
+ * The switch is `localStorage syncbiz:autoplayNext` = "on" | "off" (lib/autoplay-next-pref.ts).
  */
 
 import { useEffect, useRef } from "react";
+import { autoplayNextEnabled } from "@/lib/autoplay-next-pref";
 import { usePlayback } from "@/lib/playback-provider";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { getYouTubeVideoId } from "@/lib/playlist-utils";
@@ -120,7 +122,7 @@ export function AutoplayRecommender(): null {
     else if (sessionLen > 1 && !lastOfList) why = `part-of-a-playlist(${sessionLen} tracks)`;
     else {
       try {
-        if (localStorage.getItem("syncbiz:autoplayNext") !== "on" && !driven) why = "switched-off"; // opt-in only (owner 2026-10-27) — except for the music the schedule started (owner 2026-11-15)
+        if (!autoplayNextEnabled() && !driven) why = "switched-off"; // ON by default in a browser (owner 2026-11-25), OFF by default in the desktop app (the 2026-10-27 pilot rule) — see lib/autoplay-next-pref.ts; the music the schedule started is always allowed (owner 2026-11-15)
       } catch {
         /* ignore */
       }

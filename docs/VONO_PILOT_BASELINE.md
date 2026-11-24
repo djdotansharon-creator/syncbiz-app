@@ -57,7 +57,7 @@
   1. **END OF LIST = SILENCE (P0) — FIXED IN CODE, PR open (owner 2026-10-27):** #67 made LOOP "off" the default → a bank
      (stream-url) / online list / station list stopped at its end. Owner rule (final, 2026-10-27): bank, customer URL list /
      playlist, single song, desktop / Lenovo → START AGAIN; VONO never lines up a song the business did not choose (the
-     AutoplayRecommender is opt-in only: `localStorage syncbiz:autoplayNext = "on"`); only an operator's explicit LOOP "off"
+     AutoplayRecommender is opt-in in the DESKTOP app: `localStorage syncbiz:autoplayNext = "on"`; **since 2026-11-25 (owner: "bring it back") it is ON by default in a BROWSER**, with a "Next song: Auto / Off" row in the gear menu — `lib/autoplay-next-pref.ts`; the desktop / Lenovo default is UNCHANGED); only an operator's explicit LOOP "off"
      stops. `getPlaybackRepeatMode()` (renderer + MAIN prefs).
   2. **Heavy graphics are back (P0 for Windows):** the #60 look (104 backdrop-filters) returned; Lite mode only on hardware the
      boot script guesses is weak. Owner 2026-10-27: **Lite by default on the desktop app and Windows** — next PR.

@@ -121,7 +121,37 @@ async function main() {
   };
   const naturalEnd = () => run(() => A().next({ auditTransportCase: "ended_auto" }));
 
-  // ── O. DEFAULT (owner 2026-10-27): VONO never lines up a song the business did not choose — the list starts again ────
+  // ── D. DEFAULT (owner 2026-11-25, "bring it back"): nothing stored → ON in a browser (a single song gets its next song lined up in the first seconds), OFF in the desktop app (the pilot baseline rule) ──────────
+  quiet();
+  store.delete("syncbiz:autoplayNext");
+  await reset();
+  await run(() => A().playSource(single));
+  await settle();
+  const dBrowserLined = autoplayLined();
+  loud();
+  assert("AD1 default in a BROWSER (nothing stored): a single song gets a recommended next song lined up in the first seconds", dBrowserLined === 1, { lined: dBrowserLined });
+  quiet();
+  await reset();
+  g.syncbizDesktop = {};
+  await run(() => A().playSource(single));
+  await settle();
+  const dDesktopLined = autoplayLined();
+  loud();
+  assert("AD2 default in the DESKTOP app (nothing stored): nothing is lined up (the pilot station keeps the 2026-10-27 rule)", dDesktopLined === 0, { lined: dDesktopLined });
+  quiet();
+  await reset();
+  store.set("syncbiz:autoplayNext", "on");
+  await run(() => A().playSource(single));
+  await settle();
+  const dDesktopOn = autoplayLined();
+  loud();
+  assert("AD3 the desktop app with the switch set to Auto: a recommended song IS lined up", dDesktopOn === 1, { lined: dDesktopOn });
+  quiet();
+  delete g.syncbizDesktop;
+  await reset();
+
+  // ── O. SWITCHED OFF (owner 2026-10-27, and the 'Off' of the gear menu): VONO lines up no song the business did not choose — the list starts again ────
+  store.set("syncbiz:autoplayNext", "off");
   // The recommendation service answers in this block, so "nothing lined up" proves the default switch, not a failing service.
   const listO = playlist("own-three", 3);
   quiet();
@@ -131,8 +161,8 @@ async function main() {
   await naturalEnd();
   await settle();
   loud();
-  assert("O1 default: LAST song of a customer list -> no recommended song is lined up", oListLined === 0, { lined: oListLined });
-  assert("O2 default: the last song ends -> the list starts again from its first song", A().currentSource?.id === listO.id && A().currentTrackIndex === 0 && A().status === "playing" && autoplayLined() === 0, { id: A().currentSource?.id, idx: A().currentTrackIndex, status: A().status });
+  assert("O1 switched off: LAST song of a customer list -> no recommended song is lined up", oListLined === 0, { lined: oListLined });
+  assert("O2 switched off: the last song ends -> the list starts again from its first song", A().currentSource?.id === listO.id && A().currentTrackIndex === 0 && A().status === "playing" && autoplayLined() === 0, { id: A().currentSource?.id, idx: A().currentTrackIndex, status: A().status });
   quiet();
   await reset();
   await run(() => A().playSource(single));
@@ -141,7 +171,7 @@ async function main() {
   await naturalEnd();
   await settle();
   loud();
-  assert("O3 default: a single song -> nothing lined up; it ends -> the same song starts again", oSingleLined === 0 && A().currentSource?.id === single.id && A().status === "playing", { lined: oSingleLined, id: A().currentSource?.id, status: A().status });
+  assert("O3 switched off: a single song -> nothing lined up; it ends -> the same song starts again", oSingleLined === 0 && A().currentSource?.id === single.id && A().status === "playing", { lined: oSingleLined, id: A().currentSource?.id, status: A().status });
   quiet();
   await reset();
 
