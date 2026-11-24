@@ -48,15 +48,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // ── to a PERSON by their exact VONO ID (phase D) — possibly in another business ──
   const handleIn = (body as { handle?: unknown } | null)?.handle;
   if (typeof handleIn === "string") {
-    // only an OWNER of the business may send a playlist OUT of it — checked first, before anything about the person is looked up
-    if ((await getAccessType(user.id, tenantId)) !== "OWNER") {
-      return NextResponse.json({ error: "Only an owner of the business can share a playlist with a person outside it" }, { status: 403 });
+    // only the playlist's CREATOR or an OWNER of the business may send it OUT of the business — checked first, before anything about the person is looked up
+    const senderIsCreator = !!playlist.createdByUserId && playlist.createdByUserId === user.id;
+    const senderIsOwner = (await getAccessType(user.id, tenantId)) === "OWNER";
+    if (!senderIsOwner && !senderIsCreator) {
+      return NextResponse.json({ error: "Only the person who made this playlist, or an owner of the business, can share it with a person outside it" }, { status: 403 });
     }
     if (!allowHit(`share-person:${user.id}`, 20, 60 * 60 * 1000)) return NextResponse.json({ error: "Too many shares in a short time. Try again later." }, { status: 429 });
     try {
       const target = await findPersonByHandle(handleIn);
       const counts = target ? await countPersonShares({ workspaceId: tenantId, targetUserId: target.id }) : { openToTarget: 0, pendingForTarget: 0 };
-      const d = decidePersonShare({ senderId: user.id, senderIsOwner: true, target: target ? { id: target.id, active: target.active } : null, ...counts });
+      const d = decidePersonShare({ senderId: user.id, senderIsOwner, senderIsCreator, target: target ? { id: target.id, active: target.active } : null, ...counts });
       if (!d.ok) return NextResponse.json({ error: d.error }, { status: d.status });
       shadowAuthorize("playlists/[id]/shares:POST:person", { userId: user.id, workspaceId: tenantId }, "content.manage", []); // Gate 3A shadow: log only, never blocks
       const created = await createPersonShare({ workspaceId: tenantId, playlistId: id, fromUserId: user.id, targetUserId: target!.id });

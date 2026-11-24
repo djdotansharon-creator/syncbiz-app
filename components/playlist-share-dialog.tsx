@@ -36,7 +36,7 @@ const HE = {
   sentPerson: "נשלח — הוא יתבקש לאשר",
   personAlready: "כבר משותף עם האדם הזה.",
   people: "אנשים",
-  ownerOnly: "רק בעלים של העסק יכולים לשתף עם אדם מחוץ לעסק.",
+  ownerOnly: "רק מי שיצר את הפלייליסט, או בעלים של העסק, יכולים לשתף אותו עם אדם מחוץ לעסק.",
 };
 const EN = {
   title: "Share inside VONO",
@@ -61,7 +61,7 @@ const EN = {
   sentPerson: "Sent — they will be asked to accept",
   personAlready: "Already shared with this person.",
   people: "People",
-  ownerOnly: "Only an owner of the business can share with a person outside it.",
+  ownerOnly: "Only the person who made this playlist, or an owner of the business, can share it with a person outside it.",
 };
 
 const toast = (message: string) => window.dispatchEvent(new CustomEvent("syncbiz:toast", { detail: { message } }));
@@ -154,7 +154,7 @@ export function PlaylistShareDialog({ playlistId, onClose }: { playlistId: strin
     if (!text) return;
     setBusy(true);
     try {
-      const r = await fetch(`/api/people/lookup?handle=${encodeURIComponent(text)}`, { credentials: "include", cache: "no-store" });
+      const r = await fetch(`/api/people/lookup?handle=${encodeURIComponent(text)}&playlistId=${encodeURIComponent(playlistId)}`, { credentials: "include", cache: "no-store" });
       const j = (await r.json().catch(() => ({}))) as { name?: string | null; handle?: string; error?: string };
       if (r.status === 403) setPersonMsg(t.ownerOnly);
       else if (!r.ok || !j.handle) setPersonMsg(r.status === 404 ? t.notFound : j.error ?? t.notFound);

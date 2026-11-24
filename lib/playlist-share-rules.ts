@@ -74,17 +74,19 @@ export const MAX_PENDING_PER_PERSON = 100; // everything waiting for ONE person,
 export type PersonShareDecision = { ok: true } | { ok: false; status: 400 | 403 | 404 | 429; error: string };
 
 /**
- * May this sender share with this person? Only an OWNER of the business may send a playlist OUT of it; the person must exist and be active — "no such person", "disabled" and "never had an ID" all answer the same 404, so the
+ * May this sender share with this person? Only the playlist's CREATOR or an OWNER of the business may send it OUT of the business (owner 2026-11-24: "whoever made a playlist decides who gets it"; a business playlist someone else made needs
+ * the owner, until a role permission for it exists); the person must exist and be active — "no such person", "disabled" and "never had an ID" all answer the same 404, so the
  * answer reveals nothing but "no person with this ID"; never to yourself (use a branch share); and neither the person nor the pair may be flooded.
  */
 export function decidePersonShare(i: {
   senderId: string;
   senderIsOwner: boolean;
+  senderIsCreator: boolean;
   target: { id: string; active: boolean } | null;
   openToTarget: number;
   pendingForTarget: number;
 }): PersonShareDecision {
-  if (!i.senderIsOwner) return { ok: false, status: 403, error: "Only an owner of the business can share a playlist with a person outside it" };
+  if (!i.senderIsOwner && !i.senderIsCreator) return { ok: false, status: 403, error: "Only the person who made this playlist, or an owner of the business, can share it with a person outside it" };
   if (!i.target || !i.target.active) return { ok: false, status: 404, error: "No person with this ID" };
   if (i.target.id === i.senderId) return { ok: false, status: 400, error: "That is your own ID — to share inside your business use the branches" };
   if (i.openToTarget >= MAX_OPEN_SHARES_PER_PERSON) return { ok: false, status: 429, error: "Too many shares are already open with this person" };
