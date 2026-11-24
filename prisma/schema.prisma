@@ -269,9 +269,16 @@ model User {
   status        UserStatus @default(ACTIVE)
   deactivatedAt DateTime?
   lastLoginAt   DateTime?
+  /// 2026-11-22 (owner: "a user name + # + a number, so people can share to each other and add people to a business easily"): the person's VONO ID for sharing, lowercase "name#1234", unique.
+  /// Null until one is assigned (DORMANT — nothing reads it yet). A person is found by their EXACT ID only (no browsing of users).
+  handle        String?    @unique
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
+  /// 2026-11-22 — virtual back-relations of the sharing foundation (no columns here)
+  createdPlaylists           Playlist[]               @relation("PlaylistCreator")
+  playlistSharesSent         PlaylistShare[]          @relation("PlaylistShareFrom")
+  playlistSharesReceived     PlaylistShare[]          @relation("PlaylistShareToUser")
   ownedWorkspaces            Workspace[]              @relation("WorkspaceOwner")
   memberships                WorkspaceMember[]
   branchAssignments          UserBranchAssignment[]
@@ -1034,10 +1041,14 @@ model Playlist {
   isShared                  Boolean                  @default(false)
   sharedById                String?
   publicationScope          PlaylistPublicationScope @default(PRIVATE)
+  /// 2026-11-22 (owner: "created by <name>" in small text under the playlist's name — people build playlists for businesses as work): who made it. Null = made before this column existed (shows no credit).
+  createdByUserId           String?
   createdAt                 DateTime                 @default(now())
   updatedAt                 DateTime                 @updatedAt
 
   workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User?                     @relation("PlaylistCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  shares           PlaylistShare[]
   items            PlaylistItem[]
   schedules        Schedule[]
   aiDjPlaylists    AiDjPlaylist[]
@@ -1049,6 +1060,46 @@ model Playlist {
   @@index([isShared])
   @@index([branchId])
   @@index([publicationScope])
+  @@index([createdByUserId])
+}
+
+enum PlaylistShareTargetKind {
+  BRANCH
+  USER
+}
+
+enum PlaylistShareStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+}
+
+/// 2026-11-22 (owner) — an IN-APP share of a playlist: to a branch of the SAME business, or to a PERSON (any VONO account, even in another business). LIVE: the receiver sees the owner's changes (read-only);
+/// a copy is a separate playlist made on request ("make my copy"). The receiver must ACCEPT before anything appears. A local song never travels (it stays grey on the other side).
+/// DORMANT: nothing reads or writes this table yet (additive foundation; see docs/PLAYLIST_SHARING_DESIGN.md).
+model PlaylistShare {
+  id             String                  @id @default(uuid())
+  playlistId     String
+  fromUserId     String
+  targetKind     PlaylistShareTargetKind
+  /// a branch id of the sender's own business (targetKind BRANCH) — a plain id, not an FK (the legacy key "default" is also a valid value)
+  targetBranchId String?
+  /// the receiving person (targetKind USER)
+  targetUserId   String?
+  status         PlaylistShareStatus     @default(PENDING)
+  createdAt      DateTime                @default(now())
+  decidedAt      DateTime?
+  revokedAt      DateTime?
+
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  fromUser   User     @relation("PlaylistShareFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  targetUser User?    @relation("PlaylistShareToUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([playlistId])
+  @@index([fromUserId])
+  @@index([targetUserId, status])
+  @@index([targetBranchId, status])
 }
 
 model PlaylistItem {
