@@ -31,7 +31,7 @@ import { shouldOfferLocalMove } from "@/lib/local-playlist-branch";
 import { playlistHasLocalFiles } from "@/lib/playlist-playability";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
-import { isSinglePlaylist } from "@/lib/schedule-picker-kind";
+import { pickerKindOf } from "@/lib/schedule-picker-kind";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 import { isSkippedOn, withSkipDate, ymdOf } from "@/lib/schedule-skip";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
@@ -121,7 +121,7 @@ type LibItem = {
   targetId: string;
   name: string;
   cover: string | null;
-  kind: "playlist" | "song" | "radio" | "bank" | "quiet";
+  kind: "playlist" | "single" | "set" | "radio" | "bank" | "quiet";
   sub: string;
   branchId: string;
   /** the Apple colour of this music: taken from its own cover (or a stable fallback) */
@@ -764,12 +764,14 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const colour = (targetType: string, targetId: string) => paletteIndex(`${targetType}:${targetId}`);
     const bid = (targetType: "SOURCE" | "PLAYLIST" | "RADIO", targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
     for (const p of playlists) {
-      // a song saved from a search is stored as a one-track playlist: it is told apart as a SONG by the library's own rule (owner 2026-11-24); what is scheduled stays the same stored row (targetType PLAYLIST)
-      const single = isSinglePlaylist(p);
-      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: single ? "song" : "playlist", sub: single ? tr("Song") : p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) ?? learned[p.id] ?? null });
+      // a song saved from a search is stored as a one-track playlist: it is told apart by the library's own rule — a Single (short), a Set / Mix (15 minutes or longer) or a real Playlist (owner 2026-11-24); what is
+      // scheduled stays the same stored row (targetType PLAYLIST)
+      const secs = playlistSeconds(p) ?? learned[p.id] ?? null;
+      const k = pickerKindOf(p, secs);
+      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: k, sub: k === "set" ? tr("Set / Mix") : k === "single" ? tr("Single") : p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: secs });
     }
     for (const s of sources) {
-      out.push({ key: scheduleTargetKey("SOURCE", s.id), targetType: "SOURCE", targetId: s.id, name: s.name, cover: (s.artworkUrl ?? "").trim() || null, kind: "song", sub: tr("Song"), branchId: bid("SOURCE", s.id), ci: colour("SOURCE", s.id), dur: null });
+      out.push({ key: scheduleTargetKey("SOURCE", s.id), targetType: "SOURCE", targetId: s.id, name: s.name, cover: (s.artworkUrl ?? "").trim() || null, kind: "single", sub: tr("Single"), branchId: bid("SOURCE", s.id), ci: colour("SOURCE", s.id), dur: null });
     }
     for (const r of radioStations) {
       out.push({ key: scheduleTargetKey("RADIO", r.id), targetType: "RADIO", targetId: r.id, name: r.name, cover: null, kind: "radio", sub: tr("Radio"), branchId: bid("RADIO", r.id), ci: colour("RADIO", r.id), dur: null });
@@ -2348,9 +2350,9 @@ function FilterBar({ f, tr, lead }: { f: ReturnType<typeof useFilteredLib>; tr: 
         </label>
       </div>
       <div className="ss-chips" role="tablist">
-        {(["all", "playlist", "song", "radio", "bank"] as const).map((k) => (
+        {(["all", "playlist", "single", "set", "radio", "bank"] as const).map((k) => (
           <button key={k} type="button" role="tab" aria-selected={f.kind === k} className={`ss-chip${f.kind === k ? " is-on" : ""}`} onClick={() => f.setKind(k)}>
-            {k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "song" ? tr("Songs") : k === "radio" ? tr("Radio") : tr("Royalty-free")}
+            {k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "single" ? tr("Singles") : k === "set" ? tr("Sets / Mixes") : k === "radio" ? tr("Radio") : tr("Royalty-free")}
           </button>
         ))}
       </div>
