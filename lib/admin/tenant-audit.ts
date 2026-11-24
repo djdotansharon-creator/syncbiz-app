@@ -64,7 +64,12 @@ export type TenantAuditAction =
   /** Playlist sharing (2026-11-23): a playlist was shared with a PERSON outside the business / the share was taken back / the person answered it (entityId = the share id, metadata = playlist + person). */
   | "playlist.share_create"
   | "playlist.share_revoke"
-  | "playlist.share_answer";
+  | "playlist.share_answer"
+  /** Schedule-day offers (2026-11-25): a day of a branch's schedule was offered to other branches / the receiving branch answered (accept, decline, preview is NOT logged) / the sender took it back / an accepted one was undone (entityId = the offer id). */
+  | "schedule_day_share.send"
+  | "schedule_day_share.answer"
+  | "schedule_day_share.revoke"
+  | "schedule_day_share.undo";
 
 export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "member.create",
@@ -95,6 +100,10 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
   "playlist.share_create",
   "playlist.share_revoke",
   "playlist.share_answer",
+  "schedule_day_share.send",
+  "schedule_day_share.answer",
+  "schedule_day_share.revoke",
+  "schedule_day_share.undo",
 ];
 
 /**
@@ -102,7 +111,7 @@ export const TENANT_AUDIT_ACTIONS: readonly TenantAuditAction[] = [
  * mutation, but keeping this typed lets us add `branch`, `playlist`, etc.
  * later without a schema change.
  */
-export type TenantAuditEntity = "workspace_member" | "jingle" | "branch" | "device_enrollment" | "workspace" | "playlist_share";
+export type TenantAuditEntity = "workspace_member" | "jingle" | "branch" | "device_enrollment" | "workspace" | "playlist_share" | "schedule_day_share";
 
 export type TenantAuditInput = {
   action: TenantAuditAction;

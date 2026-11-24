@@ -178,3 +178,50 @@ export async function getShareForRecipient(userId: string, shareId: string) {
 export async function getShareForSender(workspaceId: string, userId: string, shareId: string) {
   return prisma.playlistShare.findFirst({ where: { id: shareId, fromUserId: userId, playlist: { workspaceId } } });
 }
+
+// ── Used by the schedule-day copy (2026-11-25): the playlists a copied day plays are shared to the receiving branch, already ACCEPTED (the branch accepted the whole day) ──────────────────────
+
+/**
+ * INSIDE a transaction: creates ACCEPTED branch shares of one playlist (the receiving branch accepted a day that plays it). A branch that already has an open (pending / accepted) share of it is left as it is and reported.
+ * The playlist must be in `workspaceId` (checked here, not trusted). Returns what was created and which branches already had one.
+ */
+export async function createAcceptedBranchSharesTx(
+  tx: Prisma.TransactionClient,
+  i: { workspaceId: string; playlistId: string; fromUserId: string; branchIds: string[] },
+): Promise<{ created: { id: string; branchId: string }[]; alreadyOpen: string[] }> {
+  const out: { created: { id: string; branchId: string }[]; alreadyOpen: string[] } = { created: [], alreadyOpen: [] };
+  if (i.branchIds.length === 0) return out;
+  const inWorkspace = await tx.playlist.findFirst({ where: { id: i.playlistId, workspaceId: i.workspaceId }, select: { id: true } });
+  if (!inWorkspace) return out;
+  const open = await tx.playlistShare.findMany({
+    where: { playlistId: i.playlistId, targetKind: "BRANCH", targetBranchId: { in: i.branchIds }, status: { in: ["PENDING", "ACCEPTED"] } },
+    select: { targetBranchId: true },
+  });
+  const taken = new Set(open.map((r) => r.targetBranchId));
+  const now = new Date();
+  for (const branchId of i.branchIds) {
+    if (taken.has(branchId)) {
+      out.alreadyOpen.push(branchId);
+      continue;
+    }
+    const row = await tx.playlistShare.create({
+      data: { playlistId: i.playlistId, fromUserId: i.fromUserId, targetKind: "BRANCH", targetBranchId: branchId, status: "ACCEPTED", decidedAt: now },
+      select: { id: true },
+    });
+    out.created.push({ id: row.id, branchId });
+  }
+  return out;
+}
+
+/** INSIDE a transaction: takes back exactly these shares (only still-open ones, only of playlists in `workspaceId`). Returns the ids that were revoked. */
+export async function revokeSharesByIdsTx(tx: Prisma.TransactionClient, i: { workspaceId: string; shareIds: string[] }): Promise<string[]> {
+  if (i.shareIds.length === 0) return [];
+  const rows = await tx.playlistShare.findMany({
+    where: { id: { in: i.shareIds }, status: { in: ["PENDING", "ACCEPTED"] }, playlist: { workspaceId: i.workspaceId } },
+    select: { id: true },
+  });
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return [];
+  await tx.playlistShare.updateMany({ where: { id: { in: ids } }, data: { status: "REVOKED", revokedAt: new Date() } });
+  return ids;
+}
