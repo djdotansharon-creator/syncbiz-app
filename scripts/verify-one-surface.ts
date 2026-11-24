@@ -14,6 +14,7 @@ const rd = (p: string) => readFileSync(path.join(__dirname, "..", p), "utf-8").r
 const sm = rd("components/sources-manager.tsx");
 assert("L1 the 'no sources yet' message is shown only after the FIRST list has arrived (or failed): the flag starts true only when the page came with sources, and every fetch ends by setting it", /const \[sourcesFirstLoadDone, setSourcesFirstLoadDone\] = useState\(initialSources\.length > 0\);/.test(sm) && /\.finally\(\(\) => setSourcesFirstLoadDone\(true\)\)/.test(sm) && /sourcesLoading=\{!sourcesFirstLoadDone\}/.test(sm));
 assert("L2 while it is on its way the library shows the loader (glow + ring, a status for screen readers) and NOT the message", /sourcesLoading \? \(\s*<div className="library-loading" role="status" aria-live="polite" aria-label=\{t\.loadingLibrary\}>\s*<span className="library-loading-glow" aria-hidden \/>\s*<span className="library-loading-ring" aria-hidden \/>/.test(sm));
+assert("N1 the big number at the end of the library's tab row (the selected view's count) is gone, in both languages (owner 2026-11-24)", !/chipsData/.test(sm) && !/ms-auto shrink-0 pe-1 text-xl font-bold tabular-nums/.test(sm));
 const tr = rd("lib/translations.ts");
 assert("L3 the loader's label exists in both languages", /loadingLibrary: "Loading…"/.test(tr) && /loadingLibrary: "טוען…"/.test(tr));
 const css = rd("app/globals.css");

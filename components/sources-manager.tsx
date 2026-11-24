@@ -3418,28 +3418,7 @@ function SourcesManagerInner({
               );
             })}
             <PlaylistSharePill count={shares.pending.length} onClick={() => setRequestsOpen(true)} />
-            {/* Selected view's count — ONE number, big and proud on the right */}
-            {(() => {
-              const chipsData: Array<{ id: LibraryViewId; count: number }> = [
-                { id: "all_library", count: displaySources.length },
-                { id: "recently_added", count: Math.min(displaySources.length, 24) },
-                {
-                  id: "playlists",
-                  count: displaySources.filter(isRealPlaylistSource).length,
-                },
-                { id: "user_playlists", count: userPlaylistContainers.length },
-                { id: "external_playlists", count: containers.external.length },
-                { id: "sources", count: containers.sources.length },
-                { id: "favorites", count: favoriteIds.length },
-              ];
-              const activeId = !djHubRailActive && selection.type === "library_view" ? selection.id : null;
-              const n = chipsData.find((c) => c.id === activeId)?.count;
-              return typeof n === "number" ? (
-                <span className="ms-auto shrink-0 pe-1 text-xl font-bold tabular-nums leading-none text-[#f5f5f7]">
-                  {n}
-                </span>
-              ) : null;
-            })()}
+            {/* the selected view's count number was removed (owner 2026-11-24: "I don't need that number") */}
           </div>
 
           {/* BUILD mode banner — after creating a playlist: pick a genre, tap ＋
