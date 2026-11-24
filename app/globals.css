@@ -7911,6 +7911,71 @@ html[data-sb-display="white"] .sb-alb-play, html[data-sb-display="white"] .sb-al
 .sb-alb-classic:hover, .sb-alb-classic:focus-visible { outline: none; color: rgba(255, 255, 255, 0.9); }
 .sb-alb-row[data-active="1"] { background: rgba(255, 255, 255, 0.06); }
 .sb-alb-row[data-active="1"] .sb-alb-n b { color: #fff; }
+.sb-alb-extra { margin: 2px 0 0; font-size: 12.5px; color: rgba(255, 255, 255, 0.5); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sb-alb-extra button { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: rgba(255, 255, 255, 0.55); cursor: pointer; }
+.sb-alb-extra button:hover { color: rgba(255, 255, 255, 0.9); }
+/* a song that cannot play here (a file on another computer): grey; a look inside a request: nothing reacts */
+.sb-alb-row[data-off="1"] .sb-alb-art, .sb-alb-row[data-off="1"] .sb-alb-info { opacity: 0.38; }
+.sb-alb-row[data-off="1"] .sb-alb-art-play { display: none; }
+.sb-alb-row[data-ro="1"] { cursor: default; }
+.sb-alb-row[data-ro="1"]:hover { background: transparent; }
+.sb-alb-row[data-ro="1"] .sb-alb-art::after, .sb-alb-row[data-ro="1"] .sb-alb-art-play { display: none; }
+html[data-sb-display="white"] .sb-alb-extra, html[data-sb-display="white"] .sb-alb-extra button { color: rgba(28, 28, 30, 0.55); }
+/* ── Sharing inside VONO (owner 2026-11-22): the request card, the branch list, the "shared" tiles, the waiting pill. Flat: no blur, no filter. ── */
+.sb-shr-vono { display: flex; align-items: center; justify-content: center; width: 100%; margin: 0 0 16px; padding: 13px 16px; border: 0; border-radius: 14px; background: rgba(255, 255, 255, 0.1); color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background-color 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-shr-vono:hover { background: rgba(255, 255, 255, 0.17); }
+.sb-shr-vono:active { transform: scale(0.985); }
+.sb-shr-branches { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; scrollbar-width: none; }
+.sb-shr-branches::-webkit-scrollbar { display: none; }
+.sb-shr-brow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; border: 0; border-radius: 14px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; transition: background-color 160ms ease; }
+.sb-shr-brow:hover { background: rgba(255, 255, 255, 0.06); }
+.sb-shr-brow--done { cursor: default; }
+.sb-shr-brow--done:hover { background: transparent; }
+.sb-shr-check { flex: none; width: 20px; height: 20px; border-radius: 999px; border: 1.6px solid rgba(255, 255, 255, 0.4); background: transparent; position: relative; transition: background-color 160ms ease, border-color 160ms ease; }
+.sb-shr-brow[data-on="1"] .sb-shr-check { background: #fff; border-color: #fff; }
+.sb-shr-brow[data-on="1"] .sb-shr-check::after { content: ""; position: absolute; inset: 4px 5px 6px; border-inline-start: 2px solid #111; border-bottom: 2px solid #111; transform: rotate(-45deg); }
+.sb-shr-check--done { background: rgba(48, 209, 88, 0.85); border-color: transparent; }
+.sb-shr-bname { flex: 1 1 auto; min-width: 0; font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-shr-state { flex: none; font-size: 12px; color: rgba(255, 255, 255, 0.55); }
+.sb-shr-undo { flex: none; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.6); cursor: pointer; }
+.sb-shr-undo:hover { color: #fff; }
+.sb-shr-err { margin: 12px 0 0; font-size: 13px; color: #ff6961; }
+.sb-shr-card { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 6px 0 10px; animation: sb-alb-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-shr-art { position: relative; display: block; width: 188px; height: 188px; border-radius: 30px; overflow: hidden; background: rgba(255, 255, 255, 0.08); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34); }
+.sb-shr-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-shr-name { margin: 14px 0 0; max-width: 100%; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-shr-sub { margin: 0; font-size: 13px; color: rgba(255, 255, 255, 0.55); }
+.sb-shr-sub b { font-weight: 700; color: rgba(255, 255, 255, 0.82); }
+.sb-shr-look { margin-top: 12px; padding: 8px 18px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #fff; font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: background-color 160ms ease; }
+.sb-shr-look:hover { background: rgba(255, 255, 255, 0.18); }
+.sb-shr-peek .sb-alb { max-height: min(62vh, 520px); }
+.sb-shr-peek .sb-alb-head { padding-top: 0; }
+[dir="rtl"] .sb-alb-backbtn svg { transform: scaleX(-1); }
+.sb-shr-copy { padding: 4px 0 8px; }
+.sb-shr-panel { width: 100%; padding: 6px 2px 28px; color: #f5f5f7; animation: sb-alb-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.sb-shr-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 28px 20px; }
+.sb-shr-tile { display: flex; flex-direction: column; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.sb-shr-tile .sb-shr-art { width: 100%; height: auto; aspect-ratio: 1; border-radius: 24px; box-shadow: none; transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sb-shr-tile:hover .sb-shr-art { transform: translateY(-3px); }
+.sb-shr-tile .sb-shr-name { margin: 10px 2px 0; font-size: 14.5px; font-weight: 600; }
+.sb-shr-tile .sb-shr-sub { margin: 3px 2px 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-shr-empty { padding: 40px 4px; text-align: center; font-size: 15px; color: rgba(255, 255, 255, 0.7); }
+.sb-shr-hint { margin: 6px 0 0; font-size: 13px; color: rgba(255, 255, 255, 0.45); }
+.sb-shr-pill { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-inline-start: 6px; padding: 5px 13px; border: 0; border-radius: 999px; background: rgba(255, 159, 10, 0.16); color: #ffb340; font: inherit; font-size: 12.5px; font-weight: 650; cursor: pointer; white-space: nowrap; transition: background-color 160ms ease; }
+.sb-shr-pill:hover { background: rgba(255, 159, 10, 0.26); }
+.sb-shr-pill i { width: 7px; height: 7px; border-radius: 999px; background: #ff9f0a; }
+@media (prefers-reduced-motion: reduce) { .sb-shr-card, .sb-shr-panel { animation: none; } }
+html[data-sb-display="white"] .sb-shr-vono, html[data-sb-display="white"] .sb-shr-look { background: rgba(0, 0, 0, 0.07); color: #1c1c1e; }
+html[data-sb-display="white"] .sb-shr-vono:hover, html[data-sb-display="white"] .sb-shr-look:hover { background: rgba(0, 0, 0, 0.13); }
+html[data-sb-display="white"] .sb-shr-brow:hover { background: rgba(0, 0, 0, 0.05); }
+html[data-sb-display="white"] .sb-shr-check { border-color: rgba(0, 0, 0, 0.35); }
+html[data-sb-display="white"] .sb-shr-brow[data-on="1"] .sb-shr-check { background: #1c1c1e; border-color: #1c1c1e; }
+html[data-sb-display="white"] .sb-shr-brow[data-on="1"] .sb-shr-check::after { border-color: #fff; }
+html[data-sb-display="white"] .sb-shr-state, html[data-sb-display="white"] .sb-shr-undo, html[data-sb-display="white"] .sb-shr-sub, html[data-sb-display="white"] .sb-shr-hint { color: rgba(28, 28, 30, 0.55); }
+html[data-sb-display="white"] .sb-shr-sub b { color: rgba(28, 28, 30, 0.85); }
+html[data-sb-display="white"] .sb-shr-empty { color: rgba(28, 28, 30, 0.7); }
+html[data-sb-display="white"] .sb-shr-panel { color: #1c1c1e; }
+html[data-sb-display="white"] .sb-shr-pill { background: rgba(217, 119, 6, 0.14); color: #b45309; }
 html[data-sb-display="white"] .sb-alb-classic { color: rgba(28, 28, 30, 0.5); }
 html[data-sb-display="white"] .sb-alb-classic:hover, html[data-sb-display="white"] .sb-alb-classic:focus-visible { color: rgba(28, 28, 30, 0.9); }
 html[data-sb-display="white"] .sb-alb-row[data-active="1"] { background: rgba(0, 0, 0, 0.06); }
