@@ -374,14 +374,19 @@ export function SourcesManager({
   const effectiveSourcesRef = useRef<UnifiedSource[]>(initialSources); // DIAG: current on-screen list for async logging
   effectiveSourcesRef.current = effectiveSources; // DIAG
 
+  // false only while the FIRST list is still on its way (the page came with nothing and a fetch is running): the library shows a soft loader then, never the "no sources yet" message (owner 2026-11-24)
+  const [sourcesFirstLoadDone, setSourcesFirstLoadDone] = useState(initialSources.length > 0);
   const refetchSources = useCallback((trigger: string = "unknown") => {
-    fetchUnifiedSourcesWithFallback().then((items) => {
-      const before = effectiveSourcesRef.current; // DIAG: list on screen at replace time
-      const filtered = items.filter((s) => s.origin !== "radio");
-      sbLogSourcesDiag(trigger, before, filtered, getLastUnifiedFetchDiag()); // DIAG
-      prevIdsRef.current = filtered.map((s) => s.id).join(",");
-      setEffectiveSources(filtered);
-    });
+    fetchUnifiedSourcesWithFallback()
+      .then((items) => {
+        const before = effectiveSourcesRef.current; // DIAG: list on screen at replace time
+        const filtered = items.filter((s) => s.origin !== "radio");
+        sbLogSourcesDiag(trigger, before, filtered, getLastUnifiedFetchDiag()); // DIAG
+        prevIdsRef.current = filtered.map((s) => s.id).join(",");
+        setEffectiveSources(filtered);
+      })
+      .catch(() => { /* the list stays as it is; the message below then tells the truth */ })
+      .finally(() => setSourcesFirstLoadDone(true));
   }, []);
 
   useEffect(() => {
@@ -410,6 +415,7 @@ export function SourcesManager({
         playerWorkspaceMode={playerWorkspaceMode}
         workspaceRouteCenter={workspaceRouteCenter}
         defaultBranchId={defaultBranchId}
+        sourcesLoading={!sourcesFirstLoadDone}
       />
     </SourcesPlaybackProvider>
   );
@@ -882,12 +888,15 @@ function SourcesManagerInner({
   playerWorkspaceMode,
   workspaceRouteCenter,
   defaultBranchId = null,
+  sourcesLoading = false,
 }: {
   pageTitle?: string;
   pageSubtitle?: string;
   playerWorkspaceMode?: boolean;
   workspaceRouteCenter?: ReactNode;
   defaultBranchId?: string | null;
+  /** true only while the FIRST list is on its way — the library shows a soft loader, not "no sources yet" */
+  sourcesLoading?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
@@ -3477,16 +3486,23 @@ function SourcesManagerInner({
             className="sb-glow-scroll sb-anim-rise mt-2 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1 lg:max-h-none lg:flex-1 lg:min-h-0"
           >
           {displaySources.length === 0 ? (
-            <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
-              <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
-                <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
+            sourcesLoading ? (
+              <div className="library-loading" role="status" aria-live="polite" aria-label={t.loadingLibrary}>
+                <span className="library-loading-glow" aria-hidden />
+                <span className="library-loading-ring" aria-hidden />
               </div>
-              <p className="library-empty-text mx-auto max-w-sm text-sm leading-relaxed">{t.noSourcesYetDragDrop}</p>
-            </div>
+            ) : (
+              <div className="library-empty-state relative overflow-hidden rounded-2xl py-20 text-center">
+                <div className="library-empty-icon-plate mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl">
+                  <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25">
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                  </svg>
+                </div>
+                <p className="library-empty-text mx-auto max-w-sm text-sm leading-relaxed">{t.noSourcesYetDragDrop}</p>
+              </div>
+            )
           ) : selectedCollectionCards ? (
             <div className="space-y-4">
               {groupContext ? (
