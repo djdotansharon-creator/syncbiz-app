@@ -10,6 +10,7 @@
  * The classic view stays one click away ("Classic view") and is remembered. Styles: the album's own `.sb-alb*` in globals.css (+ `.sb-alb-classic`, `.sb-alb-more`, `data-active`).
  */
 
+import { PlaylistMosaic } from "@/components/playlist-mosaic";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "@/lib/locale-context";
@@ -91,6 +92,7 @@ export function preloadPlaylistCovers(urls: Array<string | null | undefined>, ma
 export function PlaylistWorkspacePanel({
   title,
   cover,
+  mosaic,
   createdBy,
   items,
   activeId,
@@ -109,6 +111,8 @@ export function PlaylistWorkspacePanel({
 }: {
   title: string;
   cover: string | null;
+  /** the first four songs' pictures side by side (owner 2026-11-24) — shown instead of the single cover when the playlist has them */
+  mosaic?: string[] | null;
   /** who made the playlist (display name) — a small "created by" line under the name; none when it was not recorded */
   createdBy?: string | null;
   items: UnifiedSource[];
@@ -224,7 +228,7 @@ export function PlaylistWorkspacePanel({
     <div dir={he ? "rtl" : "ltr"} className="sb-alb sb-alb-pl min-h-0 w-full flex-1">
       <header className="sb-alb-head">
         <span className="sb-alb-cover">
-          {cover ? <img src={cover} alt="" draggable={false} /> : <span className="sb-alb-initial">{title.charAt(0)}</span>}
+          {mosaic ? <PlaylistMosaic urls={mosaic} /> : cover ? <img src={cover} alt="" draggable={false} /> : <span className="sb-alb-initial">{title.charAt(0)}</span>}
         </span>
         <div className="sb-alb-titles">
           <h2 title={title}>{title}</h2>

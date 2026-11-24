@@ -8344,3 +8344,10 @@ html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(
 html[data-sb-arriving] .workspace-rail-grid > aside { content-visibility: hidden; visibility: hidden; opacity: 0; transition: none !important; }
 html[data-sb-arrived] .workspace-rail-grid > aside { transition: opacity 460ms ease !important; } /* a transition, not an animation: an animation here would swap the elements' own entrance animation and replay it */
 @media (prefers-reduced-motion: reduce) { html[data-sb-arrived] .library-list-shell--frameless > *:not(.sb-drop-plus):not(.sb-rail-line), html[data-sb-arrived] .workspace-rail-grid > aside { transition: none !important; } }
+
+/* a playlist cover made of its first four songs' pictures, 2 x 2, filling the box it is in (owner 2026-11-24) */
+.sb-mosaic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; width: 100%; height: 100%; overflow: hidden; }
+.sb-mosaic img { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; }
+.sb-alb-cover .sb-mosaic { position: absolute; inset: 0; }
+/* the header's own rule makes every picture inside the cover absolute (they would pile up); the quarters sit in the grid */
+.sb-alb-cover .sb-mosaic img { position: static; inset: auto; width: 100%; height: 100%; }

@@ -13,9 +13,12 @@ import { getPlaylistTracks } from "@/lib/playlist-types";
 import { useDominantColor } from "@/lib/use-dominant-color";
 import { formatDuration } from "@/lib/format-utils";
 import {
+  classifyLibraryEntityContract,
   libraryCardDisplayGenre,
   type UnifiedSource,
 } from "@/lib/source-types";
+import { playlistMosaicCovers } from "@/lib/playlist-mosaic";
+import { PlaylistMosaic } from "@/components/playlist-mosaic";
 import {
   libraryKindBadgeUpper,
   libraryKindBadgeArtClass,
@@ -474,6 +477,11 @@ export function SourceCard({
     return () => observer.disconnect();
   }, [source.id, source.url, source.type, showLeafLibraryChips, source.viewCount, source.likeCount, source.publishedAt, source.leafDurationSeconds]);
 
+  // a real playlist with at least four pictures shows the first four side by side (owner 2026-11-24); anything else keeps its single cover exactly as before
+  const mosaic = useMemo(
+    () => (source.origin === "playlist" && source.playlist && classifyLibraryEntityContract(source).entityKind === "collection" ? playlistMosaicCovers(source.playlist) : null),
+    [source],
+  );
   const useExplicitPlaylistArt = explicitArtUrl !== undefined;
   const cardCover = useExplicitPlaylistArt ? explicitArtUrl : source.cover;
   /* Hover halo tinted by the artwork's average color (subtle, never louder than the art). */
@@ -646,7 +654,11 @@ export function SourceCard({
             />
             {cardCover ? (
               <>
-                <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+                {mosaic ? (
+                  <PlaylistMosaic urls={mosaic} className="transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+                ) : (
+                  <HydrationSafeImage src={cardCover} alt="" className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]" />
+                )}
                 {/* 2026-10-16 (owner): a gentle, truly gradual blur at the foot of the tile. Chromium ignores a
                     mask on backdrop-filter (hard edge), so this is a blurred COPY of the same picture faded in
                     by a mask (`.sb-tile-blur` in globals.css). It shares the sharp picture's zoom + parallax. */}

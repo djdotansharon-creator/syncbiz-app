@@ -81,6 +81,7 @@ import {
   type ScheduleAppendContributorHint,
 } from "@/lib/schedule-composite-playlist";
 import { canonicalYouTubeWatchUrlForPlayback } from "@/lib/playlist-utils";
+import { playlistMosaicCovers } from "@/lib/playlist-mosaic";
 import {
   expandPlaylistEntityToItems,
   playlistLeafTrackIndexForQueueItem,
@@ -1529,11 +1530,14 @@ function SourcesManagerInner({
       selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist"
         ? resolvePlaylistShellByEntityKey(selection.key, sources)?.playlist?.createdByName ?? null
         : null;
+    // the first four songs' pictures side by side, for a real playlist that has them (owner 2026-11-24)
+    const mosaicPlaylist = selection.subtype === "syncbiz_playlist" ? resolvePlaylistShellByEntityKey(selection.key, sources)?.playlist : undefined;
     return {
       title: found.label,
       subtitle: found.meta ?? "Collection destination",
       count,
       cover: found.cover ?? null,
+      mosaic: mosaicPlaylist ? playlistMosaicCovers(mosaicPlaylist) : null,
       createdBy,
     };
   }, [selection, collectionContextByKey, visibleSources, sources]);
@@ -3914,6 +3918,7 @@ function SourcesManagerInner({
                 <PlaylistWorkspacePanel
                   title={collectionOpenContext.title}
                   cover={collectionOpenContext.cover}
+                  mosaic={collectionOpenContext.mosaic}
                   createdBy={collectionOpenContext.createdBy}
                   items={visibleSources}
                   activeId={isMaster ? null : masterState?.currentSource?.id ?? null}
