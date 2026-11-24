@@ -22,3 +22,12 @@ export function isSinglePlaylist(p: Playlist): boolean {
   };
   return classifyLibraryEntityContract(shell).entityKind === "item";
 }
+
+/** a single track this long or longer is a SET / MIX (a DJ set, a long mix) — the same 15 minutes the library uses for its "Set" badge (owner 2026-11-24: "over 15 minutes"). */
+export const SET_MIN_SECONDS = 15 * 60;
+
+/** what a stored playlist is called in the scheduling music list: a real playlist, a single, or a set / mix. `seconds` = its known length (null = not known → a single). */
+export function pickerKindOf(p: Playlist, seconds: number | null): "playlist" | "single" | "set" {
+  if (!isSinglePlaylist(p)) return "playlist";
+  return seconds !== null && seconds >= SET_MIN_SECONDS ? "set" : "single";
+}
