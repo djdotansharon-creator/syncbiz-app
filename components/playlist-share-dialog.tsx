@@ -27,6 +27,16 @@ const HE = {
   already: "כבר משותף עם הסניפים שנבחרו.",
   failed: "השיתוף נכשל. נסו שוב.",
   loading: "טוען…",
+  personTitle: "או לשתף עם אדם",
+  personHint: "הקלידו את מזהה ה-VONO המדויק שלו (למשל dotan#4821). הוא יקבל בקשה, גם אם הוא בעסק אחר.",
+  personPlaceholder: "name#1234",
+  find: "חיפוש",
+  notFound: "לא נמצא אדם עם המזהה הזה.",
+  sendTo: (n: string) => `שליחה ל-${n}`,
+  sentPerson: "נשלח — הוא יתבקש לאשר",
+  personAlready: "כבר משותף עם האדם הזה.",
+  people: "אנשים",
+  ownerOnly: "רק מי שיצר את הפלייליסט, או בעלים של העסק, יכולים לשתף אותו עם אדם מחוץ לעסק.",
 };
 const EN = {
   title: "Share inside VONO",
@@ -42,6 +52,16 @@ const EN = {
   already: "Already shared with the chosen branches.",
   failed: "Sharing failed. Try again.",
   loading: "Loading…",
+  personTitle: "Or share with a person",
+  personHint: "Type their exact VONO ID (for example dotan#4821). They get a request, even if they are in another business.",
+  personPlaceholder: "name#1234",
+  find: "Find",
+  notFound: "No person with this ID.",
+  sendTo: (n: string) => `Send to ${n}`,
+  sentPerson: "Sent — they will be asked to accept",
+  personAlready: "Already shared with this person.",
+  people: "People",
+  ownerOnly: "Only the person who made this playlist, or an owner of the business, can share it with a person outside it.",
 };
 
 const toast = (message: string) => window.dispatchEvent(new CustomEvent("syncbiz:toast", { detail: { message } }));
@@ -57,6 +77,10 @@ export function PlaylistShareDialog({ playlistId, onClose }: { playlistId: strin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // a person, by exact ID (sharing phase D)
+  const [idText, setIdText] = useState("");
+  const [found, setFound] = useState<{ name: string | null; handle: string } | null>(null);
+  const [personMsg, setPersonMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let off = false;
@@ -82,7 +106,8 @@ export function PlaylistShareDialog({ playlistId, onClose }: { playlistId: strin
   const own = playlist?.branchId ?? null;
   const candidates = (branches ?? []).filter((b) => b.id !== own);
   const open = new Map<string, ShareView>();
-  for (const s of shares) if (s.status === "PENDING" || s.status === "ACCEPTED") open.set(s.targetBranchId, s);
+  for (const s of shares) if (s.kind === "BRANCH" && (s.status === "PENDING" || s.status === "ACCEPTED")) open.set(s.targetBranchId, s);
+  const peopleShares = shares.filter((s) => s.kind === "USER" && (s.status === "PENDING" || s.status === "ACCEPTED"));
   const free = candidates.filter((b) => !open.has(b.id));
   const allPicked = free.length > 0 && free.every((b) => picked.has(b.id));
 
@@ -121,6 +146,52 @@ export function PlaylistShareDialog({ playlistId, onClose }: { playlistId: strin
       setBusy(false);
     }
   }, [busy, picked, playlistId, t]);
+
+  const findPerson = async () => {
+    setPersonMsg(null);
+    setFound(null);
+    const text = idText.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/people/lookup?handle=${encodeURIComponent(text)}&playlistId=${encodeURIComponent(playlistId)}`, { credentials: "include", cache: "no-store" });
+      const j = (await r.json().catch(() => ({}))) as { name?: string | null; handle?: string; error?: string };
+      if (r.status === 403) setPersonMsg(t.ownerOnly);
+      else if (!r.ok || !j.handle) setPersonMsg(r.status === 404 ? t.notFound : j.error ?? t.notFound);
+      else setFound({ name: j.name ?? null, handle: j.handle });
+    } catch {
+      setPersonMsg(t.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendToPerson = async () => {
+    if (!found || busy) return;
+    setBusy(true);
+    setPersonMsg(null);
+    try {
+      const r = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/shares`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle: found.handle }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { created?: unknown[]; error?: string };
+      if (!r.ok) {
+        setPersonMsg(r.status === 403 ? t.ownerOnly : j.error ?? t.failed);
+        return;
+      }
+      toast((j.created?.length ?? 0) > 0 ? t.sentPerson : t.personAlready);
+      setFound(null);
+      setIdText("");
+      setTick((x) => x + 1);
+    } catch {
+      setPersonMsg(t.failed);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const takeBack = async (shareId: string) => {
     setBusy(true);
@@ -197,6 +268,59 @@ export function PlaylistShareDialog({ playlistId, onClose }: { playlistId: strin
             })}
           </ul>
         )}
+        <div className="sb-shr-person">
+          <h4>{t.personTitle}</h4>
+          <p className="sb-wz-hint">{t.personHint}</p>
+          <div className="sb-shr-idrow">
+            <input
+              className="sb-wz-input sb-shr-idinput"
+              dir="ltr"
+              value={idText}
+              placeholder={t.personPlaceholder}
+              maxLength={40}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(e) => {
+                setIdText(e.target.value);
+                setFound(null);
+                setPersonMsg(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && void findPerson()}
+            />
+            <button type="button" className="sb-wz-btn" disabled={busy || !idText.trim()} onClick={() => void findPerson()}>
+              {t.find}
+            </button>
+          </div>
+          {found ? (
+            <button type="button" className="sb-shr-found" disabled={busy} onClick={() => void sendToPerson()}>
+              <span className="sb-shr-check" aria-hidden />
+              <span className="sb-shr-bname">
+                <b>{found.name ?? found.handle}</b> <i dir="ltr">{found.handle}</i>
+              </span>
+              <span className="sb-shr-send">{t.sendTo(found.name ?? found.handle)}</span>
+            </button>
+          ) : null}
+          {personMsg ? <p className="sb-shr-err" role="alert">{personMsg}</p> : null}
+          {peopleShares.length > 0 ? (
+            <ul className="sb-shr-branches">
+              {peopleShares.map((s) => (
+                <li key={s.id}>
+                  <div className="sb-shr-brow sb-shr-brow--done">
+                    <span className="sb-shr-check sb-shr-check--done" aria-hidden />
+                    <span className="sb-shr-bname">
+                      {s.targetName ?? s.targetHandle ?? t.people} {s.targetHandle ? <i dir="ltr">{s.targetHandle}</i> : null}
+                    </span>
+                    <span className="sb-shr-state">{s.status === "ACCEPTED" ? t.accepted : t.waiting}</span>
+                    <button type="button" className="sb-shr-undo" disabled={busy} onClick={() => void takeBack(s.id)}>
+                      {t.takeBack}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
         {error ? <p className="sb-shr-err" role="alert">{error}</p> : null}
       </div>
     </GlassModal>

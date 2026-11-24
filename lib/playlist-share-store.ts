@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getPlaylist } from "@/lib/playlist-store";
 import type { Playlist } from "@/lib/playlist-types";
 import { creatorDisplayName } from "@/lib/playlist-credit";
+import { redactPlaylistForShare } from "@/lib/playlist-share-redact";
+import { parseHandle } from "@/lib/user-handle";
 import type { ShareStatus } from "@/lib/playlist-share-rules";
 
 /**
@@ -24,6 +26,14 @@ export type ShareView = {
   decidedAt: string | null;
   fromUserId: string;
   fromName: string | null;
+  /** "BRANCH" (a branch of the sender's own business) or "USER" (a person, possibly in another business) */
+  kind: "BRANCH" | "USER";
+  /** the sender's business — only for a share to a person (who the person must be able to recognise) */
+  fromBusiness: string | null;
+  /** for a share to a person, as the SENDER sees it: who it went to */
+  targetName: string | null;
+  targetHandle: string | null;
+  /** WHITELISTED data only (lib/playlist-share-redact.ts) — never the raw playlist */
   playlist: Playlist | null;
 };
 
@@ -32,8 +42,20 @@ function findShareRows(where: Prisma.PlaylistShareWhereInput) {
   return prisma.playlistShare.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: { fromUser: { select: { name: true, firstName: true, lastName: true } } },
+    include: SHARE_INCLUDE,
   });
+}
+
+const SHARE_INCLUDE = {
+  fromUser: { select: { name: true, firstName: true, lastName: true } },
+  targetUser: { select: { name: true, firstName: true, lastName: true, handle: true } },
+  playlist: { select: { workspace: { select: { name: true } } } },
+} as const;
+
+/** the playlist as a receiver may see it: whitelisted, never the raw row */
+async function sharedPlaylistFor(playlistId: string): Promise<Playlist | null> {
+  const p = await getPlaylist(playlistId);
+  return p ? redactPlaylistForShare(p) : null;
 }
 
 async function toView(row: ShareRow): Promise<ShareView> {
@@ -46,7 +68,11 @@ async function toView(row: ShareRow): Promise<ShareView> {
     decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
     fromUserId: row.fromUserId,
     fromName: creatorDisplayName(row.fromUser) ?? null,
-    playlist: await getPlaylist(row.playlistId),
+    kind: row.targetKind === "USER" ? "USER" : "BRANCH",
+    fromBusiness: row.targetKind === "USER" ? row.playlist.workspace.name : null,
+    targetName: row.targetKind === "USER" ? creatorDisplayName(row.targetUser) ?? null : null,
+    targetHandle: row.targetKind === "USER" ? row.targetUser?.handle ?? null : null,
+    playlist: await sharedPlaylistFor(row.playlistId),
   };
 }
 
@@ -63,7 +89,7 @@ export async function createBranchShares(i: { workspaceId: string; playlistId: s
   for (const branchId of fresh) {
     const row = await prisma.playlistShare.create({
       data: { playlistId: i.playlistId, fromUserId: i.fromUserId, targetKind: "BRANCH", targetBranchId: branchId, status: "PENDING" },
-      include: { fromUser: { select: { name: true, firstName: true, lastName: true } } },
+      include: SHARE_INCLUDE,
     });
     created.push(await toView(row));
   }
@@ -83,7 +109,7 @@ export async function listSharesForBranches(i: { workspaceId: string; branchIds:
 
 /** The shares OF one playlist (for the sender's own screen). */
 export async function listSharesOfPlaylist(workspaceId: string, playlistId: string): Promise<ShareView[]> {
-  const rows = await findShareRows({ playlistId, targetKind: "BRANCH", playlist: { workspaceId } });
+  const rows = await findShareRows({ playlistId, playlist: { workspaceId } });
   return Promise.all(rows.map(toView));
 }
 
@@ -98,4 +124,57 @@ export async function setShareStatus(shareId: string, status: ShareStatus): Prom
     where: { id: shareId },
     data: { status, ...(status === "REVOKED" ? { revokedAt: now } : { decidedAt: now }) },
   });
+}
+
+
+// ── Sharing with a PERSON (phase D) ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export type PersonLookup = { id: string; name: string | null; handle: string; active: boolean };
+
+/** A person by their EXACT VONO ID — nothing partial, never a list. null when the text is not an exact ID or nobody has it. */
+export async function findPersonByHandle(raw: string): Promise<PersonLookup | null> {
+  const parsed = parseHandle(raw);
+  if (!parsed) return null;
+  const u = await prisma.user.findUnique({ where: { handle: parsed.handle }, select: { id: true, name: true, firstName: true, lastName: true, handle: true, status: true } });
+  if (!u || !u.handle) return null;
+  return { id: u.id, name: creatorDisplayName(u) ?? null, handle: u.handle, active: u.status === "ACTIVE" };
+}
+
+/** how many shares of this sender's business are open (pending / accepted) towards this person, and how many shares wait for the person in all */
+export async function countPersonShares(i: { workspaceId: string; targetUserId: string }): Promise<{ openToTarget: number; pendingForTarget: number }> {
+  const [openToTarget, pendingForTarget] = await Promise.all([
+    prisma.playlistShare.count({ where: { targetKind: "USER", targetUserId: i.targetUserId, status: { in: ["PENDING", "ACCEPTED"] }, playlist: { workspaceId: i.workspaceId } } }),
+    prisma.playlistShare.count({ where: { targetKind: "USER", targetUserId: i.targetUserId, status: "PENDING" } }),
+  ]);
+  return { openToTarget, pendingForTarget };
+}
+
+/** Creates ONE pending share of a playlist to a person; null when an open share of it to that person already exists. */
+export async function createPersonShare(i: { workspaceId: string; playlistId: string; fromUserId: string; targetUserId: string }): Promise<ShareView | null> {
+  const open = await prisma.playlistShare.findFirst({
+    where: { playlistId: i.playlistId, targetKind: "USER", targetUserId: i.targetUserId, status: { in: ["PENDING", "ACCEPTED"] }, playlist: { workspaceId: i.workspaceId } },
+    select: { id: true },
+  });
+  if (open) return null;
+  const row = await prisma.playlistShare.create({
+    data: { playlistId: i.playlistId, fromUserId: i.fromUserId, targetKind: "USER", targetUserId: i.targetUserId, status: "PENDING" },
+    include: SHARE_INCLUDE,
+  });
+  return toView(row);
+}
+
+/** The shares sent TO this person (from any business), filtered by status. */
+export async function listSharesForPerson(i: { userId: string; statuses: ShareStatus[] }): Promise<ShareView[]> {
+  const rows = await findShareRows({ targetKind: "USER", targetUserId: i.userId, status: { in: i.statuses } });
+  return Promise.all(rows.map(toView));
+}
+
+/** One share, only when it was sent TO this person. */
+export async function getShareForRecipient(userId: string, shareId: string) {
+  return prisma.playlistShare.findFirst({ where: { id: shareId, targetKind: "USER", targetUserId: userId } });
+}
+
+/** One share, only when this person SENT it and its playlist is in the caller's workspace. */
+export async function getShareForSender(workspaceId: string, userId: string, shareId: string) {
+  return prisma.playlistShare.findFirst({ where: { id: shareId, fromUserId: userId, playlist: { workspaceId } } });
 }
