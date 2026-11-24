@@ -26,3 +26,13 @@ html[data-sb-listlocked][data-sb-listpress] :is(.queue-row, .play-next-pad, .sb-
 html[data-sb-listlocked][data-sb-listpress] :is(.queue-row, .play-next-pad, .sb-queue-rowline, .sb-queue-list) * {
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='M3.5 3.5l9 9M12.5 3.5l-9 9' stroke='%23ff3b30' stroke-width='2.4' stroke-linecap='round'/></svg>") 8 8, not-allowed !important;
 }
+
+/* ── One surface (owner 2026-11-24) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* the white look: the strip takes the page's own colour with dark ink (the Control Room's bar already does) — it no longer stays a black band over a white page */
+html[data-sb-display="white"] .sb-rb { background: #eceef1; color: #1c1c1e; --sb-seam: rgba(0, 0, 0, 0.13); }
+html[data-sb-display="white"] .sb-rb .sb-brand-mark { background-color: #0b0b0c; }
+html[data-sb-display="white"] .sb-rb-where:hover:not(:disabled) { background: rgba(0, 0, 0, 0.07); }
+html[data-sb-display="white"] .sb-rb-state { color: rgba(28, 28, 30, 0.62); }
+html[data-sb-display="white"] .sb-rb-where[data-online="0"] ~ .sb-rb-state { color: #9a5b00; }
+/* the same soft hairline as under the top zone: it does not reach the edges and fades out at both ends — between the strip and the player (all three looks) */
+.sb-rb::after { content: ""; position: absolute; inset-inline: 7%; bottom: 0; height: 1px; pointer-events: none; background: linear-gradient(90deg, transparent 0%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 24%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 76%, transparent 100%); }
