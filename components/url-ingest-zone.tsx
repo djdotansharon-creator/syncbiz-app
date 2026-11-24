@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { useTranslations } from "@/lib/locale-context";
 import { inferPlaylistType } from "@/lib/playlist-utils";
 import type { UnifiedSource } from "@/lib/source-types";
@@ -81,14 +83,14 @@ export function UrlIngestZone({ onAdd }: Props) {
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            body: JSON.stringify(withStationBranch({
               name: parsed?.title ?? "Untitled",
               url: first.url,
               genre: parsed?.genre ?? "Mixed",
               type: "youtube",
               thumbnail: first.cover || (parsed?.cover ?? ""),
               viewCount: first.viewCount,
-            }),
+            }, stationBranchIdNow())),
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;
@@ -137,14 +139,14 @@ export function UrlIngestZone({ onAdd }: Props) {
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            body: JSON.stringify(withStationBranch({
               name: parsed?.title ?? "Untitled",
               url: trimmed,
               genre: parsed?.genre ?? "Mixed",
               type: parsed?.type ?? "stream-url",
               thumbnail: parsed?.cover ?? "",
               viewCount: parsed?.viewCount,
-            }),
+            }, stationBranchIdNow())),
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;

@@ -1,8 +1,8 @@
 /**
  * THE LIBRARY SHOWS A PLAYLIST ONLY IN ITS OWN BRANCH — or where it was SHARED (owner + Dotan 2026-11-22/23: "a playlist appears only in its branch or in the branches it was shared with"; the earlier step, #237, hid only the
  * playlists of local files). A playlist of music FILES exists only on the computer that built it; a playlist of links belongs to the branch that made it and reaches other branches ONLY through sharing (the "Shared" view,
- * lib/shared-playlist-source.ts) — it is no longer drawn everywhere. Pure: it only decides what the library DRAWS; nothing is deleted, moved or sent anywhere, and playback never reads this list. Plain sources and radios
- * are not playlists and are never hidden.
+ * lib/shared-playlist-source.ts) — it is no longer drawn everywhere. Pure: it only decides what the library DRAWS; nothing is deleted, moved or sent anywhere, and playback never reads this list. Plain sources, radios and (since 2026-11-24)
+ * single songs and sets of links are not playlists and are never hidden.
  *
  *   · `viewBranch` = the branch of THIS window: the desktop app's own branch (MAIN's config), or — in a browser / phone — the branch chosen at the top (the last one used). Unknown (the desktop has not answered yet)
  *     = show everything, exactly as before.
@@ -10,14 +10,18 @@
  */
 import { sameBranch } from "./local-playlist-branch";
 import { playlistHasLocalFiles } from "./playlist-playability";
-import type { UnifiedSource } from "./source-types";
+import { classifyLibraryEntityContract, type UnifiedSource } from "./source-types";
 
-/** true when this library row is a playlist (or a song of one) that belongs to ANOTHER branch than `viewBranch`. */
+/** true when this library row is a real PLAYLIST (or a single / set that plays local files) that belongs to ANOTHER branch than `viewBranch`. */
 export function isPlaylistOfAnotherBranch(source: UnifiedSource, viewBranch: string | null | undefined, canonicalDefaultBranchId: string | null): boolean {
   const view = (viewBranch ?? "").trim();
   if (!view) return false;
   if (source.origin !== "playlist" || !source.playlist) return false;
-  return !sameBranch(source.playlist.branchId, view, canonicalDefaultBranchId);
+  if (sameBranch(source.playlist.branchId, view, canonicalDefaultBranchId)) return false;
+  // a SINGLE song or a long SET (an "item", not a playlist) that plays from links is the business's, not one branch's: it is seen everywhere (owner 2026-11-24: "songs and what was played
+  // lately are everyone's"). Only one that plays LOCAL files stays with the computer that has the files.
+  if (classifyLibraryEntityContract(source).entityKind === "item" && !playlistHasLocalFiles(source.playlist)) return false;
+  return true;
 }
 
 /** the narrower rule of #237 (kept for its guard): a playlist of LOCAL files that belongs to another branch. */

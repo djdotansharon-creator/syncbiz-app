@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { RiseText } from "@/components/rise-text";
 import {
   buildDjCreatorMatchContextFromWizard,
@@ -1354,14 +1356,14 @@ export function DjCreatorAiShell({
         credentials: "include",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(withStationBranch({
           name,
           url: first.url,
           genre: "DJ Creator",
           type: first.type,
           thumbnail: playlistThumbnail,
           tracks,
-        }),
+        }, stationBranchIdNow())),
       });
       let payload: unknown;
       try {

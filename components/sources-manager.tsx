@@ -12,6 +12,8 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import {
   useCenterModule,
   isJinglesModule,
@@ -2301,13 +2303,13 @@ function SourcesManagerInner({
     const res = await fetch("/api/playlists", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(withStationBranch({
         name,
         url: `local://user-playlist/${Date.now()}`,
         type: "local",
         genre: "Custom",
         cover: "",
-      }),
+      }, stationBranchIdNow())),
     });
     if (!res.ok) return null;
 

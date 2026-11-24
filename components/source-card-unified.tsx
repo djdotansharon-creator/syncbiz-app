@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
@@ -357,7 +359,7 @@ export function SourceCard({
                       const res = await fetch("/api/playlists", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
+                        body: JSON.stringify(withStationBranch({
                           name: snapshot.name,
                           url: snapshot.url,
                           type: snapshot.type,
@@ -367,7 +369,7 @@ export function SourceCard({
                           viewCount: snapshot.viewCount,
                           durationSeconds: snapshot.durationSeconds,
                           tracks: snapshot.tracks,
-                        }),
+                        }, stationBranchIdNow())),
                       });
                       if (res.ok) window.dispatchEvent(new Event("library-updated"));
                     } catch {

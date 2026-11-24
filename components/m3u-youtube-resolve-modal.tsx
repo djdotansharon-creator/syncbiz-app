@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { mergeM3uLocalsWithYoutubePicks, type M3uYoutubePickForMerge } from "@/lib/m3u-import-youtube-merge";
 import {
@@ -393,14 +395,14 @@ export function M3uYoutubeResolveModal({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: JSON.stringify(withStationBranch({
             name: context.playlistName,
             url: firstUrl,
             genre: defaultGenre,
             type: "youtube",
             thumbnail: firstCover,
             tracks,
-          }),
+          }, stationBranchIdNow())),
         });
         if (!postRes.ok) {
           const errBody = await postRes.json().catch(() => ({}));
