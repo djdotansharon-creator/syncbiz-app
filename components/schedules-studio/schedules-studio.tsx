@@ -31,6 +31,7 @@ import { shouldOfferLocalMove } from "@/lib/local-playlist-branch";
 import { playlistHasLocalFiles } from "@/lib/playlist-playability";
 import { useScheduleBlockAuto } from "@/lib/use-schedule-block-auto";
 import { resolveScheduleTargetBranchId, scheduleTargetKey } from "@/lib/schedule-target-helpers";
+import { isSinglePlaylist } from "@/lib/schedule-picker-kind";
 import { explicitEndMinutes, isSilenceBlock } from "@/lib/schedule-actions";
 import { isSkippedOn, withSkipDate, ymdOf } from "@/lib/schedule-skip";
 import { stationBranchIdNow, useStationBranchId } from "@/lib/station-branch";
@@ -763,7 +764,9 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const colour = (targetType: string, targetId: string) => paletteIndex(`${targetType}:${targetId}`);
     const bid = (targetType: "SOURCE" | "PLAYLIST" | "RADIO", targetId: string) => resolveScheduleTargetBranchId({ targetType, targetId }, sources, playlists, radioStations);
     for (const p of playlists) {
-      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: "playlist", sub: p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) ?? learned[p.id] ?? null });
+      // a song saved from a search is stored as a one-track playlist: it is told apart as a SONG by the library's own rule (owner 2026-11-24); what is scheduled stays the same stored row (targetType PLAYLIST)
+      const single = isSinglePlaylist(p);
+      out.push({ key: scheduleTargetKey("PLAYLIST", p.id), targetType: "PLAYLIST", targetId: p.id, name: p.name, cover: (p.thumbnail || p.cover || "").trim() || null, kind: single ? "song" : "playlist", sub: single ? tr("Song") : p.tracks?.length ? (p.tracks.length === 1 ? tr("1 song") : tr("{n} songs", { n: p.tracks.length })) : tr("Playlist"), branchId: bid("PLAYLIST", p.id), ci: colour("PLAYLIST", p.id), dur: playlistSeconds(p) ?? learned[p.id] ?? null });
     }
     for (const s of sources) {
       out.push({ key: scheduleTargetKey("SOURCE", s.id), targetType: "SOURCE", targetId: s.id, name: s.name, cover: (s.artworkUrl ?? "").trim() || null, kind: "song", sub: tr("Song"), branchId: bid("SOURCE", s.id), ci: colour("SOURCE", s.id), dur: null });
