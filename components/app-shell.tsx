@@ -50,6 +50,7 @@ import { isControlScreenPath } from "@/lib/control-screen";
 import { LOCALES } from "@/lib/locales";
 import { DisplayModeMenuRow } from "@/components/display-mode-menu-row";
 import { FxModeMenuRow } from "@/components/fx-mode-menu-row";
+import { AutoplayNextMenuRow } from "@/components/autoplay-next-menu-row";
 import { DeviceDetailsModal } from "@/components/device-details";
 import { KioskDisplay } from "@/components/kiosk-display";
 import { KioskLaunchButton } from "@/components/kiosk-launch-button";
@@ -1592,6 +1593,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {/* owner 2026-10-31: the "Player / Remote details" row is gone — the Player / Remote icon in the top bar opens that window */}
                       <DisplayModeMenuRow />
                       <FxModeMenuRow />
+                      <AutoplayNextMenuRow />
                       {activeWorkspaceId && workspaceList && workspaceList.length > 1 ? (
                         <div className="sb-fx-section" dir="ltr">
                           <span className="sb-fx-title">{tr("Business")}</span>
