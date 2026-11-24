@@ -9,6 +9,8 @@ import {
   getYouTubeThumbnail,
   getYouTubeVideoId,
 } from "./playlist-utils";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import type { Playlist } from "./playlist-types";
 
 export type CreatePlaylistFromSearchMeta = {
@@ -57,7 +59,7 @@ export async function createPlaylistFromUrl(
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    body: JSON.stringify(withStationBranch({
       name: meta?.title || "Untitled",
       url,
       genre: meta?.genre || "Mixed",
@@ -68,7 +70,7 @@ export async function createPlaylistFromUrl(
       ...(options?.playlistOwnershipScope
         ? { playlistOwnershipScope: options.playlistOwnershipScope }
         : {}),
-    }),
+    }, stationBranchIdNow())),
   });
   if (!res.ok) {
     if (options?.onError) {

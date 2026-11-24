@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { createPortal } from "react-dom";
 import { formatDuration } from "@/lib/format-utils";
 import {
@@ -149,7 +151,7 @@ export function YouTubeMixImportPanelShell({ sourceUrl, onDismiss, onSaved: onSa
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
+        body: JSON.stringify(withStationBranch({
           name,
           url: first.url,
           genre: "Mixed",
@@ -159,7 +161,7 @@ export function YouTubeMixImportPanelShell({ sourceUrl, onDismiss, onSaved: onSa
           durationSeconds: first.durationSeconds,
           tracks,
           saveOrigin: PLAYLIST_CREATE_SAVE_ORIGIN_YOUTUBE_MIX_IMPORT,
-        }),
+        }, stationBranchIdNow())),
       });
       const data = (await res.json()) as Playlist & { error?: string };
       if (!res.ok) {

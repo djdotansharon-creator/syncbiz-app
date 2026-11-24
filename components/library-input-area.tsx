@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useTranslations, useLocale } from "@/lib/locale-context";
@@ -1400,14 +1402,14 @@ export function LibraryInputArea({
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            body: JSON.stringify(withStationBranch({
               name: parsed?.title ?? tx.defaultUntitled,
               url: resolvedFirstUrl,
               genre: parsed?.genre ?? tx.defaultGenreMixed,
               type: "youtube",
               thumbnail: first.cover || (parsed?.cover ?? ""),
               viewCount: first.viewCount,
-            }),
+            }, stationBranchIdNow())),
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;
@@ -1473,7 +1475,7 @@ export function LibraryInputArea({
           const res = await fetch("/api/playlists", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            body: JSON.stringify(withStationBranch({
               name: parsed?.title ?? tx.defaultUntitled,
               url: playableUrl,
               genre: parsed?.genre ?? tx.defaultGenreMixed,
@@ -1481,7 +1483,7 @@ export function LibraryInputArea({
               thumbnail: parsed?.cover ?? "",
               viewCount: parsed?.viewCount,
               durationSeconds: parsed?.durationSeconds,
-            }),
+            }, stationBranchIdNow())),
           });
           if (res.ok) {
             const created = (await res.json()) as Playlist;
@@ -1532,7 +1534,7 @@ export function LibraryInputArea({
         const res = await fetch("/api/playlists", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: JSON.stringify(withStationBranch({
             name,
             url: resolvedUrl,
             genre: genreLine,
@@ -1540,7 +1542,7 @@ export function LibraryInputArea({
             thumbnail: candidate.cover?.trim() || pack.parsed.cover || "",
             viewCount: candidate.viewCount,
             durationSeconds: candidate.durationSeconds,
-          }),
+          }, stationBranchIdNow())),
         });
         if (res.ok) {
           const created = (await res.json()) as Playlist;

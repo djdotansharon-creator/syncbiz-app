@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { withStationBranch } from "@/lib/local-playlist-branch";
+import { stationBranchIdNow } from "@/lib/station-branch";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PlaylistCard } from "@/components/playlist-card";
@@ -37,13 +39,13 @@ export function PlaylistManager({ initialPlaylists }: Props) {
         fetch("/api/playlists", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: JSON.stringify(withStationBranch({
             name: data.name,
             url: data.url,
             genre: data.genre ?? "",
             type: data.type ?? "stream-url",
             thumbnail: data.thumbnail ?? "",
-          }),
+          }, stationBranchIdNow())),
         }).then((res) => {
           if (res.ok) {
             res.json().then((p) => setPlaylists((prev) => [p, ...prev]));
