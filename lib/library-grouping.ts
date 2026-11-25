@@ -26,7 +26,7 @@ export const LIBRARY_SECTION_LABELS: Record<LibrarySectionId, string> = {
   syncbiz_playlists: "SyncBiz Playlists",
   mix_set: "Mix / Set",
   external_playlists: "External Playlists",
-  single_tracks: "Single Tracks",
+  single_tracks: "Singles",
   other: "Other / Uncategorized",
 };
 
