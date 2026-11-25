@@ -279,6 +279,8 @@ model User {
   createdPlaylists           Playlist[]               @relation("PlaylistCreator")
   playlistSharesSent         PlaylistShare[]          @relation("PlaylistShareFrom")
   playlistSharesReceived     PlaylistShare[]          @relation("PlaylistShareToUser")
+  /// 2026-11-25 — virtual back-relation of the schedule-day offers (no column here)
+  scheduleDayShareOffers     ScheduleDayShare[]       @relation("ScheduleDayShareFrom")
   ownedWorkspaces            Workspace[]              @relation("WorkspaceOwner")
   memberships                WorkspaceMember[]
   branchAssignments          UserBranchAssignment[]
@@ -344,6 +346,8 @@ model Workspace {
   accessCodeRow     WorkspaceAccessCode?
   /// Private music banks opened to this business by the platform owner (owner 2026-11-10).
   musicBankGrants   MusicBankGrant[]
+  /// 2026-11-25 — virtual back-relation of the schedule-day offers (no column here)
+  scheduleDayShares ScheduleDayShare[]
 
   @@index([ownerId])
 }
@@ -1100,6 +1104,45 @@ model PlaylistShare {
   @@index([fromUserId])
   @@index([targetUserId, status])
   @@index([targetBranchId, status])
+}
+
+/// 2026-11-25 (owner) — an OFFER to copy ONE DAY of a branch's schedule onto another branch of the SAME business. The receiving branch decides (accept / decline); accepting COPIES the blocks (replace-the-day by default) as ordinary
+/// Schedule rows stamped taxonomyTags {key:"day-copy", value:<batchId>} — nothing is added to Schedule itself. `snapshot` is a WHITELISTED copy of the day (never a local file path or address — CLAUDE.md §12); `ledger` is what an
+/// accept created / changed, so it can be undone (14 days) without losing anything that was edited since. Text columns (not enums) on purpose: the migration is CREATE TABLE only.
+/// DORMANT until the routes of phase 1 are used (nothing in the player reads this table).
+model ScheduleDayShare {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  /// the sender's branch (a plain id of a branch of this business — the legacy key "default" is resolved to its canonical branch before it is stored)
+  fromBranchId    String
+  targetBranchId  String
+  /// "BRANCH" now; "USER" is reserved for a person in another business (later)
+  targetKind      String    @default("BRANCH")
+  fromUserId      String
+  /// 0 (Sunday) – 6 (Saturday): which day of the sender's week was sent
+  sourceWeekday   Int
+  /// PENDING | ACCEPTED | DECLINED | REVOKED | UNDONE (checked by lib/schedule-day-share-rules.ts)
+  status          String    @default("PENDING")
+  /// the client's idempotency key (one per target branch: "<key>#<targetBranchId>"), so a double click / retry sends once
+  requestId       String    @unique
+  snapshot        Json
+  ledger          Json?
+  /// "weekday" (a weekly routine) | "date" (one calendar day) — set when accepted
+  appliedMode     String?
+  appliedWeekdays Int[]     @default([])
+  appliedDate     String?
+  createdAt       DateTime  @default(now())
+  decidedAt       DateTime?
+  undoneAt        DateTime?
+  /// a PENDING offer cannot be accepted after this (30 days)
+  expiresAt       DateTime
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fromUser  User      @relation("ScheduleDayShareFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+
+  @@index([targetBranchId, status])
+  @@index([workspaceId])
+  @@index([fromUserId])
 }
 
 model PlaylistItem {
