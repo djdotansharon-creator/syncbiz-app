@@ -8405,3 +8405,19 @@ html[dir="rtl"][data-sb-display="white"]:not([data-sb-player="compact"]) .audio-
    light by design. Only while a clip shows; nothing else is touched. */
 html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-timeline-time--end { text-shadow: 0 0 3px rgba(255, 255, 255, 0.95), 0 0 7px rgba(255, 255, 255, 0.75); }
 html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-transport-wing--end .player-transport-secondary button { background: rgba(255, 255, 255, 0.5) !important; border-radius: 999px; }
+
+/* ── The playlist screen sits on the page's own surface — wider, higher and bigger (owner 2026-11-25: "it is still inside a whiter square; take it more to the sides and up, bigger elements; no black gap at the top of the cover") ──
+   Black and white looks: the library's canvas is no panel (no fill, border, shadow or corners) — everything is on ONE background; the transparent look keeps its soft glass tint. The cover and the song pictures are
+   16:9 rectangles like the videos they come from (a YouTube still carries black bars top and bottom; in a square they showed as a black gap, in a 16:9 frame `cover` crops exactly those bars away). */
+html[data-sb-display="white"] .library-sections-canvas, html[data-sb-display="black"] .library-sections-canvas { background: none !important; box-shadow: none !important; border: 0 !important; border-radius: 0; padding-inline: 4px; padding-top: 0; }
+.library-sections-canvas .sb-alb-pl .sb-alb-head { padding-top: 0; gap: 26px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-cover { width: 272px; height: 153px; border-radius: 20px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-titles h2 { font-size: 36px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-row { grid-template-columns: 68px 112px minmax(0, 1fr); }
+.library-sections-canvas .sb-alb-pl .sb-alb-n { height: 63px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-art { width: 112px; height: 63px; border-radius: 12px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-name { font-size: 17px; }
+.library-sections-canvas .sb-alb-pl .sb-alb-meta { font-size: 13.5px; }
+/* the white look: the close (×) of the playlist screen is dark ink, not white on white */
+html[data-sb-display="white"] .library-sections-canvas .sb-alb-head .sb-wz-x { color: rgba(28, 28, 30, 0.55); }
+html[data-sb-display="white"] .library-sections-canvas .sb-alb-head .sb-wz-x:hover { color: #1c1c1e; }
