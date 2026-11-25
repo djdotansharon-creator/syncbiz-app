@@ -155,7 +155,12 @@ assert("payload: invalid url → [] (nothing plays, even with a bell)",
   // design. Same invariant, same two paths, current spelling (CLAUDE.md §18).
   assert("#9 explicit On-Air surfaces still emit via fireOnAir / handleResultPlay",
     /onClick=\{handleResultPlay\}[\s\S]{0,200}📡 \{tr\("On-Air"\)\}/.test(shell) && /const handlePadPlay = useCallback\(\(pad: SamplerPadItem\) => \{[\s\S]{0,400}fireOnAir\(pad\.url\);/.test(shell));
-  assert("#9 fireOnAir still routes CONTROL → PLAY_INTERRUPT", /sendCommandToMaster\("PLAY_INTERRUPT", \{ url \}\)/.test(shell));
+  // 2026-11-26: #264 (F3) appends the workspace-scoped jingle token before dispatch, so the
+  // payload is now `{ url: tokenized }` rather than the shorthand `{ url }`. What this guards is
+  // the ROUTE, not the shape of the object literal, so it matches the call and the url key and
+  // stops breaking every time what goes INTO it changes (CLAUDE.md §18). A removed route still
+  // fails it, which is checked.
+  assert("#9 fireOnAir still routes CONTROL → PLAY_INTERRUPT", /sendCommandToMaster\("PLAY_INTERRUPT", \{ url[:,}\s]/.test(shell));
   const hook = read("components", "jingles-control", "use-audio-preview.ts");
   assert("#8 browser preview hook is local-only (no WS / bridge / PLAY_INTERRUPT)", !/PLAY_INTERRUPT|sendCommand|syncbizDesktop/.test(hook));
   const mobile = read("components", "mobile", "mobile-jingles.tsx");
