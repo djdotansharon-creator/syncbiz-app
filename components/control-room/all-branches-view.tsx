@@ -21,6 +21,7 @@ import { Marquee } from "@/components/control-room/marquee";
 import { ColorPanel, useColorMode } from "@/components/control-room/color-panel";
 import { RegionTitle } from "@/components/control-room/region-title";
 import { BranchJingles, JinglesHqPanel } from "@/components/control-room/jingles-panels";
+import { BranchSchedule, useWaitingDayOffers } from "@/components/control-room/branch-schedule";
 import { suggestAudience, type AudienceDeps } from "@/components/control-room/jingle-audience";
 import { REGIONS, branchRegion, type RegionId } from "@/lib/control-room-regions";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
@@ -127,6 +128,8 @@ export function AllBranchesView() {
   }, []);
   /** bump to reload the branch list (after add / edit) */
   const [reloadKey, setReloadKey] = useState(0);
+  /** how many "a day of a schedule is waiting" offers each branch has — the small dot on its row (owner 2026-11-25) */
+  const waitingOffers = useWaitingDayOffers();
   /** owner: add / edit branch form in the right column */
   const [form, setForm] = useState<{ mode: "add" } | { mode: "edit"; id: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -496,6 +499,8 @@ export function AllBranchesView() {
                   >
                   {/* the branch's Players / Remotes and the requests waiting for it (device approval, owner 2026-10-28) — renders nothing while the feature is off */}
                   <BranchDevices key={`dev-${open.id}`} branchId={open.id} />
+                  {/* the branch's schedule, read only: one day as a lane, a day waiting from another branch, Undo; the owner can send a day to the other branches (owner 2026-11-25) */}
+                  <BranchSchedule key={`sch-${open.id}`} branchId={open.id} branchName={open.name} isOwner={isHQ} onChanged={waitingOffers.refresh} />
                   {/* the branch's jingles: "Branch jingles" + "Available to this branch" (same library, server-filtered) */}
                   <BranchJingles
                     key={open.id}
@@ -529,6 +534,7 @@ export function AllBranchesView() {
                     latestEngine={latestEngine}
                     selected={r.id === selectedId}
                     onSelect={() => openBranch(r.id)}
+                    waiting={waitingOffers.counts[r.id] ?? 0}
                   />
                 ))}
               </ul>
@@ -692,7 +698,8 @@ const STATUS_TEXT_CLASS: Record<RowStatus, string> = {
   unknown: "text-[var(--sb-text-tertiary)]",
 };
 
-function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine }: { L: Mgmt; row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void; latestEngine: string | null }) {
+function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine, waiting }: { L: Mgmt; row: Row; brand: BrandRow | null; status: RowStatus; selected: boolean; onSelect: () => void; latestEngine: string | null; /** schedules waiting for this branch (0 = no dot) */ waiting: number }) {
+  const tr = useTr();
   // the station's engine version; amber "Update" when a newer one is published (a flat ellipse, like the player's own pill)
   const engineOld = !!row.stationVersion && !!latestEngine && isNewer(latestEngine, row.stationVersion);
   // what plays there, one line — a ticker when it is longer than its box
@@ -727,6 +734,7 @@ function BranchRow({ L, row, brand, status, selected, onSelect, latestEngine }: 
           {row.regionReason === "no_location" ? <span className="text-amber-300/80">{L.t("cr.noLocation")}</span> : null}
           {row.stationVersion ? <span className="tabular-nums" dir="ltr" title={engineOld && latestEngine ? L.t("cr.updateTip").replace("{v}", row.stationVersion).replace("{w}", latestEngine) : undefined}>v{row.stationVersion}</span> : null}
           {engineOld ? <span className="cr-row-update"><span className="sb-pill-t">{L.t("cr.update")}</span></span> : null}
+          {waiting > 0 ? <span className="cr-sch-rowdot" title={tr("Schedule waiting")}><i aria-hidden />{tr("Schedule waiting")}</span> : null}
         </span>
         <span className={`cr-row-status ${STATUS_TEXT_CLASS[status]}`}>
           <StatusLed status={status} size={11} />
