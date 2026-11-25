@@ -14,6 +14,7 @@ import { useLibraryTheme } from "@/lib/library-theme-context";
 import { AudioPlayer } from "@/components/audio-player";
 import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
+import { useDevicePlayer } from "@/lib/device-player-context";
 import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId, inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
@@ -498,6 +499,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isMediaThemeRoute = true;
   const { libraryTheme } = useLibraryTheme();
   const { playSource, setQueue, setUrlPrepareActive, setLastMessage } = usePlayback();
+  // A song / playlist / link dropped on the player. A browser that only CONTROLS a branch (a Remote: connected to a branch, not the MASTER, not the desktop app) must SEND the drop to the station — exactly what a library card's play does
+  // (sources-manager `playSourceOverride` = `playSourceOrSend`). Before, the drop only changed this screen's own queue and nothing switched until Play was pressed (owner 2026-11-25). The Player itself, the MASTER and the desktop app are unchanged.
+  const dropDeviceCtx = useDevicePlayer();
+  const dropSendsToStation = !isDesktopApp && !!dropDeviceCtx?.isBranchConnected && dropDeviceCtx.deviceMode !== "MASTER";
+  const dropPlaySource: typeof playSource = dropSendsToStation && dropDeviceCtx ? dropDeviceCtx.playSourceOrSend : playSource;
   const [playerDropActive, setPlayerDropActive] = useState(false);
   const [activeCenterModule, setActiveCenterModule] = useState<CenterModule>(null);
   // ─── Adaptive player size: full / compact / mini ──────────────────────────
@@ -954,7 +960,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         setQueue([unified], { force: true });
         urlTimingMark("playSource_call", { sourceId: unified.id, fastPath: true });
         console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id, fastPath: true });
-        playSource(unified);
+        dropPlaySource(unified);
         return;
       }
 
@@ -1017,7 +1023,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         savePlaylistToLocal(created);
         setQueue([unified], { force: true });
         console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
-        playSource(unified);
+        dropPlaySource(unified);
         return;
       }
 
@@ -1042,7 +1048,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         saveRadioToLocal(station);
         setQueue([unified], { force: true });
         console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
-        playSource(unified);
+        dropPlaySource(unified);
         return;
       }
 
@@ -1104,7 +1110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       setQueue([unified], { force: true });
       urlTimingMark("playSource_call", { sourceId: unified.id });
       console.log("[SyncBiz Audit] url_prepare playSource_call", { sourceId: unified.id });
-      playSource(unified);
+      dropPlaySource(unified);
     } catch {
       clearUrlPrepare("error");
       urlTimingSummary({ outcome: "error" });
@@ -1155,7 +1161,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 ...unifiedFoundationHints("playlist", "local", playlist.url),
               };
               setQueue([unified], { force: true });
-              playSource(unified, 0);
+              dropPlaySource(unified, 0);
             }
             return;
           }
@@ -1171,7 +1177,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             }
             const ephemeral = ephemeralLocalSourceWithCover(p, cover ?? null);
             setQueue([ephemeral], { force: true });
-            playSource(ephemeral);
+            dropPlaySource(ephemeral);
             return;
           }
         }
@@ -1230,7 +1236,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ...unifiedFoundationHints("playlist", "local", playlist.url),
           };
           setQueue([unified], { force: true });
-          playSource(unified, 0);
+          dropPlaySource(unified, 0);
           return;
         }
       }
@@ -1242,7 +1248,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const queue = JSON.parse(queueSourcesJson) as UnifiedSource[];
         if (Array.isArray(queue) && queue.length > 0) {
           setQueue(queue, { force: true });
-          playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
+          dropPlaySource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
           return;
         }
       } catch {
@@ -1259,7 +1265,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const queue = ids.map((id) => byId.get(id)).filter((s): s is UnifiedSource => !!s);
         if (queue.length > 0) {
           setQueue(queue, { force: true });
-          playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
+          dropPlaySource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
           return;
         }
       } catch {
@@ -1283,7 +1289,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           const queue = resolveSyncbizPlaylistPlayQueue(payload.key, allSources, assignments);
           if (queue.length > 0) {
             setQueue(queue, { force: true });
-            playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
+            dropPlaySource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
             return;
           }
         }
@@ -1292,7 +1298,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           const queue = resolveDaypartCollectionSources(payload.key, allSources);
           if (queue.length > 0) {
             setQueue(queue, { force: true });
-            playSource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
+            dropPlaySource(queue[0], playlistLeafTrackIndexForQueueItem(queue[0]));
             return;
           }
         }
@@ -1307,7 +1313,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const source = JSON.parse(sourceJson) as UnifiedSource;
         if (source?.id && source?.url) {
           setQueue([source], { force: true });
-          playSource(source);
+          dropPlaySource(source);
           return;
         }
       } catch {
@@ -1321,7 +1327,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const source = allSources.find((s) => s.id === sourceId);
       if (source) {
         setQueue([source], { force: true });
-        playSource(source);
+        dropPlaySource(source);
         return;
       }
     }
