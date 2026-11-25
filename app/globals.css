@@ -8438,3 +8438,13 @@ html[data-sb-display="white"] .sb-timeline-track { background: rgba(28, 28, 30, 
 html[data-sb-display="white"] .sb-timeline-row[data-scrubbing="true"] .sb-timeline-track { background: rgba(28, 28, 30, 0.22) !important; }
 html[data-sb-display="white"] .sb-timeline-buffer { background: rgba(28, 28, 30, 0.08) !important; }
 html[data-sb-display="white"] .sb-timeline-played { background: #1c1c1e !important; }
+
+/* ── A video that is NOT a full-frame picture (an album-art / "Official Audio" video, an old 4:3 clip) sits at the deck's edge, as tall as the deck (owner 2026-11-25) ─────────────────────────────────────────────
+   components/deck-clip-fit.tsx measures the video's thumbnail once and publishes --sb-clip-tx / -ty / -z / -w and data-sb-clip-fit on the deck; a normal video publishes nothing and nothing here applies.
+   The transform is !important because the deck's own script writes `transform: none` on the iframe inline every second; the fade's reference width is moved a little beyond the picture so only its inner side melts. */
+.audio-player-library-deck[data-sb-clip-fit] .sb-deck-video-bg iframe { transform: translate(var(--sb-clip-tx, 0px), var(--sb-clip-ty, 0px)) scale(var(--sb-clip-z, 1)) !important; transform-origin: 50% 50% !important; }
+.audio-player-library-deck[data-sb-clip-fit] .sb-deck-video-bg { --sb-video-w: var(--sb-clip-w, 60%); }
+/* white look: the drop overlay (+) blurs what is behind it, like the other looks (it had no blur at all in the white look) */
+html[data-sb-display="white"]:not([data-sb-fx="lite"]) .sb-player-drop[data-on] { -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+/* when a picture sits UNDER the share button (the fitted clip), the button gets the same faint frosted disc the volume button has — a plain icon would vanish on dark footage (white look only; otherwise the icon stays plain) */
+html[data-sb-display="white"] .audio-player-library-deck[data-sb-clip-fit] .sb-transport-wing--end .player-transport-secondary button { background: rgba(255, 255, 255, 0.6); border-radius: 999px; }
