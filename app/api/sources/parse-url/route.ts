@@ -12,6 +12,12 @@ import type { MusicStreamingProvider, ParseUrlJson } from "@/lib/source-types";
 import { parseUrlFoundationHints } from "@/lib/source-types";
 import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
 import { resolveDroploudUrl } from "@/lib/droploud-resolve";
+// V2 SECURITY (2026-11-25): close the unauthenticated SSRF on this endpoint — require a session, reject
+// non-public targets before fetching, and route every caller-URL fetch through the connection-time-guarded
+// safeFetch (same infra shipped for F1 radio/metadata). Shazam/oEmbed/noembed sinks are already host-pinned.
+import { getCurrentUserFromCookies } from "@/lib/auth-helpers";
+import { resolveRemoteMediaTarget } from "@/lib/remote-media-url-policy";
+import { safeFetch } from "@/lib/ssrf-safe-fetch";
 
 /** Stage 6C: try noembed for storefront track URLs typed as generic `stream-url`. */
 const NOEMBED_FOR_EXTERNAL_RESOLVE_PROVIDERS = new Set<MusicStreamingProvider>([
@@ -214,19 +220,15 @@ async function fetchSpotifyOfficialOEmbed(trackUrl: string): Promise<{
 
 async function fetchMarketingHtmlPreview(pageUrl: string): Promise<{ title: string | null; cover: string | null }> {
   try {
-    const res = await fetch(pageUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      signal: AbortSignal.timeout(9000),
-      redirect: "follow",
-    });
-    if (!res.ok) return { title: null, cover: null };
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html")) return { title: null, cover: null };
-    const html = await res.text();
+    // V2: SSRF-safe fetch of the (public, host-pinned) Beatport/Beatsource page. Browser UA preserved
+    // (storefronts 403/empty bot-like agents); safeFetch keeps Host/SNI and re-validates redirects.
+    const res = await safeFetch(pageUrl, {
+      timeoutMs: 9000,
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }).catch(() => null);
+    if (!res?.ok) return { title: null, cover: null };
+    const html = res.body;
     const ogTitle = parseOgTitle(html);
     const twTitle = parseTwitterCardTitle(html);
     const titleTag = parseTitleTag(html);
@@ -365,21 +367,15 @@ function walkJsonLdForSpotifyMusicRecording(node: unknown): { artist: string; so
 /** One HTML fetch: JSON-LD MusicRecording + OG/twitter title fallbacks for Spotify `/track/` URLs */
 async function enrichSpotifyTrackPageHtml(trackUrl: string, out: ParseUrlJson): Promise<void> {
   try {
-    const res = await fetch(trackUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://open.spotify.com/",
-      },
-      signal: AbortSignal.timeout(12_000),
-      redirect: "follow",
-    });
-    if (!res.ok) return;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html")) return;
-    const html = await res.text();
+    // V2: SSRF-safe fetch of the (public, host-pinned) Spotify track page. Browser UA preserved (Spotify's
+    // bot-gate keys on UA); safeFetch keeps Host/SNI so the public page still resolves, and re-validates redirects.
+    const res = await safeFetch(trackUrl, {
+      timeoutMs: 12_000,
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }).catch(() => null);
+    if (!res?.ok) return;
+    const html = res.body;
 
     const ld = parseSpotifyJsonLdMusicRecording(html);
     if (ld) {
@@ -408,9 +404,17 @@ async function enrichSpotifyTrackPageHtml(trackUrl: string, out: ParseUrlJson): 
 
 export async function POST(req: NextRequest) {
   try {
+    // V2: require an authenticated session. Every caller is a same-origin fetch from the signed-in app shell
+    // (library / sources / mobile / GUESTS inbox), so the session cookie is always present — same gate as F1.
+    const user = await getCurrentUserFromCookies();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { url } = (await req.json()) as { url?: string };
     const raw = typeof url === "string" ? url.trim() : "";
-    if (!raw || !isValidUrl(raw)) {
+    // V2: reject invalid / non-public (internal / loopback / credentialed / non-http) targets before any fetch.
+    if (!raw || !isValidUrl(raw) || resolveRemoteMediaTarget(raw) === null) {
       return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
     }
 
@@ -621,24 +625,23 @@ export async function POST(req: NextRequest) {
         }
       }
       try {
-        const res = await fetch(fetchUrl, {
-          headers: { "User-Agent": "Mozilla/5.0 (compatible; SyncBiz/1.0)" },
-          signal: AbortSignal.timeout(8000),
-        });
+        // V2: the primary unauthenticated SSRF sink — fetchUrl is caller-controlled (any http(s) host classifies
+        // as stream-url). safeFetch validates the resolved IP at connection time and re-validates redirect hops.
+        const res = await safeFetch(fetchUrl, {
+          timeoutMs: 8000,
+          userAgent: "Mozilla/5.0 (compatible; SyncBiz/1.0)",
+        }).catch(() => null);
         if (res?.ok) {
-          const ct = res.headers.get("content-type") || "";
-          if (ct.includes("text/html")) {
-            const html = await res.text();
-            const guessed = parseOgTitle(html) ?? parseTitleTag(html);
-            const g = guessed?.trim() ?? "";
-            if (g && !isWeakStorefrontParsedTitle(g)) result.title = g;
-            applyArtistSongSplitsFromMarketingTitle(result);
-            const ogImage = parseOgImage(html);
-            const favicon = parseFavicon(html, fetchUrl);
-            result.cover = ogImage
-              ? resolveUrl(ogImage, fetchUrl)
-              : favicon ?? result.cover ?? null;
-          }
+          const html = res.body;
+          const guessed = parseOgTitle(html) ?? parseTitleTag(html);
+          const g = guessed?.trim() ?? "";
+          if (g && !isWeakStorefrontParsedTitle(g)) result.title = g;
+          applyArtistSongSplitsFromMarketingTitle(result);
+          const ogImage = parseOgImage(html);
+          const favicon = parseFavicon(html, fetchUrl);
+          result.cover = ogImage
+            ? resolveUrl(ogImage, fetchUrl)
+            : favicon ?? result.cover ?? null;
         }
       } catch {
         /* fetch failed */
