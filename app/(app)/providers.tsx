@@ -11,6 +11,7 @@ import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { ScheduleVolumeGuard } from "@/components/schedule-volume-guard";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 import { AutoplayRecommender } from "@/components/autoplay-recommender";
+import { DeckClipFit } from "@/components/deck-clip-fit";
 import { PlayerAutoCompact } from "@/components/player-auto-compact";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
@@ -40,6 +41,8 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <JingleScheduleAutoPlayer />
                 {/* round 8: a lone YouTube song is followed by what YouTube recommends (fills Play Next; renders null) */}
                 <AutoplayRecommender />
+                {/* owner 2026-11-25: a square-cover video is enlarged and pushed to the deck's edge (display only; renders null) */}
+                <DeckClipFit />
                 <PlayerAutoCompact />
                 {/* Read-only diagnostic probe for the P1.1 playback harness (dev-only, renders null). */}
                 <HarnessPlaybackProbe />
