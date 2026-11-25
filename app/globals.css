@@ -8404,30 +8404,15 @@ html[data-sb-display="white"] .sb-deck-glass::after,
 html[dir="rtl"][data-sb-display="white"] .sb-deck-glass::after { background: none; box-shadow: none; }
 /* the plain-ink end time over a clip keeps a soft white halo so it reads on dark footage (text only — no circle, no pill) */
 html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-timeline-time--end { text-shadow: 0 0 3px rgba(255, 255, 255, 0.95), 0 0 7px rgba(255, 255, 255, 0.75); }
-/* A clip that is not 16:9 (square album art, 4:3, vertical, a film with bars) has its own black / white bars INSIDE the 16:9 frame; they used to end in a hard
-   box at the deck's top, bottom and outer edge. In the white look the clip now also fades softly at those three edges (the inner side keeps its own, longer
-   ramp, started a little later so the inner edge of a 4:3 picture, 72px in, is ~3% opaque instead of ~13%), so the frame's rim melts into the card. The picture's own edge INSIDE the frame (e.g. a square cover) cannot be softened from outside the frame. */
+/* White look: the clip is NOT faded at its top, bottom or outer edge any more (owner 2026-11-25: "why is there fog around all the corners? I did not ask for that") — only the inner side, where the clip meets the song's text, keeps its soft ramp
+   (started a little later than in the other looks so the inner edge of a 4:3 picture, 72px in, is ~3% opaque instead of ~13%). A square / 4:3 picture is moved to the deck's edge by components/deck-clip-fit.tsx, so its frame's bars are outside the deck. */
 html[data-sb-display="white"] .sb-deck-video-bg {
-  -webkit-mask-image:
-    linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
-    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
-    linear-gradient(270deg, transparent 0, #000 56px);
-  mask-image:
-    linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
-    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
-    linear-gradient(270deg, transparent 0, #000 56px);
-  -webkit-mask-composite: source-in, source-in;
-  mask-composite: intersect, intersect;
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px));
+  mask-image: linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px));
 }
 html[dir="rtl"][data-sb-display="white"] .sb-deck-video-bg {
-  -webkit-mask-image:
-    linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
-    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
-    linear-gradient(90deg, transparent 0, #000 56px);
-  mask-image:
-    linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
-    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
-    linear-gradient(90deg, transparent 0, #000 56px);
+  -webkit-mask-image: linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px));
+  mask-image: linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px));
 }
 /* A YouTube "hqdefault" still is 4:3 with black bars above and below a 16:9 picture; in a square (queue rows / collapsed strip, the round cover) object-fit: cover
    keeps the bars. Scaling by 4/3 about the centre pushes the bars out of the square (the tile clips). Only these thumbnails, only that kind of still. */
