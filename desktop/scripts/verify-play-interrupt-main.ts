@@ -148,8 +148,13 @@ assert("payload: invalid url → [] (nothing plays, even with a bell)",
     !/isDesktop \? (fireOnAir|handleResultPlay)/.test(shell) && previewButtons.every((b) => !/fireOnAir|handleResultPlay|sendCommandToMaster/.test(b)));
   assert("#7 desktop Preview is disabled with an explicit unavailable state (never silently On-Air)",
     (shell.match(/disabled=\{!(?:resultCard\.url|a\.url) \|\| isDesktop\}/g) ?? []).length === 2 && /Preview isn't available in the desktop app yet/.test(shell));
-  assert("#9 explicit On-Air buttons still emit via fireOnAir / handleResultPlay",
-    /onClick=\{handleResultPlay\}[\s\S]{0,200}📡 On-Air/.test(shell) && /onClick=\{\(\) => fireOnAir\(a\.url\)\}[\s\S]{0,200}📡 On-Air/.test(shell));
+  // 2026-11-25: this pinned pre-redesign markup, not the invariant. The result card's On-Air
+  // button is still there and still calls handleResultPlay; only its label moved into tr().
+  // The library tile's own On-Air button was removed by the 2026-10-26 redesign (5d816de), and
+  // a library jingle now reaches the air through the Quick Pad board, which is explicit by
+  // design. Same invariant, same two paths, current spelling (CLAUDE.md §18).
+  assert("#9 explicit On-Air surfaces still emit via fireOnAir / handleResultPlay",
+    /onClick=\{handleResultPlay\}[\s\S]{0,200}📡 \{tr\("On-Air"\)\}/.test(shell) && /const handlePadPlay = useCallback\(\(pad: SamplerPadItem\) => \{[\s\S]{0,400}fireOnAir\(pad\.url\);/.test(shell));
   assert("#9 fireOnAir still routes CONTROL → PLAY_INTERRUPT", /sendCommandToMaster\("PLAY_INTERRUPT", \{ url \}\)/.test(shell));
   const hook = read("components", "jingles-control", "use-audio-preview.ts");
   assert("#8 browser preview hook is local-only (no WS / bridge / PLAY_INTERRUPT)", !/PLAY_INTERRUPT|sendCommand|syncbizDesktop/.test(hook));
