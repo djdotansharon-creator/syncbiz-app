@@ -68,7 +68,6 @@ export function SharedPlaylistsPanel({
         onBack={() => setOpenId(null)}
         onPlayAll={() => onPlayAll(leaves.filter((l) => !isLocalOnlyLeaf(l)))}
         onPlayItem={(leaf) => onPlayLeaf(leaf, leaves.filter((l) => !isLocalOnlyLeaf(l)))}
-        onClassicView={() => {}}
         unavailable={isLocalOnlyLeaf}
         onUnavailable={() => toast(t.offline)}
         extra={

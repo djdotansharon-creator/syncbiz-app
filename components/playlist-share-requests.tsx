@@ -186,7 +186,6 @@ export function PlaylistShareRequests({
               onBack={() => setPeek(false)}
               onPlayAll={() => {}}
               onPlayItem={() => {}}
-              onClassicView={() => {}}
             />
           </div>
         ) : copying ? (

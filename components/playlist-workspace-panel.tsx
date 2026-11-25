@@ -99,7 +99,6 @@ export function PlaylistWorkspacePanel({
   onBack,
   onPlayAll,
   onPlayItem,
-  onClassicView,
   onAddToPlaylist,
   deleteContextFor,
   canDeleteFromLibrary,
@@ -121,7 +120,6 @@ export function PlaylistWorkspacePanel({
   onBack: () => void;
   onPlayAll: () => void;
   onPlayItem: (item: UnifiedSource) => void;
-  onClassicView: () => void;
   /** the library's own "add to playlist" for a song (opens its picker, or adds straight to a playlist being built) */
   onAddToPlaylist?: (item: UnifiedSource) => void;
   /** what removing this song means here (the classic card's own rule) */
@@ -239,11 +237,7 @@ export function PlaylistWorkspacePanel({
           ) : null}
           <p className="sb-alb-count">{t.songs(items.length)}</p>
           {extra ? <div className="sb-alb-extra">{extra}</div> : null}
-          {mode === "library" ? (
-            <button type="button" className="sb-alb-classic" onClick={onClassicView} title={t.classicTitle}>
-              {t.classic}
-            </button>
-          ) : null}
+          {/* the "Classic view" button was removed (owner 2026-11-25) — an opened playlist is always the album look */}
         </div>
         {items.length > 0 && canPlay ? (
           <button type="button" className="sb-alb-play" onClick={onPlayAll} aria-label={t.playAll} title={t.playAll}>

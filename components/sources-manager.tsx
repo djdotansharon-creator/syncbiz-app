@@ -910,23 +910,8 @@ function SourcesManagerInner({
   const { t } = useTranslations();
   const { libraryTheme } = useLibraryTheme();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  /** An OPENED playlist shows in the album look (1, 2, 3 …) by default; "classic" = the previous cards / rows view, kept one click away (owner 2026-11-22). Remembered per device. */
-  const [playlistView, setPlaylistViewState] = useState<"album" | "classic">("album");
-  useEffect(() => {
-    try {
-      if (localStorage.getItem("vono-playlist-view-v1") === "classic") setPlaylistViewState("classic");
-    } catch {
-      /* only a preference */
-    }
-  }, []);
-  const setPlaylistView = useCallback((v: "album" | "classic") => {
-    setPlaylistViewState(v);
-    try {
-      localStorage.setItem("vono-playlist-view-v1", v);
-    } catch {
-      /* only a preference */
-    }
-  }, []);
+  /** An OPENED playlist always shows in the album look (1, 2, 3 …); the "Classic view" was removed (owner 2026-11-25), and a stored "classic" choice of an older version is ignored. */
+  const playlistView = "album" as const;
   const [genreFilter, setGenreFilter] = useState("");
   /* Workspace rail 3-state collapse (lg+). Both open by default; a collapsed rail becomes a
      40px handle strip and the center monitor (minmax(0,1fr)) owns the remaining width. State
@@ -3839,13 +3824,6 @@ function SourcesManagerInner({
                         <p className="library-card-meta mt-0.5 text-xs">{tr("created by")} <b className="font-semibold">{collectionOpenContext.createdBy}</b></p>
                       ) : null}
                       <p className="library-card-meta mt-1 text-xs">{collectionOpenContext.count} items</p>
-                      {selection.type === "collection_container" &&
-                      (selection.subtype === "syncbiz_playlist" || selection.subtype === "external_playlist") &&
-                      !(compositeScheduleBlocks != null && compositeScheduleBlocks.length > 0) ? (
-                        <button type="button" onClick={() => setPlaylistView("album")} className="library-nav-link mt-1 rounded-lg px-2 py-1 text-[11px]">
-                          {locale === "he" ? "תצוגת אלבום" : "Album view"}
-                        </button>
-                      ) : null}
                     </div>
                   </div>
                 </header>
@@ -3924,7 +3902,6 @@ function SourcesManagerInner({
                     if (selection.type === "collection_container") playCollectionSelection(selection.subtype, selection.key);
                   }}
                   onPlayItem={playAlbumViewItem}
-                  onClassicView={() => setPlaylistView("classic")}
                   onAddToPlaylist={handleAddLeafToPlaylist}
                   deleteContextFor={getItemDeleteContext}
                   canDeleteFromLibrary={(it) => libraryRowEligibleForLibraryDelete(it, displaySources)}
