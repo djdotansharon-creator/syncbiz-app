@@ -7,7 +7,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement, type RefObject } from "react";
 import { useTr } from "@/lib/i18n/use-tr";
 import { formatMinutes, tickStep, windowTicks } from "@/lib/schedules-timeline";
-import { laneBox, laneRange, laneTimes, type LaneBlock } from "@/lib/branch-schedule-lane";
+import { laneBox, laneRange, laneTimes, reasonText, type LaneBlock } from "@/lib/branch-schedule-lane";
+import type { SkippedBlock } from "@/lib/schedule-day-share-rules";
 
 // ── small shared reads (one request, shared by a quick re-open) ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ export function useBranches(): BranchLite[] | null {
 
 // ── the lane ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function useWidth(ref: RefObject<HTMLElement | null>): number {
+export function useWidth(ref: RefObject<HTMLElement | null>): number {
   const [w, setW] = useState(560);
   useEffect(() => {
     const el = ref.current;
@@ -96,7 +97,7 @@ export function DayLane({ blocks, label, compact = false }: { blocks: LaneBlock[
             >
               {isNarrow ? null : (
                 <>
-                  <span className="cr-sch-b-name" dir="auto">{name}</span>
+                  <span className="cr-sch-b-name">{name}</span>
                   {compact ? null : <span className="cr-sch-b-time">{formatMinutes(b.start)}</span>}
                 </>
               )}
@@ -120,3 +121,17 @@ export function DayLane({ blocks, label, compact = false }: { blocks: LaneBlock[
   );
 }
 
+
+/** the blocks that could not be placed, each with its plain reason (the server's own wording, translated) — used by the send window and the offer screen */
+export function WhyList({ skipped }: { skipped: SkippedBlock[] }): ReactElement {
+  const tr = useTr();
+  return (
+    <ul className="cr-sch-why" dir="auto">
+      {skipped.map((s, i) => (
+        <li key={i}>
+          <bdi className="cr-sch-small-time">{s.time.slice(0, 5)}</bdi> <b dir="auto">{s.targetName ?? s.name ?? tr("Music")}</b> <span>{tr(reasonText(s))}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}

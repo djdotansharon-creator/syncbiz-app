@@ -1,8 +1,9 @@
 /**
- * CONTROL ROOM — the Schedule section + "send a day to my other branches": the SCREENS (owner 2026-11-25, phase 2). A static guard + the pure helpers.
- *   components/control-room/branch-schedule.tsx · branch-schedule-dialogs.tsx · branch-schedule-parts.tsx · branch-schedule.css
- *   lib/branch-schedule-lane.ts · lib/schedule-day-share-client.ts (+ the wiring in all-branches-view.tsx and the Hebrew in lib/i18n/phrases.ts)
- * The runtime check (a real browser, three looks, Hebrew) is kept next to the screenshots: see the Playwright script `runtime.mjs` of the same work.
+ * CONTROL ROOM — the Schedule section + "send a day to my other branches": the SCREENS (owner 2026-11-25, phase 2, reworked after the owner's feedback: the receiving branch gets a NOTIFICATION and its own OFFER SCREEN).
+ * A static guard + the pure helpers.
+ *   components/control-room/branch-schedule.tsx (section) · branch-schedule-offer.tsx (notification + offer screen) · branch-schedule-dialogs.tsx (send window) · branch-schedule-parts.tsx · branch-schedule-data.tsx
+ *   branch-schedule.css · lib/branch-schedule-lane.ts · lib/schedule-day-share-client.ts (+ the wiring in all-branches-view.tsx and the Hebrew in lib/i18n/phrases.ts)
+ * The runtime check (a real browser, three looks, Hebrew) is kept next to the screenshots: the Playwright script `runtime.mjs` of the same work.
  * Run: npx tsx scripts/verify-schedule-day-ui.ts
  */
 import { readFileSync } from "node:fs";
@@ -15,12 +16,14 @@ import {
   WEEKDAYS_SHORT,
   cannotBePlaced,
   errorText,
+  isSafeCover,
   laneBlocks,
   laneBox,
   laneRange,
   laneTimes,
   newRequestId,
   nextDateOfWeekday,
+  ownBlocksOn,
   snapshotLane,
   todayYmd,
   undoableOffers,
@@ -33,8 +36,10 @@ const ok = (c: boolean, m: string) => { if (c) { pass++; console.log("  ✓", m)
 const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
 
 const SECTION = read("components/control-room/branch-schedule.tsx");
+const OFFER = read("components/control-room/branch-schedule-offer.tsx");
 const DIALOGS = read("components/control-room/branch-schedule-dialogs.tsx");
 const PARTS = read("components/control-room/branch-schedule-parts.tsx");
+const DATA = read("components/control-room/branch-schedule-data.tsx");
 const CSS = read("components/control-room/branch-schedule.css");
 const LANE = read("lib/branch-schedule-lane.ts");
 const CLIENT = read("lib/schedule-day-share-client.ts");
@@ -42,7 +47,15 @@ const VIEW = read("components/control-room/all-branches-view.tsx");
 const ROUTE_LIST = read("app/api/schedule-day-shares/route.ts");
 const ROUTE_ONE = read("app/api/schedule-day-shares/[id]/route.ts");
 const ROUTE_PREVIEW = read("app/api/schedule-day-shares/preview/route.ts");
-const ALL_UI = SECTION + "\n" + DIALOGS + "\n" + PARTS;
+const ALL_UI = [SECTION, OFFER, DIALOGS, PARTS, DATA].join("\n");
+/** the source of one function / component: from its start to the next top-level declaration */
+const bodyOf = (src: string, start: string): string => {
+  const i = src.indexOf(start);
+  if (i < 0) return "";
+  const rest = src.slice(i + start.length);
+  const m = /\n(?:export )?(?:function|const|type|async function) |\n\/\/ ──/.exec(rest);
+  return src.slice(i, i + start.length + (m ? m.index : rest.length));
+};
 
 // ── DU1 — every word the screens show exists in Hebrew too ───────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log("DU1 — every string is in both languages");
@@ -56,26 +69,28 @@ for (const v of ["The time for undoing this is over", "This day is too big to se
 for (const d of [...WEEKDAYS_FULL, ...WEEKDAYS_SHORT]) keys.add(d);
 keys.add(SEND_CAP_TEXT);
 const missing = [...keys].filter((k) => !HE_PHRASES[k] || !HE_PHRASES[k]!.trim());
-ok(keys.size > 100, `${keys.size} strings found in the screens`);
+ok(keys.size > 120, `${keys.size} strings found in the screens`);
 ok(missing.length === 0, `none is missing in Hebrew${missing.length ? ": " + missing.slice(0, 5).join(" | ") : ""}`);
 const holes = (s: string) => (s.match(/\{[a-z]+\}/g) ?? []).sort().join(",");
 const badVars = [...keys].filter((k) => HE_PHRASES[k] && holes(k) !== holes(HE_PHRASES[k]!));
 ok(badVars.length === 0, `every {placeholder} survives in Hebrew${badVars.length ? ": " + badVars.slice(0, 3).join(" | ") : ""}`);
-ok(WEEKDAYS_FULL.every((d) => /^[֐-׿]+$/.test(HE_PHRASES[d] ?? "")), "the seven days are in Hebrew");
-ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(ALL_UI + CSS + LANE + CLIENT), "no emoji in the new files");
+ok(WEEKDAYS_FULL.every((d) => /^[\u0590-\u05FF]+$/.test(HE_PHRASES[d] ?? "")), "the seven days are in Hebrew");
+ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(ALL_UI + CSS + LANE + CLIENT), "no emoji (and no music-note character) in the new files");
 
-// ── DU2 — the send button is for the owner only; nothing can be edited in the lane ─────────────────────────────────────────────────────────────────────────────────────
+// ── DU2 — the send button is for the owner only; nothing can be edited on these screens ─────────────────────────────────────────────────────────────────────────────
 console.log("DU2 — owner only · read only");
 ok(/isOwner \? \(\s*<button[\s\S]{0,400}onClick=\{\(\) => setSending\(true\)\}/.test(SECTION), "the send button is drawn only when isOwner, and it is the only thing that opens the send window");
 ok((SECTION.match(/setSending\(true\)/g) ?? []).length === 1, "…nothing else opens the send window");
 ok(/\{sending \? <SendDayDialog/.test(SECTION), "the send window is rendered only while 'sending'");
-ok(/isOwner=\{isHQ\}/.test(VIEW) && /setIsHQ\(d\?\.accessType === "OWNER"\)/.test(VIEW), "the Control Room gives the section isOwner = the account's OWNER access (fail closed until it is read)");
-ok(/const \[isHQ, setIsHQ\] = useState\(false\)/.test(VIEW), "isHQ starts false");
-const laneFn = PARTS.slice(PARTS.indexOf("export function DayLane"));
-ok(laneFn.length > 500 && !/\bon[A-Z][A-Za-z]+=/.test(laneFn) && !/draggable|contentEditable|tabIndex|\bonClick\b/.test(laneFn), "the lane has no event handlers, no drag, no edit");
-ok(/role="list"/.test(laneFn) && /role="listitem"/.test(laneFn) && /aria-label=\{`\$\{name\}, \$\{laneTimes\(b\)\}`\}/.test(laneFn), "the lane is a labelled list (each block: name, times)");
+ok(!/SendDayDialog|isOwner/.test(OFFER), "the receiving side has no send button at all");
+ok(/isOwner=\{isHQ\}/.test(VIEW) && /setIsHQ\(d\?\.accessType === "OWNER"\)/.test(VIEW) && /const \[isHQ, setIsHQ\] = useState\(false\)/.test(VIEW), "the Control Room gives the section isOwner = the account's OWNER access (false until it is read)");
+const laneFn = PARTS.slice(PARTS.indexOf("export function DayLane"), PARTS.indexOf("export function WhyList"));
+ok(laneFn.length > 500 && !/\bon[A-Z][A-Za-z]+=/.test(laneFn) && !/draggable|contentEditable|tabIndex|\bonClick\b/.test(laneFn), "the small lane has no event handlers, no drag, no edit");
+ok(/role="list"/.test(laneFn) && /role="listitem"/.test(laneFn) && /aria-label=\{`\$\{name\}, \$\{laneTimes\(b\)\}`\}/.test(laneFn), "…it is a labelled list (each block: name, times)");
+const dayFn = bodyOf(OFFER, "function StudioDay(");
+ok(dayFn.length > 500 && !/\bon[A-Z][A-Za-z]+=/.test(dayFn) && !/draggable|contentEditable|tabIndex|\bonClick\b/.test(dayFn) && /role="list"/.test(dayFn) && /aria-label=\{`\$\{name\}, \$\{laneTimes\(b\)\}`\}/.test(dayFn), "the Studio-style day on the offer screen is read only too (no handlers; a labelled list)");
 ok(!/method:\s*"(PUT|PATCH|DELETE)"/.test(ALL_UI + CLIENT), "the screens never write with PUT / PATCH / DELETE");
-ok(!/method:/.test(SECTION + PARTS) && (SECTION.match(/fetch\(`\/api\/schedules\?branchId=/g) ?? []).length === 1, "the branch's own schedule is only READ (one GET, no method)");
+ok(!/method:/.test(SECTION + PARTS + OFFER + DATA) && (DATA.match(/fetch\(`\/api\/schedules\?branchId=/g) ?? []).length === 1, "the branch's own schedule is only READ (one GET, no method)");
 ok(!/prisma|schedule-day-share-store"/.test(ALL_UI.replace(/import type[^;]+;/g, "")) && !/@\/lib\/prisma/.test(ALL_UI + CLIENT + LANE), "no database code in the browser files (types only)");
 
 // ── DU3 — the calls match the server ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -87,14 +102,12 @@ ok(["preview", "accept", "decline", "undo"].every((a) => sentActions.includes(a)
 ok(!sentActions.includes("revoke"), "…and 'revoke' (the sender's) is not offered by these screens");
 ok(/"\/api\/schedule-day-shares\/preview"/.test(CLIENT) && /"\/api\/schedule-day-shares"/.test(CLIENT) && /`\/api\/schedule-day-shares\/\$\{encodeURIComponent\(offerId\)\}`/.test(CLIENT), "paths: list+send, preview, one offer");
 ok(/\/api\/schedule-day-shares\?\$\{q\.toString\(\)\}/.test(CLIENT) && /q\.set\("branchId"/.test(CLIENT), "the list asks ?status= and &branchId=");
-const statuses = [...CLIENT.matchAll(/status: "(pending|accepted|history|all)"/g)].map((m) => m[1]);
-ok(/s === "accepted"/.test(ROUTE_LIST) && /s === "all"/.test(ROUTE_LIST) && /s === "history"/.test(ROUTE_LIST) && /"pending"/.test(ROUTE_LIST), "the server understands the status words (pending / accepted / all / history)");
-ok(statuses.length >= 0 && /type OfferStatusQuery = "pending" \| "accepted" \| "history" \| "all"/.test(CLIENT), "the client's status words are exactly those");
+ok(/s === "accepted"/.test(ROUTE_LIST) && /s === "all"/.test(ROUTE_LIST) && /s === "history"/.test(ROUTE_LIST) && /"pending"/.test(ROUTE_LIST) && /type OfferStatusQuery = "pending" \| "accepted" \| "history" \| "all"/.test(CLIENT), "the status words are the server's (pending / accepted / all / history)");
 for (const k of ["fromBranchId", "weekday", "targetBranchIds", "requestId"]) ok(new RegExp(`\\b${k}\\b`).test(ROUTE_LIST) && new RegExp(`\\b${k}\\b`).test(CLIENT), `body field ${k} is read by the server and sent by the client`);
 for (const k of ["fromBranchId", "weekday", "targetBranchIds"]) ok(new RegExp(`\\b${k}\\b`).test(ROUTE_PREVIEW), `the dry run reads ${k}`);
 ok(/mode must be "weekday" or "date"/.test(ROUTE_ONE) && /mode: "weekday", weekdays: c\.weekdays/.test(CLIENT) && /mode: "date", date: c\.date/.test(CLIENT), "apply body: mode weekday + weekdays, or mode date + date");
-ok(/conflict must be "replace" or "alongside"/.test(ROUTE_ONE) && /conflict: "replace" \| "alongside"/.test(CLIENT) && /useState<"replace" \| "alongside">\("replace"\)/.test(DIALOGS), "conflict is replace | alongside, and 'Replace that day' is the default");
-ok(/ApplyChoice/.test(DIALOGS) && /min=\{today\}/.test(DIALOGS) && /todayYmd\(now\)/.test(DIALOGS), "the date picker starts today (the server refuses a past date)");
+ok(/conflict must be "replace" or "alongside"/.test(ROUTE_ONE) && /conflict: "replace" \| "alongside"/.test(CLIENT) && /useState<"replace" \| "alongside">\("replace"\)/.test(OFFER), "conflict is replace | alongside, and 'Replace that day' is the default");
+ok(/min=\{today\}/.test(OFFER) && /todayYmd\(now\)/.test(OFFER), "the date picker starts today (the server refuses a past date)");
 // the idempotent requestId: a fresh one per click — made inside the click handler, never kept
 const sendFn = DIALOGS.slice(DIALOGS.indexOf("const send = async"), DIALOGS.indexOf("const nameOf"));
 ok(/requestId: newRequestId\(\)/.test(sendFn) && (DIALOGS.match(/newRequestId\(\)/g) ?? []).length === 1, "requestId = newRequestId() is made inside the send click (one per click)");
@@ -102,40 +115,70 @@ const idRegex = new RegExp(/const REQUEST_ID = (\/.+\/);/.exec(ROUTE_LIST)![1]!.
 const ids = Array.from({ length: 200 }, () => newRequestId());
 ok(ids.every((id) => idRegex.test(id)) && new Set(ids).size === 200, "200 requestIds: all accepted by the server's pattern, all different");
 ok(/canSend/.test(sendFn) && /disabled=\{!canSend\}/.test(DIALOGS), "a second click while sending does nothing (the button is off while busy)");
-// the server's cap of 50 branches per send (and a business may have more branches than that): the dry run, "All branches" and the ticks all stay inside it
 ok(/DAY_SHARE_LIMITS\.MAX_TARGET_BRANCHES/.test(DIALOGS) && /others\.slice\(0, MAX_TARGETS\)/.test(DIALOGS) && /selectable\.slice\(0, MAX_TARGETS\)/.test(DIALOGS) && /p\.length >= MAX_TARGETS \? p/.test(DIALOGS), "the dry run, 'All branches' and the ticks stay inside the server's cap of branches per send");
 ok(!/targetBranchIds: "all"/.test(DIALOGS), "the window never asks the server for 'all' (a business with more than 50 branches would be refused)");
 ok(errorText(413, "A day can be sent to at most 50 branches at once") === SEND_CAP_TEXT && SEND_CAP_TEXT.includes("50"), "the server's 'at most 50 branches' is said in plain words");
 
-// ── DU4 — what the screens do on the receiving side ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-console.log("DU4 — receiving side, undo, states");
-ok(/listOffers\(\{ branchId, status: "pending" \}\)/.test(SECTION) && /listOffers\(\{ branchId, status: "accepted" \}\)/.test(SECTION), "the section reads this branch's pending and accepted offers");
-ok(/undoableOffers\(offers\.accepted, new Date\(\)\)/.test(SECTION) && /undoOffer\(o\.id\)/.test(SECTION), "Undo rows come from the accepted offers still inside their undo time");
-ok(/previewAccept\(offer\.id, choice\)/.test(DIALOGS) && /acceptOffer\(offer\.id, choice\)/.test(DIALOGS) && DIALOGS.indexOf("previewAccept(") < DIALOGS.indexOf("acceptOffer("), "'what will happen' (preview) comes before accept");
-ok(/disabled=\{!canUse\}/.test(DIALOGS) && /data\.willPlace\.length > 0/.test(DIALOGS), "'Use this' waits for the preview and for something to place");
-ok(/declineOffer\(offer\.id\)/.test(SECTION) && /tr\("Not now"\)/.test(SECTION), "'Not now' declines");
-ok(/role="status"/.test(SECTION) && /role="alert"/.test(SECTION) && /aria-live="polite"/.test(DIALOGS), "states are announced (status / alert / live)");
-ok(/cr-sch-spin/.test(SECTION) && /tr\("Can't load the schedule\."\)/.test(SECTION) && /tr\("Nothing planned on this day\."\)/.test(SECTION), "loading, error and empty states exist");
-ok(/<GlassModal/.test(DIALOGS) && (DIALOGS.match(/<GlassModal/g) ?? []).length === 2 && /"Escape"/.test(read("components/glass-modal.tsx")), "both windows are the Control Room's glass window (Esc closes)");
-ok(/aria-pressed=\{i === day\}/.test(SECTION) && /aria-label=\{tr\("Day of the week"\)\}/.test(SECTION.replace('aria-label={tr("Day of the week")}', 'aria-label={tr("Day of the week")}')), "the day chips are real buttons with aria-pressed");
+// ── DU4 — the receiving side: a NOTIFICATION, and its own screen ────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log("DU4 — notification + offer screen");
+ok(!/OfferCard|cr-sch-wait|UseDayDialog|branchId, status: "pending"/.test(SECTION + DIALOGS), "the branch screen's section has no 'Schedule waiting' card, no mini lane for offers, no pending read — only the Undo rows (accepted)");
+ok(/listOffers\(\{ branchId, status: "accepted" \}\)/.test(SECTION) && /undoableOffers\(offers\.accepted, new Date\(\)\)/.test(SECTION) && /undoOffer\(o\.id\)/.test(SECTION), "Undo rows come from the accepted offers still inside their undo time");
+const pillFn = bodyOf(OFFER, "export function SchedulePill(");
+ok(pillFn.includes('status: "pending"') && /<button type="button" className="cr-sch-pill" onClick=\{onOpen\}/.test(pillFn) && !/DayLane|StudioDay|<ul|<table/.test(pillFn), "the notification is ONE button (no strip, no list, no lane) that opens the offer screen");
+ok(/if \(list\.length === 0\) return null/.test(pillFn) && /list\.length > 1 \? <span className="cr-sch-count">/.test(pillFn) && /A schedule is waiting · from \{branch\}/.test(pillFn) && /Schedules are waiting/.test(pillFn), "…nothing when nothing waits; 'A schedule is waiting · from <branch>'; a count when several");
+ok(/aria-label=\{text\}/.test(pillFn), "…and it has an accessible name");
+const screen = bodyOf(OFFER, "export function BranchOfferScreen(");
+ok(screen.length > 800 && !/GlassModal|DayLane|BranchDevices|BranchJingles|BranchPeople|StationActivation|BranchSchedule\b|SendDayDialog/.test(OFFER.replace(/BranchSchedule\.|branch-schedule/g, "")), "the offer screen is not a window and brings none of the branch screen's other parts");
+ok(/<header className="cr-bp-head">[\s\S]{0,700}cr-bp-back[\s\S]{0,700}<LogoTile[\s\S]{0,300}<h2 dir="auto">\{name\}<\/h2>/.test(screen) && !/StatusLed|cr-bp-status|BranchMenu/.test(screen), "its header is the back arrow + the branch's logo and name — nothing else");
+ok(/<h3 className="cr-sch-os-title"[^>]*>\{tr\("Schedule"\)\}<\/h3>/.test(screen), "under it the title 'Schedule'");
+ok(/e\.key === "Escape"\) onBack\(\)/.test(screen) && /aria-label=\{tr\("Back"\)\}/.test(screen) && /titleRef\.current\?\.focus\(\)/.test(screen), "Esc and the back arrow return; focus lands on the title");
+ok(/onBack=\{\(\) => setOfferFor\(null\)\}/.test(VIEW) && /if \(open && offerFor === open\.id\) \{/.test(VIEW) && VIEW.indexOf("offerFor === open.id") < VIEW.indexOf("<BranchPanel"), "the Control Room swaps the branch screen for the offer screen (and back)");
+ok(/<BranchOfferScreen[\s\S]{0,700}name=\{open\.name\}[\s\S]{0,500}logoUrl=\{/.test(VIEW) && /<SchedulePill key=\{`pill-\$\{open\.id\}`\} branchId=\{open\.id\} onOpen=\{\(\) => setOfferFor\(open\.id\)\} \/>\s*<BranchPanel/.test(VIEW) && /headerEnd=\{<BranchPeople key=/.test(VIEW), "the notification sits right above the branch title and opens it (the people strip keeps its place in the header)");
+// the day, the Studio's way
+ok(/\/api\/playlists/.test(DATA) && /m\.set\(p\.id, \{ name: p\.name, cover: isSafeCover\(c\) \? c : null \}\)/.test(DATA) && /b\.targetType === "PLAYLIST" \? playlists\?\.get\(b\.targetId\)\?\.cover/.test(OFFER), "covers come from the playlists the workspace already lists, by target id");
+ok(/<img className="cr-sch-art"[^>]*onError=/.test(OFFER) && /cr-sch-art is-ph/.test(OFFER) && /cr-sch-art is-quiet/.test(OFFER), "a block shows its cover, else the placeholder, else (quiet) the hatch; a broken picture falls back to the placeholder");
+ok(/<StudioDay blocks=\{lane\} playlists=\{playlists\}/.test(OFFER) && /<Agenda blocks=\{lane\} playlists=\{playlists\}/.test(OFFER) && /The day, hour by hour/.test(OFFER), "the day lane with covers AND 'The day, hour by hour' with a cover on every row (as the Studio's day view)");
+ok(/\.cr-sch-sd-b[^{]*\{[^}]*overflow: hidden/.test(CSS) && /\.cr-sch-sd-text \{[^}]*linear-gradient\(to bottom, transparent 0, color-mix\(in srgb, var\(--cs-fog\)/.test(CSS) && /\.cr-sch-art\.is-ph \{[^}]*repeating-linear-gradient\(135deg/.test(CSS) && /\.cr-sch-art\.is-quiet \{[^}]*repeating-linear-gradient\(135deg/.test(CSS) && /--cs-fog: #0b0b0d/.test(CSS) && /--cs-ph-a: #121215/.test(CSS), "the Studio's visual language is recreated (cover behind a fog veil, hatched placeholder, hatched quiet blocks, the Studio's fog colours)");
+ok(!/schedules-studio|from "@\/components\/schedules-studio/.test(ALL_UI + CSS), "…without importing or editing the Studio (only pure helpers from lib/schedules-timeline.ts)");
+ok(/from "@\/lib\/schedules-timeline"/.test(OFFER) && /(formatMinutes|tickStep|windowTicks)/.test(OFFER), "the pure helpers are reused");
+// what the screen offers
+ok(/cannotBePlaced\(data\.skipped\)/.test(OFFER) && /<WhyList skipped=\{cannot\} \/>/.test(OFFER) && /ownBlocksOn\(ownItems\.filter\(\(s\) => s\.branchId === branchId\), choice\)/.test(OFFER) && /setSeenKey\(dayKeyOf\(choice\)\)/.test(OFFER) && /tr\("Replace that day"\)/.test(OFFER) && /tr\("Keep both"\)/.test(OFFER) && /tr\("What will happen"\)/.test(OFFER), "under the day: what can't be placed (with reasons), the conflict note, Replace / Keep both, What will happen");
+ok(/previewAccept\(offer\.id, choice\)/.test(OFFER) && /acceptOffer\(offer\.id, choice\)/.test(OFFER) && OFFER.indexOf("previewAccept(") < OFFER.indexOf("acceptOffer("), "'what will happen' (preview) comes before accept");
+ok(/disabled=\{!canUse\}/.test(OFFER) && /data\.willPlace\.length > 0/.test(OFFER) && /declineOffer\(offer\.id\)/.test(OFFER) && /tr\("Not now"\)/.test(OFFER) && /tr\("Use this"\)/.test(OFFER), "[Use this] waits for the preview; [Not now] declines");
+const useFn = bodyOf(OFFER, "  const use = async () => {");
+const noFn = bodyOf(OFFER, "  const notNow = async () => {");
+ok(/postScheduleNotice\(branchId/.test(useFn) && /onBack\(\)/.test(useFn) && /postScheduleNotice\(branchId/.test(noFn) && /onBack\(\)/.test(noFn), "both answers leave one calm line and return to the branch screen");
+ok(/peekScheduleNotice\(branchId\)/.test(SECTION) && /clearScheduleNotice\(branchId\)/.test(SECTION) && /role="status"/.test(SECTION) && /cr-sch-notice/.test(SECTION), "…the branch screen shows that line once");
+ok(/role="status"/.test(DATA) && /role="alert"/.test(OFFER) && /aria-live="polite"/.test(OFFER), "states are announced (status / alert / live)");
+ok(/cr-sch-spin/.test(DATA) && /tr\("Can't load the schedule\."\)/.test(SECTION) && /tr\("Nothing planned on this day\."\)/.test(SECTION) && /tr\("No schedule is waiting\."\)/.test(OFFER), "loading, error and empty states exist");
+ok(/aria-pressed=\{i === day\}/.test(SECTION) && /aria-pressed=\{weekdays\.includes\(i\)\}/.test(OFFER), "the day chips are real buttons with aria-pressed");
+ok(/list\.length > 1 \? \(\s*<div className="cr-sch-os-pick"/.test(OFFER) && /aria-pressed=\{o\.id === offer\.id\}/.test(OFFER), "several waiting offers: a plain choice between them on the offer screen");
+ok(/<GlassModal/.test(DIALOGS) && (DIALOGS.match(/<GlassModal/g) ?? []).length === 1 && /"Escape"/.test(read("components/glass-modal.tsx")), "the owner's send window is the Control Room's glass window (Esc closes) — the only window left");
 
 // ── DU5 — the wiring on the branch screen and in the list ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log("DU5 — wiring");
 const iDev = VIEW.indexOf("<BranchDevices"), iSch = VIEW.indexOf("<BranchSchedule "), iJin = VIEW.indexOf("<BranchJingles");
 ok(iDev > 0 && iSch > iDev && iJin > iSch, "the section sits between the devices and the jingles");
-ok(/waiting=\{waitingOffers\.counts\[r\.id\] \?\? 0\}/.test(VIEW) && /cr-sch-rowdot/.test(VIEW) && /useWaitingDayOffers\(\)/.test(VIEW), "a branch row gets a small dot while a schedule waits for it");
-ok(/onChanged=\{waitingOffers\.refresh\}/.test(VIEW), "answering an offer refreshes the dots");
+ok(/waiting=\{waitingOffers\.counts\[r\.id\] \?\? 0\}/.test(VIEW) && /cr-sch-rowdot/.test(VIEW) && /useWaitingDayOffers\(\)/.test(VIEW), "a branch row keeps its small dot while a schedule waits for it");
+ok((VIEW.match(/onChanged=\{waitingOffers\.refresh\}/g) ?? []).length === 2, "answering or undoing refreshes the dots");
 ok(/key=\{`sch-\$\{open\.id\}`\}/.test(VIEW), "the section is re-made for each branch (no stale state)");
-ok(!/desktop\/|server\/index|master/i.test(SECTION + DIALOGS + PARTS + CLIENT), "no player / desktop / MASTER code touched or referenced");
+ok(!/desktop\/|server\/index|master/i.test(ALL_UI + CLIENT), "no player / desktop / MASTER code touched or referenced");
 
-// ── DU6 — the styles stay inside the section ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-console.log("DU6 — the css is scoped");
-const selectors = [...CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(^|\})\s*([^{}@][^{}]*)\{/g)].map((m) => m[2]!.trim()).filter((x) => x && !x.startsWith("@")); // at-rule preludes (@media / @container / @keyframes) are not selectors
+// ── DU6 — the styles stay inside, and carry no frames ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log("DU6 — the css is scoped, frameless");
+const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+const selectors = [...bare.matchAll(/(^|\})\s*([^{}@][^{}]*)\{/g)].map((m) => m[2]!.trim()).filter((x) => x && !x.startsWith("@")); // at-rule preludes are not selectors
 const outside = selectors.flatMap((s) => s.split(",").map((x) => x.trim())).filter((x) => !/cr-sch/.test(x) && !/^(from|to|\d+%)$/.test(x));
-ok(selectors.length > 60 && outside.length === 0, `every one of ${selectors.length} rules is about .cr-sch*${outside.length ? " — outside: " + outside.slice(0, 3).join(" | ") : ""}`);
-ok(!/rgba?\(\s*255\s*,\s*255\s*,\s*255/.test(CSS) && !/#fff\b|#ffffff\b/.test(CSS.replace(/--cs-on-ink: #ffffff/, "")), "no hard-coded white — the colours come from the look's own text colour");
-ok(/--cs-on-ink: #ffffff; --cs-warn: #8a5a00; --cs-bad: #b4232f/.test(CSS) && /html\[data-sb-display="white"\]\[data-sb-control\]/.test(CSS), "the white look sets its three tokens (on-ink, amber, red)");
-ok(!/margin-left|margin-right|padding-left|padding-right|\bleft:|\bright:|text-align:\s*(left|right)/.test(CSS), "logical properties only (Hebrew right-to-left)");
+ok(selectors.length > 90 && outside.length === 0, `every one of ${selectors.length} rules is about .cr-sch*${outside.length ? " — outside: " + outside.slice(0, 3).join(" | ") : ""}`);
+const noWhiteRule = bare.replace(/html\[data-sb-display="white"\]\[data-sb-control\][^{]*\{[^}]*\}/g, "");
+ok(!/rgba?\(\s*255\s*,\s*255\s*,\s*255/.test(bare) && !/#fff\b|#ffffff\b/i.test(noWhiteRule), "no hard-coded white — the colours come from the look's own text colour (the white look sets its own few tokens)");
+ok(/--cs-on-ink: #ffffff; --cs-warn: #8a5a00; --cs-bad: #b4232f;/.test(CSS) && /--cs-fog: #ffffff; --cs-fog-ink: #1c1c1e; --cs-ph-a: #f6f7f9; --cs-ph-b: #eceef2;/.test(CSS) && /html\[data-sb-display="white"\]\[data-sb-control\]/.test(CSS), "the white look sets its tokens (on-ink, amber, red, the Studio's fog and stripes)");
+const rules = [...bare.matchAll(/([^{}@][^{}]*)\{([^}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! }));
+const framed = rules.filter((r) => /\bborder:(?!\s*0\b)/.test(r.body) && /border-radius/.test(r.body) && !/cr-sch-spin/.test(r.sel));
+ok(framed.length === 0, `no framed boxes (a border together with rounded corners)${framed.length ? ": " + framed[0]!.sel : ""}`);
+ok(!rules.some((r) => /cr-sch-(os-body|wait|offer|pill-row)\s*$/.test(r.sel) && /background:/.test(r.body)), "the offer screen and the notification row are plain text on the page (no panel behind them)");
+ok(!/margin-left|margin-right|padding-left|padding-right|\bleft:|\bright:|text-align:\s*(left|right)/.test(bare), "logical properties only (Hebrew right-to-left)");
+ok(/prefers-reduced-motion: reduce/.test(CSS) && /\.cr-sch-os, \.cr-sch \.cr-sch-notice \{ animation: none; \}/.test(CSS), "the entrance is off for reduced motion");
 
 // ── DU7 — the pure helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log("DU7 — the lane, the dates, the words");
@@ -152,6 +195,7 @@ const sched: Schedule[] = [
 const labels = { quiet: "Quiet", closing: "Closing" };
 const lane = laneBlocks(sched, 2, (s) => s.name ?? "", labels);
 ok(lane.map((b) => b.key).join(",") === "m,s,l,q,c", `the lane is the weekly routine: ${lane.map((b) => b.key).join(",")} (a paused, a one-time block are not drawn; a date's skip does not remove a weekly block)`);
+ok(lane.find((b) => b.key === "m")?.targetType === "PLAYLIST" && lane.find((b) => b.key === "m")?.targetId === "pl-m" && lane.find((b) => b.key === "c")?.targetType === "SILENCE", "a lane block knows what it plays (the offer screen finds the cover by it)");
 ok(lane.find((b) => b.key === "c")?.closing === true && lane.find((b) => b.key === "c")?.quiet === true && lane.find((b) => b.key === "c")?.name === "Closing", "the closing block is quiet and named Closing");
 ok(lane.find((b) => b.key === "q")?.name === "Quiet" && lane.find((b) => b.key === "q")?.closing === false, "another quiet block is named Quiet");
 ok(laneBlocks(sched, 4, (s) => s.name ?? "", labels).map((b) => b.key).join(",") === "l,c", "Thursday: Lunch and Closing (the daily ones)");
@@ -159,7 +203,7 @@ ok(lane.every((b, i) => i === 0 || lane[i - 1]!.start <= b.start), "in time orde
 const r = laneRange(lane);
 ok(r.first === 9 * 60 && r.last === 24 * 60, `the lane covers 09:00 → 24:00 (${r.first}–${r.last})`);
 ok(laneRange([]).last - laneRange([]).first === 12 * 60, "an empty day still has a range");
-const short = laneRange([{ key: "a", start: 600, end: 630, name: "x", quiet: false, closing: false, tone: 0 }]);
+const short = laneRange([{ key: "a", start: 600, end: 630, name: "x", quiet: false, closing: false, tone: 0, targetType: "PLAYLIST", targetId: "p" }]);
 ok(short.last - short.first === 240 && short.first <= 600 && short.last >= 630, "a short day is shown at least four hours wide");
 const box = laneBox({ start: 12 * 60, end: 18 * 60 }, { first: 8 * 60, last: 20 * 60 });
 ok(Math.abs(box.left - 33.333) < 0.01 && Math.abs(box.width - 50) < 0.01, "a block's place in the lane, in percent");
@@ -169,7 +213,16 @@ const snap: SnapshotBlock[] = [
   { time: "13:00:00", end: "14:30:00", name: null, target: { type: "SILENCE", id: "silence", name: "Quiet" }, volume: 40, priority: 1 },
 ];
 const sl = snapshotLane(snap, 2, labels);
-ok(sl.length === 2 && sl[0]!.name === "Morning mix" && sl[1]!.quiet && sl[1]!.end === 14 * 60 + 30, "an offer's blocks are drawn by the same code (playlist name, quiet, its own end)");
+ok(sl.length === 2 && sl[0]!.name === "Morning mix" && sl[0]!.targetId === "p1" && sl[1]!.quiet && sl[1]!.end === 14 * 60 + 30, "an offer's blocks are drawn by the same code (playlist name and id, quiet, its own end)");
+ok(isSafeCover("https://x.test/a.jpg") && isSafeCover("data:image/png;base64,AAAA") && isSafeCover("/api/artwork/1.jpg") && !isSafeCover("C:\\music\\cover.jpg") && !isSafeCover("file:///Users/a/cover.jpg") && !isSafeCover("//evil.test/x.jpg") && !isSafeCover("") && !isSafeCover(null), "a cover is a web / inline / site address — never a file path of a computer");
+const own: Schedule[] = [
+  S({ id: "a", startTimeLocal: "08:00:00", daysOfWeek: [2, 3] }),
+  S({ id: "b", startTimeLocal: "09:00:00", daysOfWeek: [3], enabled: false }),
+  S({ id: "c", startTimeLocal: "10:00:00", recurrence: "one_off", oneOffDateLocal: "2026-12-01", daysOfWeek: [] }),
+  S({ id: "d", startTimeLocal: "11:00:00", daysOfWeek: [2], skipDates: ["2026-12-08"] }),
+];
+ok(ownBlocksOn(own, { mode: "weekday", weekdays: [2] }) === 2 && ownBlocksOn(own, { mode: "weekday", weekdays: [3] }) === 1 && ownBlocksOn(own, { mode: "weekday", weekdays: [5] }) === 0 && ownBlocksOn(own, null) === 0, "the conflict note counts this branch's active weekly blocks on the chosen weekdays");
+ok(ownBlocksOn(own, { mode: "date", date: "2026-12-01" }) === 3 && ownBlocksOn(own, { mode: "date", date: "2026-12-08" }) === 1, "…and, for one date, the weekly ones that day (not switched off for it) plus the one-time block of that date");
 ok(todayYmd(new Date(2026, 10, 5)) === "2026-11-05", "today as YYYY-MM-DD");
 ok(weekdayOfDate("2026-11-25") === 3 && weekdayOfDate("2026-12-01") === 2, "the weekday of a date (25 Nov 2026 = Wednesday)");
 ok(nextDateOfWeekday(new Date(2026, 10, 25), 2) === "2026-12-01" && nextDateOfWeekday(new Date(2026, 10, 25), 3) === "2026-11-25" && nextDateOfWeekday(new Date(2026, 11, 30), 1) === "2027-01-04", "the next date on a weekday (today counts; crosses month and year)");

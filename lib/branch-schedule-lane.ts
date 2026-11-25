@@ -28,6 +28,9 @@ export type LaneBlock = {
   closing: boolean;
   /** 0..7 — the tone of a music block (the same hash the Studio uses is not needed: a stable pick by name keeps one playlist one colour) */
   tone: number;
+  /** what the block plays (PLAYLIST / BANK / SILENCE …) and its id — the offer screen looks the playlist's cover up by it */
+  targetType: string;
+  targetId: string;
 };
 
 const toneOf = (key: string): number => {
@@ -44,7 +47,7 @@ export function laneBlocks(schedules: Schedule[], weekday: number, nameOf: (s: S
       const quiet = isSilenceBlock(sc.schedule);
       const closing = quiet && (sc.schedule.name ?? "").trim() === CLOSING_BLOCK_NAME;
       const name = quiet ? (closing ? labels.closing : labels.quiet) : nameOf(sc.schedule);
-      return { key: sc.schedule.id, start: sc.start, end: Math.min(DAY_MINUTES, Math.max(sc.start + 1, sc.end)), name, quiet, closing, tone: toneOf(sc.schedule.targetId || name) };
+      return { key: sc.schedule.id, start: sc.start, end: Math.min(DAY_MINUTES, Math.max(sc.start + 1, sc.end)), name, quiet, closing, tone: toneOf(sc.schedule.targetId || name), targetType: sc.schedule.targetType, targetId: sc.schedule.targetId };
     });
 }
 
@@ -118,6 +121,21 @@ export function nextDateOfWeekday(now: Date, weekday: number): string {
 }
 
 // ── the offers ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** a cover is a web address, an inline image or a path on this site — never a file path of a computer, never a protocol-relative address (CLAUDE.md §12) */
+export const isSafeCover = (c: unknown): c is string => typeof c === "string" && /^(https?:\/\/|data:image\/|\/(?!\/))/i.test(c.trim());
+
+/** how many blocks a branch already has on the days an offer would land on (a weekly routine on those weekdays, or what runs on that date) — active blocks only */
+export function ownBlocksOn(
+  items: readonly Pick<Schedule, "enabled" | "recurrence" | "daysOfWeek" | "oneOffDateLocal" | "skipDates">[],
+  c: { mode: "weekday"; weekdays: readonly number[] } | { mode: "date"; date: string } | null,
+): number {
+  if (!c) return 0;
+  const live = items.filter((s) => s.enabled);
+  if (c.mode === "weekday") return live.filter((s) => s.recurrence !== "one_off" && Array.isArray(s.daysOfWeek) && s.daysOfWeek.some((d) => c.weekdays.includes(d))).length;
+  const wd = weekdayOfDate(c.date);
+  return live.filter((s) => (s.recurrence === "one_off" ? s.oneOffDateLocal === c.date : Array.isArray(s.daysOfWeek) && s.daysOfWeek.includes(wd) && !(s.skipDates ?? []).includes(c.date))).length;
+}
 
 /** the blocks of an offer that could not be placed — "the branch keeps its own closing" is not a failure, so it is not listed */
 export const cannotBePlaced = (skipped: readonly SkippedBlock[]): SkippedBlock[] => skipped.filter((s) => s.reason !== "closing-kept");

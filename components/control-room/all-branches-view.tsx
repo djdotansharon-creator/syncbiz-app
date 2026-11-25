@@ -22,6 +22,7 @@ import { ColorPanel, useColorMode } from "@/components/control-room/color-panel"
 import { RegionTitle } from "@/components/control-room/region-title";
 import { BranchJingles, JinglesHqPanel } from "@/components/control-room/jingles-panels";
 import { BranchSchedule, useWaitingDayOffers } from "@/components/control-room/branch-schedule";
+import { BranchOfferScreen, SchedulePill } from "@/components/control-room/branch-schedule-offer";
 import { suggestAudience, type AudienceDeps } from "@/components/control-room/jingle-audience";
 import { REGIONS, branchRegion, type RegionId } from "@/lib/control-room-regions";
 import { useMgmt } from "@/lib/i18n/use-mgmt";
@@ -130,6 +131,8 @@ export function AllBranchesView() {
   const [reloadKey, setReloadKey] = useState(0);
   /** how many "a day of a schedule is waiting" offers each branch has — the small dot on its row (owner 2026-11-25) */
   const waitingOffers = useWaitingDayOffers();
+  /** the branch whose OFFER screen (a day of a schedule another branch sent — opened from the notification under the title) is open; it takes the branch screen's place */
+  const [offerFor, setOfferFor] = useState<string | null>(null);
   /** owner: add / edit branch form in the right column */
   const [form, setForm] = useState<{ mode: "add" } | { mode: "edit"; id: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -485,9 +488,27 @@ export function AllBranchesView() {
                 </div>
               );
             }
+            if (open && offerFor === open.id) {
+              return (
+                <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                  <BranchOfferScreen
+                    key={`offer-${open.id}`}
+                    branchId={open.id}
+                    name={open.name}
+                    brandName={open.brandId ? brandById.get(open.brandId)?.name ?? null : null}
+                    brandColor={open.brandId ? brandById.get(open.brandId)?.color ?? DEFAULT_BRAND_COLOR : null}
+                    logoUrl={open.logoUrl || (open.brandId ? brandById.get(open.brandId)?.logoUrl : null) || null}
+                    onBack={() => setOfferFor(null)}
+                    onChanged={waitingOffers.refresh}
+                  />
+                </div>
+              );
+            }
             if (open) {
               return (
                 <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                  {/* the NOTIFICATION: one calm line right above the branch title while another branch's schedule waits (owner 2026-11-25); it opens the offer screen */}
+                  <SchedulePill key={`pill-${open.id}`} branchId={open.id} onOpen={() => setOfferFor(open.id)} />
                   <BranchPanel
                     branch={{ id: open.id, name: open.name, branchNumber: open.branchNumber, city: open.city, status: rowStatus(open, liveKnown), live: open.live, state: open.state, hasStation: open.hasStation, logoUrl: open.logoUrl || (open.brandId ? brandById.get(open.brandId)?.logoUrl : null) || null, brandName: open.brandId ? brandById.get(open.brandId)?.name ?? null : null, brandColor: open.brandId ? brandById.get(open.brandId)?.color ?? DEFAULT_BRAND_COLOR : null }}
                     onBack={() => { setOpenId(null); setPeopleFor(null); if (backToRequests) { setRequestsOpen(true); setBackToRequests(false); } }}
