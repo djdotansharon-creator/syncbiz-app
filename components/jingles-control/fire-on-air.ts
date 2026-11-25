@@ -5,19 +5,24 @@
  * MASTER over the existing device→MASTER command path. Nothing here touches the playback chain itself.
  */
 import type { RemoteCommand } from "@/lib/remote-control/types";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 
 type Sender = { deviceMode?: string; sendCommandToMaster?: (command: RemoteCommand, payload?: { url?: string }) => unknown } | null | undefined;
 
 export function fireJingleOnAir(devicePlayer: Sender, url: string): void {
   if (!url) return;
+  // F3: append the workspace-scoped jingle token so the MASTER's MPV can authenticate the audio read
+  // (MPV cannot send the session cookie). Only /api/jingles/audio/* URLs are tokenized; a bell URL
+  // passes through unchanged.
+  const tokenized = appendJingleToken(url);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = typeof window !== "undefined" ? (window as any).syncbizDesktop : null;
   if (api?.mpvPlayInterrupt && devicePlayer?.deviceMode === "MASTER") {
     // MPV needs an absolute URL — resolve relative paths (/api/jingles/audio/…) against this origin.
-    api.mpvPlayInterrupt(url.startsWith("/") ? `${window.location.origin}${url}` : url);
+    api.mpvPlayInterrupt(tokenized.startsWith("/") ? `${window.location.origin}${tokenized}` : tokenized);
     return;
   }
-  devicePlayer?.sendCommandToMaster?.("PLAY_INTERRUPT", { url });
+  devicePlayer?.sendCommandToMaster?.("PLAY_INTERRUPT", { url: tokenized });
 }
 
 /** Synthesized pre-roll bell presets served from /api/jingles/bell/[style]; "off" → none. */
