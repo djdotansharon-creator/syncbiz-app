@@ -1783,7 +1783,9 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               result={resultCard}
               isDesktop={isDesktop}
               previewing={!!resultCard && preview.previewUrl === resultCard.url}
-              onPlay={isDesktop ? handleResultPlay : () => resultCard && preview.toggle(resultCard.url)}
+              onPlay={() => {
+                if (!isDesktop && resultCard) preview.toggle(resultCard.url);
+              }}
               onSave={() => void handleResultSaveToLibrary()}
               onAddToPad={() => resultCard && setAssignForAsset(resultCard)}
               onSchedule={(el) => resultCard && openSchedule(resultCard, el)}
@@ -1817,8 +1819,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           <button
                             type="button"
                             className="jcl-hit"
-                            disabled={!a.url}
-                            onClick={() => (isDesktop ? fireOnAir(a.url) : preview.toggle(a.url))}
+                            disabled={!a.url || isDesktop}
+                            onClick={() => {
+                              if (!isDesktop) preview.toggle(a.url);
+                            }}
+                            title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : undefined}
                             aria-label={`${on ? tr("Stop") : tr("Play")} ${a.title}`}
                           />
                           <span className="jcl-play" aria-hidden>
