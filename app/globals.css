@@ -8374,37 +8374,6 @@ html[data-sb-display]:root header.sticky { box-shadow: none !important; border-b
 html[data-sb-display] header.sticky::after { content: ""; position: absolute; inset-inline: 7%; bottom: 0; height: 1px; pointer-events: none; z-index: 1; background: linear-gradient(90deg, transparent 0%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 24%, var(--sb-seam, rgba(255, 255, 255, 0.14)) 76%, transparent 100%); }
 html[data-sb-display="white"] header.sticky::after { --sb-seam: rgba(0, 0, 0, 0.13); }
 
-/* ── 2026-11-24 (owner) WHITE look: the clip keeps its natural colours ───────────────────────────────────────────────────────────────────
-   In the white look two pale layers sit over the WHOLE deck, clip included: the shell's slate tint (a Tailwind gradient on .player-hero-shell)
-   and the milky sheet (.sb-deck-glass::after, white at 55%). Over the clip they wash every colour to pastel grey. While a clip is really showing
-   (a styled deck iframe, not the slim bar where the clip is hidden) the SAME two layers are painted by the glass sheet instead and masked off over
-   the clip's own area; the mask is the exact inverse of the clip's own left fade (same 260px ramp, same --sb-video-w), so the clip dissolves into the
-   page softly — no hard box. Left of the clip (cover, title, controls) the look is unchanged (measured ≤3/255 per channel). No clip showing → none of this applies.
-   Black and transparent ("song") looks are not touched (selectors are white-only). Display-only; no player code. */
-html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .player-hero-shell { background-image: none; }
-html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-deck-glass::after {
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)),
-    linear-gradient(to bottom in oklab, rgb(15 23 43 / 0.32), rgb(2 6 24 / 0.68));
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.95) calc(100% - var(--sb-video-w, 60%) + 45px), rgba(0, 0, 0, 0.78) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.45) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.15) calc(100% - var(--sb-video-w, 60%) + 220px), transparent calc(100% - var(--sb-video-w, 60%) + 260px));
-  mask-image: linear-gradient(90deg, #000 calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.95) calc(100% - var(--sb-video-w, 60%) + 45px), rgba(0, 0, 0, 0.78) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.45) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.15) calc(100% - var(--sb-video-w, 60%) + 220px), transparent calc(100% - var(--sb-video-w, 60%) + 260px));
-}
-/* playing: the shell's tint is one notch deeper (from-slate-800/38 to-slate-950/72) — kept exactly */
-html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]):has(> .player-hero-shell[class*="from-slate-800"]) .sb-deck-glass::after {
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)),
-    linear-gradient(to bottom in oklab, rgb(29 41 61 / 0.38), rgb(2 6 24 / 0.72));
-}
-/* right-to-left: the clip is on the LEFT, so the mask runs the other way (mirror of the clip's own RTL mask) */
-html[dir="rtl"][data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-deck-glass::after {
-  -webkit-mask-image: linear-gradient(270deg, #000 calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.95) calc(100% - var(--sb-video-w, 60%) + 45px), rgba(0, 0, 0, 0.78) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.45) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.15) calc(100% - var(--sb-video-w, 60%) + 220px), transparent calc(100% - var(--sb-video-w, 60%) + 260px));
-  mask-image: linear-gradient(270deg, #000 calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.95) calc(100% - var(--sb-video-w, 60%) + 45px), rgba(0, 0, 0, 0.78) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.45) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.15) calc(100% - var(--sb-video-w, 60%) + 220px), transparent calc(100% - var(--sb-video-w, 60%) + 260px));
-}
-/* … and the two plain-ink items that now sit ON the natural clip get a light touch so dark ink reads on dark footage too: the end time a soft white halo,
-   the share button a faint frosted pill (the white look bans filters on icons). The volume button already has its own frosted pill; the progress line is
-   light by design. Only while a clip shows; nothing else is touched. */
-html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-timeline-time--end { text-shadow: 0 0 3px rgba(255, 255, 255, 0.95), 0 0 7px rgba(255, 255, 255, 0.75); }
-html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-transport-wing--end .player-transport-secondary button { background: rgba(255, 255, 255, 0.5) !important; border-radius: 999px; }
 
 /* ── The playlist screen sits on the page's own surface — wider, higher and bigger (owner 2026-11-25: "it is still inside a whiter square; take it more to the sides and up, bigger elements; no black gap at the top of the cover") ──
    Black and white looks: the library's canvas is no panel (no fill, border, shadow or corners) — everything is on ONE background; the transparent look keeps its soft glass tint. The cover and the song pictures are
@@ -8421,3 +8390,51 @@ html[data-sb-display="white"] .library-sections-canvas, html[data-sb-display="bl
 /* the white look: the close (×) of the playlist screen is dark ink, not white on white */
 html[data-sb-display="white"] .library-sections-canvas .sb-alb-head .sb-wz-x { color: rgba(28, 28, 30, 0.55); }
 html[data-sb-display="white"] .library-sections-canvas .sb-alb-head .sb-wz-x:hover { color: #1c1c1e; }
+
+/* ── 2026-11-25 (owner) WHITE look deck: ONE soft off-white card (replaces the 2026-11-24 "natural colours" veil mask) ───────────────────────
+   Before: the header carried a white→blue-grey gradient, the shell a slate tint (Tailwind) and the glass a milky sheet — together a grey that
+   changed with the clip, and (because the header's square 8px gutter peeked out beside the shell's rounded corner) two nested rounded edges in
+   the corner. Now the deck is one flat soft white (#f4f5f7, a little darker than pure white, a little lighter than the page's #eceef1 so it still
+   reads as a card): the header paints it, the shell and the glass paint nothing, the unified card has the same colour (no 1px ring of another tone),
+   and the clip melts into it with its own left/right fade. The clip is never veiled. Display-only; black and transparent looks are not touched. */
+html[data-sb-display="white"] .library-theme[data-library-theme="pearl-light"].library-player-route-bridge .audio-player-library-deck { background: #f4f5f7; box-shadow: none; }
+html[data-sb-display="white"] .library-theme[data-library-theme="pearl-light"] .library-deck-unified { background-color: #f4f5f7; }
+html[data-sb-display="white"] .player-hero-shell { background-image: none; }
+html[data-sb-display="white"] .sb-deck-glass::after,
+html[dir="rtl"][data-sb-display="white"] .sb-deck-glass::after { background: none; box-shadow: none; }
+/* the plain-ink end time over a clip keeps a soft white halo so it reads on dark footage (text only — no circle, no pill) */
+html[data-sb-display="white"]:not([data-sb-player="compact"]) .audio-player-library-deck:has(> .sb-deck-video-bg iframe[data-sb-shown="1"]) .sb-timeline-time--end { text-shadow: 0 0 3px rgba(255, 255, 255, 0.95), 0 0 7px rgba(255, 255, 255, 0.75); }
+/* A clip that is not 16:9 (square album art, 4:3, vertical, a film with bars) has its own black / white bars INSIDE the 16:9 frame; they used to end in a hard
+   box at the deck's top, bottom and outer edge. In the white look the clip now also fades softly at those three edges (the inner side keeps its own, longer
+   ramp, started a little later so the inner edge of a 4:3 picture, 72px in, is ~3% opaque instead of ~13%), so the frame's rim melts into the card. The picture's own edge INSIDE the frame (e.g. a square cover) cannot be softened from outside the frame. */
+html[data-sb-display="white"] .sb-deck-video-bg {
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
+    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
+    linear-gradient(270deg, transparent 0, #000 56px);
+  mask-image:
+    linear-gradient(90deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
+    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
+    linear-gradient(270deg, transparent 0, #000 56px);
+  -webkit-mask-composite: source-in, source-in;
+  mask-composite: intersect, intersect;
+}
+html[dir="rtl"][data-sb-display="white"] .sb-deck-video-bg {
+  -webkit-mask-image:
+    linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
+    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
+    linear-gradient(90deg, transparent 0, #000 56px);
+  mask-image:
+    linear-gradient(270deg, transparent calc(100% - var(--sb-video-w, 60%) - 10px), rgba(0, 0, 0, 0.01) calc(100% - var(--sb-video-w, 60%) + 60px), rgba(0, 0, 0, 0.1) calc(100% - var(--sb-video-w, 60%) + 105px), rgba(0, 0, 0, 0.55) calc(100% - var(--sb-video-w, 60%) + 170px), rgba(0, 0, 0, 0.85) calc(100% - var(--sb-video-w, 60%) + 220px), #000 calc(100% - var(--sb-video-w, 60%) + 260px)),
+    linear-gradient(180deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%),
+    linear-gradient(90deg, transparent 0, #000 56px);
+}
+/* A YouTube "hqdefault" still is 4:3 with black bars above and below a 16:9 picture; in a square (queue rows / collapsed strip, the round cover) object-fit: cover
+   keeps the bars. Scaling by 4/3 about the centre pushes the bars out of the square (the tile clips). Only these thumbnails, only that kind of still. */
+.library-deck-slot-aside img[src*="hqdefault"],
+.player-hero-shell .grid > div:first-child > div > img[src*="hqdefault"] { transform: scale(1.34); }
+/* The timeline was white-on-grey (a light track and a white fill, made for the old grey deck); on the soft white deck it would vanish — dark ink, like the rest of the controls. */
+html[data-sb-display="white"] .sb-timeline-track { background: rgba(28, 28, 30, 0.14) !important; }
+html[data-sb-display="white"] .sb-timeline-row[data-scrubbing="true"] .sb-timeline-track { background: rgba(28, 28, 30, 0.22) !important; }
+html[data-sb-display="white"] .sb-timeline-buffer { background: rgba(28, 28, 30, 0.08) !important; }
+html[data-sb-display="white"] .sb-timeline-played { background: #1c1c1e !important; }
