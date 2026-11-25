@@ -16,6 +16,7 @@ import { PlayerAutoCompact } from "@/components/player-auto-compact";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
 import { MasterMediaSession } from "@/components/master-media-session";
+import { JingleSession } from "@/components/jingle-session";
 import { DesktopPerfDiag } from "@/components/desktop-perf-diag";
 import { PrivateBankGuard } from "@/components/private-bank-guard";
 
@@ -50,6 +51,9 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <PocOfflineLauncher />
                 {/* Stage A.1 — MASTER acquires + refreshes its own Media Session Token (renders null). */}
                 <MasterMediaSession />
+                {/* F3 — any signed-in device acquires + refreshes a workspace Jingle Access Token so a
+                    jingle audio read can be authorized at the station MPV (renders null). */}
+                <JingleSession />
                 {/* READ-ONLY performance diagnostic (renders null): slow clicks / long frames / hardware → the desktop main.log. Desktop shell or localStorage "syncbiz-perfdiag"="1" only. */}
                 <DesktopPerfDiag />
               </DevicePlayerProvider>
