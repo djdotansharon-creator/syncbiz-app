@@ -217,7 +217,14 @@ export function JingleCreateFlow({
         <div className="sb-dj-stage" key="done">
           <h3 className="sb-dj-q"><RiseText text={result.title || tr("Your jingle")} /></h3>
           <p className="sb-dj-sub">{result.durationLabel && result.durationLabel !== "—" ? `${result.durationLabel} · ` : ""}{draft.language === "he" ? "עברית" : "English"}</p>
-          <button type="button" className="sb-jf-play" onClick={onPlay} aria-label={isDesktop ? tr("Play on air") : previewing ? tr("Stop preview") : tr("Preview")}>
+          <button
+            type="button"
+            className="sb-jf-play"
+            disabled={isDesktop}
+            onClick={onPlay}
+            title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : undefined}
+            aria-label={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : previewing ? tr("Stop preview") : tr("Preview")}
+          >
             {!isDesktop && previewing ? (
               <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.6" strokeLinejoin="round" aria-hidden><rect x="7" y="7" width="10" height="10" rx="2.2" /></svg>
             ) : (
