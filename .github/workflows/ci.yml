@@ -104,8 +104,13 @@ jobs:
   lint:
     name: Lint (report only)
     runs-on: ubuntu-latest
-    continue-on-error: true   # main has 90 errors + 268 warnings today; blocking on
-                              # that would block every pull request from day one
+    # Reports, never blocks: main carries 90 errors and 268 warnings today, and
+    # blocking on that would block every pull request from day one. It exits 0 on
+    # purpose. `continue-on-error` was not enough: it keeps the WORKFLOW green but
+    # the check itself still shows red, so every pull request wore a permanent red
+    # mark, and a red that is always there teaches people to ignore red.
+    # Once the 90 errors are cleared this should become a ratchet: fail when the
+    # count goes UP against the base branch, which is a real signal.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -113,7 +118,21 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run lint
+      - name: Lint, and put the counts where they can be seen
+        run: |
+          set +e
+          npm run lint > lint.txt 2>&1
+          code=$?
+          cat lint.txt
+          line=$(grep -oE '[0-9]+ problems \([0-9]+ errors, [0-9]+ warnings\)' lint.txt | tail -1)
+          {
+            echo "### Lint"
+            echo ""
+            if [ -n "$line" ]; then echo "\`$line\`"; else echo "no summary line; exit code $code"; fi
+            echo ""
+            echo "Reported, not enforced. main carries this backlog today; see the debt list."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
 
   full-suite:
     name: Every gate (report only)
