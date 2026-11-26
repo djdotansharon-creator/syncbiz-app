@@ -166,6 +166,18 @@ assert("payload: invalid url → [] (nothing plays, even with a bell)",
   assert("#7b library tile names the desktop action as On-Air (tooltip + accessible name)",
     /title=\{isDesktop \? tr\("Play on air"\) : undefined\}/.test(shell)
     && /aria-label=\{isDesktop \? `\$\{tr\("Play on air"\)\} \$\{a\.title\}`/.test(shell));
+  // #7c the SECOND control #263 left dead on a station: the round PLAY on a jingle you just
+  // created. It was `disabled={isDesktop}` with an onPlay that did nothing on desktop, so after
+  // creating a jingle there was no way to hear it at all until it had been assigned to a pad.
+  // Same correction, same proven path: on a station the click is ON-AIR via handleResultPlay.
+  const createFlow = read("components", "jingles-control", "jingle-create-flow.tsx");
+  assert("#7c create-result PLAY is clickable on the station (not disabled on desktop)",
+    /className="sb-jf-play"/.test(createFlow) && !/className="sb-jf-play"[\s\S]{0,120}disabled=\{isDesktop\}/.test(createFlow));
+  assert("#7c create-result PLAY routes desktop clicks to On-Air via handleResultPlay",
+    /if \(isDesktop\) handleResultPlay\(\);\s*else if \(resultCard\) preview\.toggle\(resultCard\.url\);/.test(shell));
+  assert("#7c create-result PLAY names the desktop action as On-Air (tooltip + accessible name)",
+    /title=\{isDesktop \? tr\("Play on air"\) : undefined\}/.test(createFlow)
+    && /aria-label=\{isDesktop \? tr\("Play on air"\) :/.test(createFlow));
   // 2026-11-25: this pinned pre-redesign markup, not the invariant. The result card's On-Air
   // button is still there and still calls handleResultPlay; only its label moved into tr().
   // The library tile has its own labelled On-Air route again (#7b above), alongside the Quick Pads, and

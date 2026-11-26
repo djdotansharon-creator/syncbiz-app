@@ -1800,7 +1800,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               isDesktop={isDesktop}
               previewing={!!resultCard && preview.previewUrl === resultCard.url}
               onPlay={() => {
-                if (!isDesktop && resultCard) preview.toggle(resultCard.url);
+                // On a station there is one speaker system, so the only meaning a click has is
+                // ON-AIR - the same handleResultPlay the explicit On-Air button calls (pre-roll
+                // bell + fireOnAir). In a browser or on a phone it stays a local audition.
+                if (isDesktop) handleResultPlay();
+                else if (resultCard) preview.toggle(resultCard.url);
               }}
               onSave={() => void handleResultSaveToLibrary()}
               onAddToPad={() => resultCard && setAssignForAsset(resultCard)}
