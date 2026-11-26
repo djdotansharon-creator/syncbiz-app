@@ -26,6 +26,7 @@ import { useSchedulePlaybackHandlers } from "@/lib/use-schedule-playback-handler
 import { runSchedulePlayback } from "@/lib/schedule-playback-client";
 import { listBankPacks, type BankPackSummary } from "@/lib/music-bank/bank-play-source";
 import { canReadLocalLengths, learnLocalLengths, localTracksMissingLength } from "@/lib/local-track-length";
+import { canProbeYoutubeLengths, learnYoutubeLengths, youtubeTracksMissingLength } from "@/lib/youtube-track-length";
 import { blockBranchFor, studioItems } from "@/lib/schedules-lanes";
 import { shouldOfferLocalMove } from "@/lib/local-playlist-branch";
 import { playlistHasLocalFiles } from "@/lib/playlist-playability";
@@ -1056,6 +1057,16 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
     const known = lengthLookups.current.get(item.targetId);
     if (known) return known;
     const p = (async (): Promise<number | null> => {
+      // a NEW YouTube song is asked in THIS browser first (a hidden embed, 0.3 - 1.2 s, nothing plays - lib/youtube-track-length.ts): the server cannot look a YouTube length up from its datacenter,
+      // and a song with no length lets a block be stretched past it (owner 2026-11-26). Only songs that have no length; the number is saved by the song's own id (never by its name).
+      const first = playlistsRef.current.find((x) => x.id === item.targetId);
+      if (first && canProbeYoutubeLengths() && youtubeTracksMissingLength(first).length > 0) {
+        const sec = await learnYoutubeLengths(first);
+        if (typeof sec === "number" && sec > 0) {
+          setLearned((prev) => ({ ...prev, [item.targetId]: sec }));
+          return sec;
+        }
+      }
       try {
         const res = await api<{ durationSeconds?: number | null }>("POST", `/api/playlists/${encodeURIComponent(item.targetId)}/refresh-duration`);
         const sec = res?.durationSeconds;
