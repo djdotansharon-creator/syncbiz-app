@@ -42,6 +42,7 @@
 import { useEffect, useRef } from "react";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { useStationBranchId } from "@/lib/station-branch";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 import {
   JINGLE_SCHEDULE_EVENT,
   lastFiringMs,
@@ -123,8 +124,12 @@ export function JingleScheduleAutoPlayer(): null {
     const isMaster = devicePlayer?.deviceMode === "MASTER";
     const isDesktop = typeof window !== "undefined" && "syncbizDesktop" in window;
     fireRef.current = (url: string) => {
-      if (isDesktop && isMaster) playInterrupt(url);
-      else devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url });
+      // F3: the station MPV authenticates the audio read with the workspace-scoped jingle token
+      // (it cannot send the session cookie). Same single boundary as JinglesShell.fireOnAir: pure,
+      // synchronous, a pre-roll bell URL passes through unchanged.
+      const tokenized = appendJingleToken(url);
+      if (isDesktop && isMaster) playInterrupt(tokenized);
+      else devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url: tokenized });
     };
     canFireRef.current = () =>
       (isDesktop && isMaster) || (!!devicePlayer?.masterDeviceId && !!devicePlayer?.isBranchConnected);

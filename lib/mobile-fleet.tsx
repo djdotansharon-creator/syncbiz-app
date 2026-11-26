@@ -17,6 +17,7 @@ import type { UnifiedSource } from "@/lib/source-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { warmTone } from "@/lib/cover-tone";
 import { followingOf, pickIncoming, withIncoming, type TappedIncoming } from "@/lib/mobile-incoming";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 import {
   beginTransition,
   decideUserCommand,
@@ -478,7 +479,9 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
   const setShuffle = useCallback((value: boolean) => { send("SET_SHUFFLE", { value }); }, [send]);
   const setAutoMix = useCallback((value: boolean) => { send("SET_AUTOMIX", { value }); }, [send]);
   const setRepeat = useCallback((mode: "playlist" | "track" | "off") => { send("SET_REPEAT_MODE", { mode }); }, [send]);
-  const interrupt = useCallback((url: string) => (url.trim() ? send("PLAY_INTERRUPT", { url }) : false), [send]);
+  // F3: a phone pad fires a jingle the BRANCH MPV then fetches, so the url carries the workspace-scoped
+  // jingle token. One boundary, so every current and future caller of interrupt() is covered.
+  const interrupt = useCallback((url: string) => (url.trim() ? send("PLAY_INTERRUPT", { url: appendJingleToken(url) }) : false), [send]);
 
   const branchesRef = useRef(branches);
   useEffect(() => {

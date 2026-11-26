@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode 
 import type { RemoteCommand } from "@/lib/remote-control/types";
 import { useAudioPreview } from "@/components/jingles-control/use-audio-preview";
 import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 import type { Mgmt } from "@/lib/i18n/management";
 import {
   AudienceBadge,
@@ -129,7 +130,8 @@ export function BranchJingles({ branch, deps, isHQ, L, sendCommandWithAck }: {
     setArming(null);
     if (!branch.liveBranchId) { setStatus((s) => ({ ...s, [j.id]: L.t("jg.offline") })); return; }
     // explicit target = THIS branch only (the same PLAY_INTERRUPT path as Broadcast)
-    const r = await sendCommandWithAck(branch.liveBranchId, "PLAY_INTERRUPT", { url: j.url });
+    // F3: the branch MPV fetches this url, so it carries the jingle token.
+    const r = await sendCommandWithAck(branch.liveBranchId, "PLAY_INTERRUPT", { url: appendJingleToken(j.url) });
     setStatus((s) => ({ ...s, [j.id]: r.delivered ? L.t("jg.sent") : L.t("jg.offline") }));
   };
   const local = (items ?? []).filter((j) => j.audience === "LOCAL" && j.audienceBranchId === branch.id);

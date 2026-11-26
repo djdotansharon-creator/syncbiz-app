@@ -45,7 +45,11 @@ async function pure(): Promise<void> {
   const view = (await import("node:fs")).readFileSync("components/control-room/all-branches-view.tsx", "utf8");
   assert("P6 panel rule + the existing per-branch send; the view passes the brand-scoped rows and remounts per brand",
     src.includes(`const chosen = mode === "all" ? targets : online.filter((t) => selected.has(t.id));`) &&
-    src.includes(`t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" }`) &&
+    // 2026-11-26: F3 wraps the url in appendJingleToken before dispatch. P6 guards that each branch
+    // gets its OWN send on its own liveBranchId and that a branch with no station is reported rather
+    // than skipped silently - so it matches that shape and not the url's wrapper (CLAUDE.md §18).
+    /t\.liveBranchId \? await sendCommandWithAck\(t\.liveBranchId, "PLAY_INTERRUPT", \{ url: [^}]*jingle\.url/.test(src) &&
+    src.includes(`: { delivered: false, reason: "no_station" }`) &&
     // 2026-10-11 regional map: the brand scope now comes from applyControlRoomFilters().brandRows (brand only — never cut
     // by region / search; covered by verify-control-room-regions F8). Same invariant, new wording.
     // 2026-10-12 status filter: the call gained status / statusOf (brandRows stays brand-only — verify-control-room-regions F8 / S-tests).

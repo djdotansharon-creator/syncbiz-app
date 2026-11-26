@@ -15,7 +15,7 @@
  *
  * Run (from desktop/): npx tsx scripts/verify-play-interrupt-main.ts
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { WebSocketServer, type WebSocket as WsSocket } from "ws";
@@ -166,6 +166,43 @@ assert("payload: invalid url → [] (nothing plays, even with a bell)",
   const mobile = read("components", "mobile", "mobile-jingles.tsx");
   const mobPreview = mobile.slice(mobile.indexOf("const togglePreview = useCallback("), mobile.indexOf("const togglePreview = useCallback(") + 900);
   assert("#8 mobile preview stays local (togglePreview has no PLAY_INTERRUPT)", mobPreview.length > 100 && !/PLAY_INTERRUPT|sendCommandToMaster/.test(mobPreview));
+
+  // #12 (2026-11-26) EVERY surface that fires a jingle appends the jingle token.
+  //
+  // Why a sweep and not another named assertion: #264 (F3) made /api/jingles/audio/<id> require a
+  // credential, and the station MPV can present only the `?jt=` token the RENDERER appends at
+  // dispatch. Three dispatchers were converted and four were not, so scheduled jingles, both
+  // Control Room paths and the phone's pads were answered 401 in production: silence, no error, no
+  // log anyone was watching. Per-file assertions miss exactly the file nobody remembered, so this
+  // one asks the tree instead: if you dispatch an interrupt, you tokenize. A new firing surface
+  // fails this gate until it does.
+  //
+  // Two files dispatch and legitimately do not tokenize. They are named, with the reason, so that
+  // adding to this list is a decision someone has to defend in review:
+  const TOKEN_EXEMPT = new Set([
+    // The RECEIVER, not a sender: it plays cmd.payload.url, which the sending device tokenized.
+    "lib/device-player-context.tsx",
+    // A developer panel that fires a URL typed by hand. No library, no schedule, not a product surface.
+    "components/desktop-mpv-test-panel.tsx",
+  ]);
+  const DISPATCHES = /"PLAY_INTERRUPT",\s*\{|\bmpvPlayInterrupt\(|\btriggerPlayInterrupt\(/;
+  const repoRoot = path.join(__dirname, "..", "..");
+  const sourceFiles = (dir: string, out: string[] = []): string[] => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== "node_modules" && e.name !== ".next") sourceFiles(p, out); }
+      else if (/\.tsx?$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const untokenized = ["app", "components", "lib"]
+    .flatMap((d) => sourceFiles(path.join(repoRoot, d)))
+    .map((f) => ({ rel: path.relative(repoRoot, f).split(path.sep).join("/"), src: readFileSync(f, "utf-8") }))
+    .filter((f) => DISPATCHES.test(f.src) && !/appendJingleToken/.test(f.src))
+    .map((f) => f.rel)
+    .filter((rel) => !TOKEN_EXEMPT.has(rel));
+  assert("#12 every jingle firing surface appends the jingle token (F3)", untokenized.length === 0,
+    untokenized.length ? "missing in: " + untokenized.join(", ") : "");
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(process.exitCode ?? 0);
