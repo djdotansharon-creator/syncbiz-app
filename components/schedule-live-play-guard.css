@@ -1,0 +1,27 @@
+/* "A schedule is active" question (owner 2026-11-26): no card. The whole screen blurs, a centred title and one line of text, two buttons side by side: one blue, one white.
+   In the light graphics the veil is a plain, stronger tint instead of a blur. */
+.vono-lp { position: fixed; inset: 0; z-index: 2147483200; display: grid; place-items: center; padding: 24px; box-sizing: border-box; background: rgba(6, 6, 10, 0.46); animation: vono-lp-fade 220ms ease both; }
+/* the blur: app/lite-fx.css removes every backdrop-filter in the white look with !important at specificity (0,1,1), so this selector is deliberately heavier (measured: without it the white look stays un-blurred) */
+html:not([data-sb-fx="lite"]) .vono-lp.vono-lp { -webkit-backdrop-filter: blur(26px) saturate(1.15) !important; backdrop-filter: blur(26px) saturate(1.15) !important; }
+html[data-sb-fx="lite"] .vono-lp { background: rgba(6, 6, 10, 0.78); -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html[data-sb-display="white"] .vono-lp { background: rgba(244, 245, 247, 0.58); }
+html[data-sb-display="white"][data-sb-fx="lite"] .vono-lp { background: rgba(244, 245, 247, 0.94); }
+.vono-lp-body { display: flex; flex-direction: column; align-items: center; width: min(520px, 100%); text-align: center; color: #f5f5f7; animation: vono-lp-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.vono-lp-h { text-wrap: balance; margin: 0; font-size: clamp(26px, 4.2vw, 38px); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
+.vono-lp-p { text-wrap: balance; margin: 14px 0 0; max-width: 440px; font-size: clamp(15px, 2vw, 18px); line-height: 1.55; color: rgba(245, 245, 247, 0.78); }
+.vono-lp-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 34px; }
+.vono-lp-btn { min-width: 150px; height: 50px; padding: 0 26px; border: 0; border-radius: 999px; font: inherit; font-size: 16px; font-weight: 650; cursor: pointer; transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease; }
+.vono-lp-btn:hover { transform: scale(1.03); }
+.vono-lp-btn:active { transform: scale(0.98); }
+.vono-lp-btn:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.8); outline-offset: 3px; }
+.vono-lp-yes { background: #2f7bff; color: #fff; box-shadow: 0 10px 30px rgba(47, 123, 255, 0.45); }
+.vono-lp-yes:hover { background: #4a8bff; }
+.vono-lp-no { background: #fff; color: #111114; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
+html[data-sb-display="white"] .vono-lp-body { color: #1c1c1e; }
+html[data-sb-display="white"] .vono-lp-p { color: rgba(28, 28, 30, 0.66); }
+html[data-sb-display="white"] .vono-lp-no { background: #fff; color: #1c1c1e; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 10px 30px rgba(0, 0, 0, 0.12); }
+html[data-sb-display="white"] .vono-lp-btn:focus-visible { outline-color: rgba(28, 28, 30, 0.8); }
+@keyframes vono-lp-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vono-lp-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media (max-width: 520px) { .vono-lp-actions { flex-direction: column-reverse; align-items: stretch; width: 100%; } .vono-lp-btn { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .vono-lp, .vono-lp-body { animation: none; } .vono-lp-btn { transition: none; } }
