@@ -10,7 +10,7 @@ import { useEffect } from "react";
  * (the CSS in app/globals.css does the moving). Renders null. If the thumbnail cannot be read nothing changes.
  */
 
-type Box = { x0: number; x1: number; y0: number; y1: number };
+export type Box = { x0: number; x1: number; y0: number; y1: number };
 const cache = new Map<string, Box | null>();
 
 function videoIdOf(src: string): string | null {
@@ -46,6 +46,25 @@ export function pictureBox(d: ArrayLike<number>, W: number, H: number): Box | nu
   const box = { x0: x0 / W, x1: (x1 + 1) / W, y0: y0 / H, y1: (y1 + 1) / H };
   // a picture that fills most of the frame width is a normal video: leave it alone
   return box.x1 - box.x0 > 0.82 ? null : box;
+}
+
+/** where the frame sits inside its slot (layout only - a transform does not change it) */
+export type FrameLayout = { w: number; h: number; left: number; top: number; slotW: number; slotH: number };
+
+/**
+ * PURE: the scale and the two shifts that put the picture's box at the slot's OUTER edge, as tall as the slot, centred vertically (a CSS transform about the frame's centre).
+ * It follows the frame's REAL layout position: the browser Player lays the frame flush to the slot's outer edge and top, but the station / Remote clip (components/player-surface/desktop-video-dock.tsx)
+ * lays it out 120 % wide from -10 % with `top: 50%` - arithmetic that assumed the first left the picture half a frame too low and 10 % of the slot too far out (owner 2026-11-26: "the video on dad's PC is too low").
+ */
+export function clipPlacement(box: Box, f: FrameLayout, rtl: boolean): { z: number; tx: number; ty: number } {
+  const z = Math.min(1.7, Math.max(1, 1 / (box.y1 - box.y0)));
+  const cy = (box.y0 + box.y1) / 2;
+  const cx = f.left + f.w / 2; // the frame's centre inside the slot (its transform origin)
+  const cyBox = f.top + f.h / 2;
+  // the picture's OUTER edge flush to the slot's outer edge: its right edge at the slot's right (left-to-right) / its left edge at the slot's left (right-to-left)
+  const tx = rtl ? -cx - z * f.w * (box.x0 - 0.5) : f.slotW - cx - z * f.w * (box.x1 - 0.5);
+  const ty = f.slotH / 2 - cyBox - z * f.h * (cy - 0.5); // the picture centred vertically in the slot
+  return { z, tx, ty };
 }
 
 /** the picture's box in the thumbnail as fractions (0–1) of the frame, or null when it fills (nearly) the whole frame or cannot be read */
@@ -109,14 +128,13 @@ export function DeckClipFit() {
         if (!alive || !box || lastId !== id || !deck.isConnected) return;
         const w = f.offsetWidth, h = f.offsetHeight; // layout size (a transform does not change it)
         if (w <= 0 || h <= 0) return;
-        const z = Math.min(1.7, Math.max(1, 1 / (box.y1 - box.y0)));
+        const slot = f.offsetParent instanceof HTMLElement ? f.offsetParent : null;
+        const bgW = slot ? slot.offsetWidth : w;
+        const bgH = slot ? slot.offsetHeight : h;
         const rtl = getComputedStyle(deck).direction === "rtl";
-        const cy = (box.y0 + box.y1) / 2;
-        const tx = rtl ? -w / 2 - z * w * (box.x0 - 0.5) : w / 2 - z * w * (box.x1 - 0.5); // the picture's OUTER edge flush to the deck's outer edge
-        const ty = -z * h * (cy - 0.5); // the picture centred vertically
+        const { z, tx, ty } = clipPlacement(box, { w, h, left: f.offsetLeft, top: f.offsetTop, slotW: bgW, slotH: bgH }, rtl);
         const pw = z * w * (box.x1 - box.x0); // the picture's width on screen
         // how much of the (moved, enlarged) frame is inside the deck, measured from the deck's outer edge: the deck's edge-fade is anchored on this, so the frame's own edge melts instead of showing as a line
-        const bgW = f.offsetParent instanceof HTMLElement ? f.offsetParent.offsetWidth : w;
         const vis = rtl ? f.offsetLeft + w / 2 + (z * w) / 2 + tx : bgW - (f.offsetLeft + w / 2 - (z * w) / 2 + tx);
         const set = (k: string, v: string) => {
           if (deck.style.getPropertyValue(k) !== v) deck.style.setProperty(k, v);
