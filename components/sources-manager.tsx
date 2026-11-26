@@ -46,6 +46,7 @@ import { HydrationSafeImage } from "@/components/ui/hydration-safe-image";
 import { formatViewCount, formatDuration } from "@/lib/format-utils";
 import { SourcesPlaybackProvider, useSourcesPlayback } from "@/lib/sources-playback-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { guardLivePlay } from "@/lib/schedule-live-play";
 import { useDevicePlayer } from "@/lib/device-player-context";
 import { SourceCard, type LibraryItemDeleteContext } from "@/components/source-card-unified";
 import { LibraryBrowseRowSurface } from "@/components/player-surface/library-browse-row-surface";
@@ -1679,10 +1680,13 @@ function SourcesManagerInner({
     (subtype: LibraryCollectionSubtype, key: string) => {
       const queue = resolveSourcesForSelection(subtype, key);
       if (queue.length === 0) return;
-      setQueue(queue, { force: true });
-      const ti = playlistLeafTrackIndexForQueueItem(queue[0]);
-      if (playSourceOverride) playSourceOverride(queue[0], ti);
-      else playSource(queue[0], ti);
+      // a schedule block playing → asked first; "no" leaves the queue and the music untouched (owner 2026-11-25, lib/schedule-live-play.ts)
+      guardLivePlay(() => {
+        setQueue(queue, { force: true });
+        const ti = playlistLeafTrackIndexForQueueItem(queue[0]);
+        if (playSourceOverride) playSourceOverride(queue[0], ti);
+        else playSource(queue[0], ti);
+      });
     },
     [resolveSourcesForSelection, setQueue, playSourceOverride, playSource]
   );
@@ -1759,23 +1763,24 @@ function SourcesManagerInner({
 
   /** Ready external drill-in: expanded rows must set session queue + correct leaf index (same contract as Play All). */
   const playSourceForLibraryCard = useCallback(
-    (source: UnifiedSource) => {
-      if (
-        selection.type === "collection_container" &&
-        (selection.subtype === "external_playlist" || selection.subtype === "syncbiz_playlist")
-      ) {
-        const queue = resolveSourcesForSelection(selection.subtype, selection.key);
-        if (queue.length > 0) {
-          setQueue(queue, { force: true });
+    (source: UnifiedSource) =>
+      guardLivePlay(() => {
+        if (
+          selection.type === "collection_container" &&
+          (selection.subtype === "external_playlist" || selection.subtype === "syncbiz_playlist")
+        ) {
+          const queue = resolveSourcesForSelection(selection.subtype, selection.key);
+          if (queue.length > 0) {
+            setQueue(queue, { force: true });
+          }
+          const ti = source.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(source) : 0;
+          if (playSourceOverride) playSourceOverride(source, ti);
+          else playSource(source, ti);
+          return;
         }
-        const ti = source.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(source) : 0;
-        if (playSourceOverride) playSourceOverride(source, ti);
-        else playSource(source, ti);
-        return;
-      }
-      if (playSourceOverride) playSourceOverride(source);
-      else playSource(source);
-    },
+        if (playSourceOverride) playSourceOverride(source);
+        else playSource(source);
+      }),
     [selection, resolveSourcesForSelection, setQueue, playSourceOverride, playSource],
   );
 
@@ -2444,25 +2449,26 @@ function SourcesManagerInner({
 
   /** Play / next / prev must use the full syncbiz queue order, not the stale global queue. */
   const playSyncbizPlaylistExpandedItem = useCallback(
-    (item: UnifiedSource) => {
-      // P0 (LOCAL→URL coherence): the clicked leaf's real track index travels on EVERY branch of the CONTROL
-      // path (playSourceOrSend defaulted to 0 → MAIN labelled Now Playing / NEXT from sessionTracks[0]).
-      const ti = playlistLeafTrackIndexForQueueItem(item);
-      if (!activePlaylistKey) {
+    (item: UnifiedSource) =>
+      guardLivePlay(() => {
+        // P0 (LOCAL→URL coherence): the clicked leaf's real track index travels on EVERY branch of the CONTROL
+        // path (playSourceOrSend defaulted to 0 → MAIN labelled Now Playing / NEXT from sessionTracks[0]).
+        const ti = playlistLeafTrackIndexForQueueItem(item);
+        if (!activePlaylistKey) {
+          if (playSourceOverride) playSourceOverride(item, ti);
+          else playSource(item);
+          return;
+        }
+        const queue = resolveSyncbizPlaylistPlayQueue(activePlaylistKey, sources, playlistItemAssignments);
+        if (queue.length === 0 || !queue.some((q) => q.id === item.id)) {
+          if (playSourceOverride) playSourceOverride(item, ti);
+          else playSource(item);
+          return;
+        }
+        setQueue(queue, { force: true });
         if (playSourceOverride) playSourceOverride(item, ti);
-        else playSource(item);
-        return;
-      }
-      const queue = resolveSyncbizPlaylistPlayQueue(activePlaylistKey, sources, playlistItemAssignments);
-      if (queue.length === 0 || !queue.some((q) => q.id === item.id)) {
-        if (playSourceOverride) playSourceOverride(item, ti);
-        else playSource(item);
-        return;
-      }
-      setQueue(queue, { force: true });
-      if (playSourceOverride) playSourceOverride(item, ti);
-      else playSource(item, ti);
-    },
+        else playSource(item, ti);
+      }),
     [activePlaylistKey, sources, playlistItemAssignments, setQueue, playSourceOverride, playSource],
   );
 
@@ -2483,12 +2489,13 @@ function SourcesManagerInner({
 
   /** Play a song of a playlist SHARED into this branch: the queue is the playlist's playable songs (a file on another computer is left out), started at the pressed one — the same primitives as `playSourceForLibraryCard`. */
   const playSharedLeaf = useCallback(
-    (leaf: UnifiedSource, all: UnifiedSource[]) => {
-      if (all.length > 0) setQueue(all, { force: true });
-      const ti = leaf.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(leaf) : 0;
-      if (playSourceOverride) playSourceOverride(leaf, ti);
-      else playSource(leaf, ti);
-    },
+    (leaf: UnifiedSource, all: UnifiedSource[]) =>
+      guardLivePlay(() => {
+        if (all.length > 0) setQueue(all, { force: true });
+        const ti = leaf.id.includes(":track:") ? playlistLeafTrackIndexForQueueItem(leaf) : 0;
+        if (playSourceOverride) playSourceOverride(leaf, ti);
+        else playSource(leaf, ti);
+      }),
     [setQueue, playSourceOverride, playSource],
   );
 
@@ -3855,8 +3862,10 @@ function SourcesManagerInner({
                           onClick={() => {
                             const first = visibleSources[0];
                             if (first) {
-                              if (playSourceOverride) playSourceOverride(first);
-                              else playSource(first);
+                              guardLivePlay(() => {
+                                if (playSourceOverride) playSourceOverride(first);
+                                else playSource(first);
+                              });
                             }
                           }}
                           className="library-nav-link rounded-lg px-2 py-1 text-[11px]"
@@ -3925,7 +3934,7 @@ function SourcesManagerInner({
                             onRemove={() => {}}
                             draggable
                             onDragStart={(e) => setLibrarySourcesPlaylistDragPayload(e, [item])}
-                            onPlaySource={(s) => (playSourceOverride ?? playSource)(s)}
+                            onPlaySource={(s) => guardLivePlay(() => (playSourceOverride ?? playSource)(s))}
                             onStop={stopOverride}
                             onPause={pauseOverride}
                             isActive={isMaster ? false : masterState?.currentSource?.id === item.id}
@@ -5015,7 +5024,7 @@ function SourceRow({
           {playlistAiMenuSlot}
           <LibrarySourceItemActions
             source={source}
-            onPlay={() => playFn(source)}
+            onPlay={() => guardLivePlay(() => playFn(source))}
             isActive={active}
             onStop={stopFn}
             onPause={pauseFn}

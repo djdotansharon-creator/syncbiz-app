@@ -9,6 +9,7 @@ import { useTranslations, useLocale } from "@/lib/locale-context";
 import { getTranslations } from "@/lib/translations";
 import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
 import { usePlayback } from "@/lib/playback-provider";
+import { guardLivePlay } from "@/lib/schedule-live-play";
 import { useSourcesPlayback } from "@/lib/sources-playback-context";
 import { ActionButtonEdit } from "@/components/ui/action-buttons";
 import { RadioIcon } from "@/components/ui/radio-icon";
@@ -646,7 +647,9 @@ export function LibraryInputArea({
   const { sources } = useSourcesPlayback();
   const { playSource } = usePlayback();
   const { setActive: setCenterModule } = useCenterModule();
-  const effectivePlaySource = playSourceOverride ?? playSource;
+  const basePlaySource = playSourceOverride ?? playSource;
+  // a schedule block playing → a search result / pick played by hand is asked about first (owner 2026-11-25, lib/schedule-live-play.ts)
+  const effectivePlaySource = useCallback((source: UnifiedSource) => { guardLivePlay(() => basePlaySource(source)); }, [basePlaySource]);
 
   const [urlValue, setUrlValue] = useState("");
   const [urlIngesting, setUrlIngesting] = useState(false);

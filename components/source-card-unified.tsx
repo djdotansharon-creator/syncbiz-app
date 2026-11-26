@@ -5,6 +5,7 @@ import { withStationBranch } from "@/lib/local-playlist-branch";
 import { stationBranchIdNow } from "@/lib/station-branch";
 import { useTranslations } from "@/lib/locale-context";
 import { usePlayback } from "@/lib/playback-provider";
+import { guardLivePlay } from "@/lib/schedule-live-play";
 import { LibraryItemContextDeleteModal } from "@/components/library-item-context-delete-modal";
 import { LibrarySourceItemActions, editHrefForLibrarySource } from "@/components/library-source-item-actions";
 import { ShareModal } from "@/components/share-modal";
@@ -586,7 +587,7 @@ export function SourceCard({
       pl && (source.playlist?.id === pl.id || currentSource?.id === source.id)
         ? { ...source, playlist: pl }
         : source;
-    playSourceFn(playTarget);
+    guardLivePlay(() => playSourceFn(playTarget)); // a schedule block playing → asked first (lib/schedule-live-play.ts)
   };
 
   const sourceActions = (
