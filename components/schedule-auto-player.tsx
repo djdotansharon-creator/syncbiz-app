@@ -9,7 +9,8 @@ import {
   getScheduleAutoOptOutIds,
   SCHEDULE_AUTO_PREFS_EVENT,
 } from "@/lib/schedule-auto-preferences";
-import { currentBlockAt, decideScheduleAction, playingBlockAt, todaysFiredKeys } from "@/lib/schedule-actions";
+import { currentBlockAt, decideScheduleAction, explicitEndMinutes, playingBlockAt, todaysFiredKeys } from "@/lib/schedule-actions";
+import { setLiveBlock } from "@/lib/schedule-live-play";
 import { scheduleAutoFireStorageKey } from "@/lib/schedule-window";
 import { ymdOf } from "@/lib/schedule-skip";
 import { decideStartCheck, type StartWatch } from "@/lib/schedule-start-retry";
@@ -177,10 +178,12 @@ export function ScheduleAutoPlayer() {
         wasEnabled.current = enabled;
         if (!enabled) {
           setScheduleVolumeLock(null); // the schedule is off: no block's volume is in force
+          setLiveBlock(null); // …and no block is playing, so a manual play asks nothing
           return; // the branch's schedule is off: nothing starts, nothing stops
         }
         if (!Array.isArray(schedules) || schedules.length === 0) {
           setScheduleVolumeLock(null);
+          setLiveBlock(null);
           return;
         }
 
@@ -197,6 +200,8 @@ export function ScheduleAutoPlayer() {
         const inForce = playingBlockAt(schedules, now, skipIds);
         const blockVolume = inForce && typeof inForce.volume === "number" ? inForce.volume : null;
         setScheduleVolumeLock(inForce && blockVolume !== null ? { blockId: inForce.id, name: inForce.name ?? "", volume: blockVolume } : null);
+        // owner 2026-11-25: a person who starts something by hand while this block plays music is asked first (lib/schedule-live-play.ts — display / question only, nothing here plays)
+        setLiveBlock(inForce ? { blockId: inForce.id, name: inForce.name ?? "", endTime: explicitEndMinutes(inForce) !== null ? (inForce.endTimeLocal ?? "").trim().slice(0, 5) || null : null } : null);
         // a start that was handed over must really have started the music (lib/schedule-start-retry.ts): into SILENCE only, a poll later, at most three starts in all
         const sw = startWatch.current;
         if (sw) {

@@ -9,6 +9,7 @@ import { DevicePlayerProvider } from "@/lib/device-player-context";
 import { ScheduleEngineProvider } from "@/lib/schedule-engine-context";
 import { ScheduleAutoPlayer } from "@/components/schedule-auto-player";
 import { ScheduleVolumeGuard } from "@/components/schedule-volume-guard";
+import { ScheduleLivePlayGuard } from "@/components/schedule-live-play-guard";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 import { AutoplayRecommender } from "@/components/autoplay-recommender";
 import { DeckClipFit } from "@/components/deck-clip-fit";
@@ -36,6 +37,7 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <ScheduleAutoPlayer />
                 {/* owner 2026-11-17: a block's own volume — raising above it asks first (renders null while there is no question) */}
                 <ScheduleVolumeGuard />
+                <ScheduleLivePlayGuard />
                 {/* owner 2026-11-11: a switched-off private bank → the station moves to its fallback music after the 04:00 close, at a song boundary (station window only, renders null) */}
                 <PrivateBankGuard />
                 <JingleScheduleAutoPlayer />

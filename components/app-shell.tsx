@@ -15,6 +15,7 @@ import { AudioPlayer } from "@/components/audio-player";
 import { LiveQueuePanel } from "@/components/live-queue-panel";
 import { usePlayback } from "@/lib/playback-provider";
 import { useDevicePlayer } from "@/lib/device-player-context";
+import { guardLivePlay, livePlayWouldAsk } from "@/lib/schedule-live-play";
 import { canonicalYouTubeWatchUrlForPlayback, getYouTubeThumbnail, getYouTubeVideoId, inferPlaylistType } from "@/lib/playlist-utils";
 import { createPlaylistFromUrl, resolveYouTubePlayableUrlForSearch } from "@/lib/search-playlist-client";
 import { DROPLOUD_UNPLAYABLE_CODE, isDroploudUrl } from "@/lib/droploud";
@@ -1118,11 +1119,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   };
 
-  const handlePlayerDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setPlayerDropActive(false);
-
+  const runPlayerDrop = async (e: React.DragEvent) => {
     const mmlRaw = e.dataTransfer.getData(SYNCBIZ_MUSIC_LIBRARY_DRAG_MIME);
     if (mmlRaw) {
       try {
@@ -1334,6 +1331,41 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     const url = extractUrlFromDrop(e);
     if (url) await playDroppedUrl(url);
+  };
+
+  /** A drop copied while the browser still lets it be read (its data store is emptied when the event returns) — used only when the person is asked first. */
+  const snapshotDrop = (e: React.DragEvent): React.DragEvent => {
+    const dt = e.dataTransfer;
+    const data: Record<string, string> = {};
+    for (const t of Array.from(dt.types)) {
+      try {
+        data[t] = dt.getData(t);
+      } catch {
+        /* a type that cannot be read is left out */
+      }
+    }
+    const files = Array.from(dt.files);
+    const items = Array.from(dt.items).map((it) => {
+      const f = it.kind === "file" ? it.getAsFile() : null;
+      return { kind: it.kind, type: it.type, getAsFile: () => f };
+    });
+    return { preventDefault() {}, stopPropagation() {}, dataTransfer: { types: Object.keys(data), getData: (k: string) => data[k] ?? "", files, items } } as unknown as React.DragEvent;
+  };
+
+  /**
+   * A song / playlist / link dropped on the player. While a schedule block is playing music the person is asked first (owner 2026-11-25, lib/schedule-live-play.ts): "No" changes nothing,
+   * "Yes" runs the drop exactly as it would have run. With no block in force the drop runs at once, untouched.
+   */
+  const handlePlayerDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPlayerDropActive(false);
+    if (!livePlayWouldAsk()) {
+      await runPlayerDrop(e);
+      return;
+    }
+    const snap = snapshotDrop(e);
+    guardLivePlay(() => void runPlayerDrop(snap));
   };
 
   // Dedicated branch streamer (GOtv / Android TV): minimal chrome, never mobile controller UI.
