@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createPlaylist, getPlaylist, isPlaylistPersistError } from "@/lib/playlist-store";
 import { getCurrentUserFromCookies, hasBranchAccess } from "@/lib/auth-helpers";
+import { getAccessType } from "@/lib/user-store";
+import { memberMayApprovePlaylists } from "@/lib/roles-store";
 import { notifyLibraryUpdated } from "@/lib/broadcast-library-updated";
 import { prisma } from "@/lib/prisma";
 import { extractClientIp, writeTenantAuditLog } from "@/lib/admin/tenant-audit";
@@ -48,6 +50,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       decision = decideShareAction({ current: share.status as ShareStatus, action, isSender: false, canUseTarget: true });
     } else if (branchShare) {
       if (!branchShare.targetBranchId) return NextResponse.json({ error: "Share not found" }, { status: 404 });
+      // owner 2026-11-26: accepting what another branch shares with this branch is a permission of the person's ROLE ("Approve shared playlists"). The business owner is never held back; a person with no role is
+      // unchanged; with roles off (SYNCBIZ_ROLES) nothing changes at all (lib/roles-store.ts memberMayApprovePlaylists).
+      if (action === "accept" && (await getAccessType(user.id, tenantId)) !== "OWNER" && !(await memberMayApprovePlaylists(tenantId, user.id))) {
+        return NextResponse.json({ error: "Your role may not approve shared playlists" }, { status: 403 });
+      }
       share = branchShare;
       decision = decideShareAction({
         current: share.status as ShareStatus,

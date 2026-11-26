@@ -10,7 +10,7 @@
  */
 
 export const PLAYER_PERMISSIONS = ["play_pause", "skip", "queue_add", "playlist_create", "schedule", "volume", "seek", "stop_player"] as const;
-export const EXTRA_PERMISSIONS = ["announcements", "library_manage", "dashboard", "branch_settings"] as const;
+export const EXTRA_PERMISSIONS = ["announcements", "library_manage", "approve_playlists", "dashboard", "branch_settings"] as const;
 /** only meaningful while "more_settings" is on */
 export const MORE_SETTINGS_PERMISSIONS = ["edit_people", "edit_players", "add_people", "remove_people"] as const;
 
@@ -122,6 +122,7 @@ export const PERMISSION_LABELS: Record<PermissionKey | "openControlRoom" | "allo
   stop_player: { title: "Stop the player completely", hint: "Switch the player off, not only pause it." },
   announcements: { title: "Announcements and jingles", hint: "Record and play announcements over the music." },
   library_manage: { title: "Manage the library", hint: "Add and remove sources, radio stations and imports." },
+  approve_playlists: { title: "Approve shared playlists", hint: "Accept a playlist that another branch shares with this branch." },
   dashboard: { title: "See the dashboard", hint: "Reports and the state of the business." },
   branch_settings: { title: "Open a branch's settings", hint: "Off: the person can control a branch from afar but not open its settings." },
   more_settings: { title: "More settings", hint: "Opens the options below." },
@@ -130,3 +131,12 @@ export const PERMISSION_LABELS: Record<PermissionKey | "openControlRoom" | "allo
   add_people: { title: "Add people", hint: "Create join codes and approve people who ask to join." },
   remove_people: { title: "Remove people", hint: "Take a person out of the business." },
 };
+
+/**
+ * May this person ACCEPT a playlist that another branch shares with their branch? (owner 2026-11-26: "every role can or cannot"). PURE.
+ * A person with no role of their own (null) is never affected by the switches, exactly as before; a person with a role may only when the role's "Approve shared playlists" switch is on.
+ */
+export function roleMayApprovePlaylists(role: { name: string; permissions: unknown } | null | undefined): boolean {
+  if (!role) return true;
+  return normalizePermissions(role.permissions, role.name).flags.approve_playlists === true;
+}

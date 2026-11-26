@@ -7,8 +7,8 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { writeTenantAuditLog } from "@/lib/admin/tenant-audit";
-import { defaultPermissionsFor, emptyPermissions, normalizePermissions, validatePermissionsInput, type RolePermissions } from "@/lib/role-permissions";
-import { DEFAULT_ROLES, MAX_ROLES_PER_WORKSPACE, accessCodeMatches, hashAccessCode, validateAccessCode, validateRoleInput } from "@/lib/roles";
+import { defaultPermissionsFor, emptyPermissions, normalizePermissions, roleMayApprovePlaylists, validatePermissionsInput, type RolePermissions } from "@/lib/role-permissions";
+import { DEFAULT_ROLES, MAX_ROLES_PER_WORKSPACE, accessCodeMatches, hashAccessCode, isRolesEnvEnabled, validateAccessCode, validateRoleInput } from "@/lib/roles";
 
 export class RoleError extends Error {
   constructor(public code: string, public httpStatus: number, message?: string) {
@@ -93,6 +93,16 @@ export async function assignMemberRole(workspaceId: string, userId: string, role
 export async function getMemberRole(workspaceId: string, userId: string): Promise<{ allowComputer: boolean; openControlRoom: boolean; name: string } | null> {
   const m = await prisma.workspaceMemberRole.findUnique({ where: { workspaceId_userId: { workspaceId, userId } }, include: { role: true } });
   return m ? { allowComputer: m.role.allowComputer, openControlRoom: m.role.openControlRoom, name: m.role.name } : null;
+}
+
+/**
+ * May this person accept a playlist another branch shares with their branch? Dormant unless SYNCBIZ_ROLES=1 (flag off: everybody may, as before); a person given no role may; a person with a role may only when the role's
+ * "Approve shared playlists" switch is on (lib/role-permissions.ts). The business owner is never held back by a role row (the caller checks that).
+ */
+export async function memberMayApprovePlaylists(workspaceId: string, userId: string): Promise<boolean> {
+  if (!isRolesEnvEnabled()) return true;
+  const m = await prisma.workspaceMemberRole.findUnique({ where: { workspaceId_userId: { workspaceId, userId } }, include: { role: true } });
+  return roleMayApprovePlaylists(m ? { name: m.role.name, permissions: m.role.permissions } : null);
 }
 
 /** The owner chooses his own access code for Settings on the player computer (stored salted + hashed). */

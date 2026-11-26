@@ -49,6 +49,7 @@ Off: remove the variable and redeploy — instant; rows stay. Remove: revert the
 | Opens the Control Room | yes | **yes** — the person's platform role + landing (`app/(app)/layout.tsx`) |
 | May sign in from a computer | yes | **yes** — `ComputerBlocked` (`app/(app)/layout.tsx`) |
 | Branches a person can reach (person page) | yes | **yes** — the existing branch authorization (`/api/admin/users`) |
+| Approve shared playlists (owner 2026-11-26) | yes | **yes**, on the server: `POST /api/playlist-shares/[id]` with `accept` on a BRANCH share needs the role's switch (a person with no role, the business owner and roles-off are unchanged) |
 | All Player permissions, Library & business, More settings, players / people scopes | yes | **NOT YET** — stage 2: the controls are hidden / shut on the screens; stage 3: the server (API routes) and the WS commands refuse what the role does not allow |
 Until stage 2 and 3 land, switching one of the "NOT YET" permissions off changes nothing a person can do. Stage 2 and 3 each need the owner's approval (stage 3 touches the command path of the WS server).
 
