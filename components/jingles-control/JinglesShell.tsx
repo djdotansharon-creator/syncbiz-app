@@ -1065,7 +1065,10 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   const [pads, setPads] = useState<SamplerPadItem[]>(() => loadPads());
   const [flashPadId, setFlashPadId] = useState<string | null>(null);
   const [resultCard, setResultCard] = useState<JingleAsset | null>(null);
-  const [activeTab, setActiveTab] = useState<JinglesOpenTab>(() => takeJinglesOpenTab() ?? "create");
+  // Which screen opens (owner 2026-11-26): with jingles saved, the LIBRARY (one tile with a plus opens the creation); with none, the creation itself, with no tabs. `null` = not decided yet (decided
+  // below as soon as it is known whether there are jingles). The Control Room surface is always the creation.
+  const [activeTab, setActiveTab] = useState<JinglesOpenTab | null>(() => takeJinglesOpenTab() ?? null);
+  const [libraryAnswered, setLibraryAnswered] = useState(false);
   // "All jingles" from the queue pane while the console is already open
   useEffect(() => {
     const on = (e: Event) => {
@@ -1082,6 +1085,13 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [savedAssets, setSavedAssets] = useState<JingleAsset[]>(() => loadLibrary());
+  const hasJingles = savedAssets.length > 0;
+  useEffect(() => {
+    if (isCR || !(libraryAnswered || hasJingles)) return;
+    // decided once the answer is known; with no jingle left the creation comes back by itself (and the tabs go)
+    setActiveTab((cur) => (cur === null ? (hasJingles ? "library" : "create") : !hasJingles && cur !== "create" ? "create" : cur));
+  }, [isCR, libraryAnswered, hasJingles]);
+  const tab: JinglesOpenTab | null = isCR ? "create" : activeTab;
   // The schedule is stored per branch (F4): THIS screen's branch — the same one its device socket and scheduler use.
   const schedBranch = useStationBranchId();
   const initialSchedule = (branch: string | null) => {
@@ -1181,6 +1191,8 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
       } catch {
         // Cloud unreachable: fall back to the local list; never blank out existing jingles.
         if (aliveRef.current) setSavedAssets(loadLibrary());
+      } finally {
+        if (aliveRef.current) setLibraryAnswered(true);
       }
     })();
   }, []);
@@ -1487,7 +1499,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
     const ro = new ResizeObserver(place);
     ro.observe(root);
     return () => ro.disconnect();
-  }, [activeTab]);
+  }, [activeTab, hasJingles]);
 
   const editingPad = editPadId ? pads.find((p) => p.id === editPadId) ?? null : null;
 
@@ -1529,11 +1541,10 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
       <div className="jc-ws-body">
         {/* Content scroll area: tabs + panels */}
         <div className="jc-ws-content">
-          {!isCR ? (
+          {!isCR && hasJingles ? (
           <nav ref={wsTabsRef} className="jc-ws-tabs" role="tablist">
             {(
               [
-                ["create", "Create"],
                 ["library", "Library"],
                 ["schedule", "Schedule"],
               ] as const
@@ -1542,8 +1553,8 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                 key={id}
                 type="button"
                 role="tab"
-                aria-selected={activeTab === id}
-                className={`jc-ws-tab ${activeTab === id ? "jc-ws-tab--active" : ""}`}
+                aria-selected={tab === id}
+                className={`jc-ws-tab ${tab === id ? "jc-ws-tab--active" : ""}`}
                 onClick={() => setActiveTab(id)}
               >
                 {tr(label)}
@@ -1555,7 +1566,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           ) : null}
 
           {/* ── Quick Pads — only where pads are managed (the Library tab); Create stays clean ── */}
-          {!isCR && activeTab === "library" ? (
+          {!isCR && tab === "library" ? (
           <div className="jcx-quickpads">
             <TriggerPads
               pads={pads}
@@ -1584,7 +1595,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           <div ref={wsWrapRef} className="jcx-ws-wrap">
           <div className="jcx-active-workspace">
           {/* ── CREATE — three calm steps (words → voice → result), see jingle-create-flow.tsx ── */}
-          {activeTab === "create" ? (
+          {tab === "create" ? (
             isCR ? (
             <div className="jcx-create jc-form">
               {/* Compact settings bar — one row of compact selects (same values/handlers) */}
@@ -1804,11 +1815,15 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           ) : null}
 
           {/* ── LIBRARY ────────────────────────────────────────────── */}
-          {activeTab === "library" ? (
+          {tab === "library" ? (
             <div className="jc-ws-panel">
               {savedAssets.length > 0 ? (
                 <div className="jcl-wrap">
                   <div className="jcl-grid">
+                    {/* ONE square with a plus opens the creation (owner 2026-11-26); the creation is not a tab */}
+                    <button type="button" className="jcl-tile jcl-tile--new" onClick={() => setActiveTab("create")} aria-label={tr("New jingle")} title={tr("New jingle")}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+                    </button>
                     {savedAssets.map((a, i) => {
                       const on = !isDesktop && preview.previewUrl === a.url;
                       return (
@@ -1854,10 +1869,6 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                       );
                     })}
                   </div>
-                  <button type="button" className="jcl-new" onClick={() => setActiveTab("create")}>
-                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-                    {tr("New jingle")}
-                  </button>
                 </div>
               ) : null}
 
@@ -1924,7 +1935,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
           ) : null}
 
           {/* ── SCHEDULE ───────────────────────────────────────────── */}
-          {activeTab === "schedule" ? (
+          {tab === "schedule" ? (
             <div className="jc-ws-panel jcs-panel">
               {schedItems.length > 0 ? (
                 <ul className="jcs-list">
