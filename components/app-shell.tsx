@@ -1333,7 +1333,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (url) await playDroppedUrl(url);
   };
 
-  /** A drop copied while the browser still lets it be read (its data store is emptied when the event returns) — used only when the person is asked first. */
+  /** A drop copied while the browser still lets it be read (its data store is emptied when the event returns) - used only when the person is asked first. */
   const snapshotDrop = (e: React.DragEvent): React.DragEvent => {
     const dt = e.dataTransfer;
     const data: Record<string, string> = {};

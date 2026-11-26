@@ -1,11 +1,11 @@
 /**
- * "A schedule is playing — play this anyway?" (owner 2026-11-25: "if the schedule is running now and I push a song live, I want a notice: a schedule is active, play anyway? yes or no").
+ * "A schedule is playing - play this anyway?" (owner 2026-11-25: "if the schedule is running now and I push a song live, I want a notice: a schedule is active, play anyway? yes or no").
  *
- * · The engine (components/schedule-auto-player.tsx) tells THIS module which block is playing music now (`setLiveBlock`) — the same block it already uses for the block's volume.
+ * · The engine (components/schedule-auto-player.tsx) tells THIS module which block is playing music now (`setLiveBlock`) - the same block it already uses for the block's volume.
  * · A song / playlist a PERSON starts by hand (a library card, a drop on the player, a search result) goes through `guardLivePlay(apply)`: with no block in force, or after the person already said
- *   "play" for this block, `apply()` runs at once, exactly as before; otherwise the window asks (components/schedule-live-play-guard.tsx) and `apply` runs only after "Play anyway". "No" changes NOTHING — `apply`
+ *   "play" for this block, `apply()` runs at once, exactly as before; otherwise the window asks (components/schedule-live-play-guard.tsx) and `apply` runs only after "Play anyway". "No" changes NOTHING - `apply`
  *   is the WHOLE action (the queue change and the play), so a "no" leaves the queue and the music exactly as they were.
- * · "Play anyway" is remembered for that block only — the person is not asked again until the next block takes over.
+ * · "Play anyway" is remembered for that block only - the person is not asked again until the next block takes over.
  * Not asked: NEXT / PREVIOUS / seek / pause / volume, anything the engine itself starts, the phone.
  * Renderer memory only (never stored, never sent); nothing here touches playback.
  */
@@ -25,7 +25,7 @@ const emit = () => {
 
 export type PendingLivePlay = { block: LiveBlock; apply: () => void };
 
-/** the engine: which block is playing music now — null when none is, the schedule is off, or it is a quiet block */
+/** the engine: which block is playing music now - null when none is, the schedule is off, or it is a quiet block */
 export function setLiveBlock(next: LiveBlock | null): void {
   const same = (live === null && next === null) || (live !== null && next !== null && live.blockId === next.blockId && live.name === next.name && live.endTime === next.endTime);
   if (same) return;
@@ -43,7 +43,7 @@ export function needsLivePlayConfirm(current: LiveBlock | null, overridden: stri
   return !!current && overridden !== current.blockId;
 }
 
-/** would a manual play ask right now? (a pure look — it changes nothing) */
+/** would a manual play ask right now? (a pure look - it changes nothing) */
 export function livePlayWouldAsk(): boolean {
   return needsLivePlayConfirm(live, overriddenBlockId);
 }

@@ -1001,7 +1001,7 @@ export const HE_PHRASES: Record<string, string> = {
   "The schedule set the volume to {n}% for now. Raise it to {v}% anyway?": "לוח הזמנים קבע עכשיו ווליום {n}%. להגביר ל-{v}% בכל זאת?",
   "Keep {n}%": "להשאיר {n}%",
   "Raise to {v}%": "להגביר ל-{v}%",
-  // ── "A schedule is playing — play this anyway?" (2026-11-25) ──
+  // ── "A schedule is playing - play this anyway?" (2026-11-25) ──
   "A schedule is active": "יש לוח זמנים פעיל",
   "“{name}” is playing now, until {t}. Play this anyway?": "“{name}” מנגן עכשיו, עד {t}. לנגן את זה בכל זאת?",
   "“{name}” is playing now. Play this anyway?": "“{name}” מנגן עכשיו. לנגן את זה בכל זאת?",

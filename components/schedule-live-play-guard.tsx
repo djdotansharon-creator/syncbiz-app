@@ -7,7 +7,7 @@ import { answerLivePlayQuestion, usePendingLivePlay } from "@/lib/schedule-live-
 import "./schedule-volume-guard.css";
 
 /**
- * "A schedule is playing — play this anyway?" (owner 2026-11-25). Shown when somebody starts a song / playlist by hand while a schedule block is playing music (lib/schedule-live-play.ts).
+ * "A schedule is playing - play this anyway?" (owner 2026-11-25). Shown when somebody starts a song / playlist by hand while a schedule block is playing music (lib/schedule-live-play.ts).
  * "No" changes nothing; "Yes, play" plays it and the block stops asking until the next block takes over. Same small card as the volume question (components/schedule-volume-guard.tsx, its CSS).
  * Renders nothing while there is no question.
  */
