@@ -2338,6 +2338,54 @@ function Cover({ item }: { item: LibItem }) {
   );
 }
 
+/** The kinds row (owner 2026-11-26): ONE line that scrolls sideways when it does not fit; the chosen kind sits in a pill that slides to the next one like the display switch's bubble (the same curve and squash,
+ *  `.sb-mode-sel-*` in globals.css). In the full graphics the pill is glass (gradients and inner light only: no live blur, so it costs nothing); in the lighter graphics a plain ellipse. */
+const KIND_KEYS = ["all", "playlist", "single", "set", "radio", "bank"] as const;
+function KindChips({ f, tr }: { f: ReturnType<typeof useFilteredLib>; tr: (s: string, v?: Record<string, string | number>) => string }) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
+  const [ready, setReady] = useState(false);
+  const label = (k: (typeof KIND_KEYS)[number]) => (k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "single" ? tr("Singles") : k === "set" ? tr("Sets / Mixes") : k === "radio" ? tr("Radio") : tr("Royalty-free"));
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const measure = (scroll: boolean) => {
+      const el = row.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!el) return;
+      setPill({ x: el.offsetLeft, w: el.offsetWidth });
+      if (scroll) {
+        // the chosen kind comes into view inside the row (the page itself never scrolls)
+        const want = el.offsetLeft - (row.clientWidth - el.offsetWidth) / 2;
+        const max = row.scrollWidth - row.clientWidth;
+        row.scrollTo({ left: Math.max(0, Math.min(max, want)), behavior: ready ? "smooth" : "auto" });
+      }
+    };
+    measure(true);
+    if (!ready) {
+      const id = window.requestAnimationFrame(() => setReady(true));
+      return () => window.cancelAnimationFrame(id);
+    }
+    const onResize = () => measure(false);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.kind, tr]);
+  return (
+    <div className="ss-chips" role="tablist" ref={rowRef} data-ready={ready ? "1" : undefined}>
+      {pill ? (
+        <span className="ss-chip-slot" aria-hidden style={{ "--px": `${pill.x}px`, "--pw": `${pill.w}px` } as CSSProperties}>
+          <span className="ss-chip-pill" key={f.kind} />
+        </span>
+      ) : null}
+      {KIND_KEYS.map((k) => (
+        <button key={k} type="button" role="tab" aria-selected={f.kind === k} className={`ss-chip${f.kind === k ? " is-on" : ""}`} onClick={() => f.setKind(k)}>
+          {label(k)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function FilterBar({ f, tr, lead }: { f: ReturnType<typeof useFilteredLib>; tr: (s: string, v?: Record<string, string | number>) => string; lead?: ReactNode }) {
   return (
     <>
@@ -2349,13 +2397,7 @@ function FilterBar({ f, tr, lead }: { f: ReturnType<typeof useFilteredLib>; tr: 
           <input value={f.q} onChange={(e) => f.setQ(e.target.value)} aria-label={tr("Search playlists, songs, radio…")} />
         </label>
       </div>
-      <div className="ss-chips" role="tablist">
-        {(["all", "playlist", "single", "set", "radio", "bank"] as const).map((k) => (
-          <button key={k} type="button" role="tab" aria-selected={f.kind === k} className={`ss-chip${f.kind === k ? " is-on" : ""}`} onClick={() => f.setKind(k)}>
-            {k === "all" ? tr("All") : k === "playlist" ? tr("Playlists") : k === "single" ? tr("Singles") : k === "set" ? tr("Sets / Mixes") : k === "radio" ? tr("Radio") : tr("Royalty-free")}
-          </button>
-        ))}
-      </div>
+      <KindChips f={f} tr={tr} />
     </>
   );
 }
@@ -2733,11 +2775,8 @@ function ScenePopover({
     >
       {choosing || !schedule ? (
         <div className="ss-pop-pick">
-          <div className="ss-pop-head">
-            <strong>{editor.kind === "new" ? `${tr("Add music")} · ${dayName(editor.day)} ${formatMinutes(editor.min)}` : tr("Choose what plays")}</strong>
-            {schedule ? <button type="button" className="ss-linkbtn" onClick={() => setChoosing(false)}>{tr("Back")}</button> : null}
-          </div>
-          <FilterBar f={f} tr={tr} />
+          {/* no title (owner 2026-11-26): only the search row on top; "Back" (when choosing a replacement) sits in that row */}
+          <FilterBar f={f} tr={tr} lead={schedule ? <button type="button" className="ss-linkbtn" onClick={() => setChoosing(false)}>{tr("Back")}</button> : undefined} />
           <ul className="ss-list ss-list--pop">
             {f.shown.map((it) => (
               <li key={it.key}>
