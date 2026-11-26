@@ -143,15 +143,45 @@ assert("payload: invalid url → [] (nothing plays, even with a bell)",
   // Every Preview button's onClick: only preview.toggle, never fireOnAir / handleResultPlay / sendCommandToMaster.
   const previewButtons = [...shell.matchAll(/<button[^>]*?>?[\s\S]{0,600}?(?:▶ Preview|"■" : "▶")[\s\S]{0,40}?<\/button>/g)].map((x) => x[0]);
   const previewOnClicks = [...shell.matchAll(/onClick=\{\(\) => \{\s*if \(!isDesktop\) preview\.toggle\([^)]*\);\s*\}\}/g)];
-  assert("#7 two Preview buttons wired to LOCAL preview.toggle only", previewOnClicks.length === 2);
+  // 2026-11-26: ONE, not two. The library tile was never a Preview control - on a station it
+  // is the On-Air surface (see #7b). Only the Create tab's Preview button is audition-only.
+  assert("#7 the Preview button is wired to LOCAL preview.toggle only", previewOnClicks.length === 1);
   assert("#7 no Preview path can call fireOnAir / handleResultPlay / sendCommandToMaster",
     !/isDesktop \? (fireOnAir|handleResultPlay)/.test(shell) && previewButtons.every((b) => !/fireOnAir|handleResultPlay|sendCommandToMaster/.test(b)));
   assert("#7 desktop Preview is disabled with an explicit unavailable state (never silently On-Air)",
-    (shell.match(/disabled=\{!(?:resultCard\.url|a\.url) \|\| isDesktop\}/g) ?? []).length === 2 && /Preview isn't available in the desktop app yet/.test(shell));
+    (shell.match(/disabled=\{!resultCard\.url \|\| isDesktop\}/g) ?? []).length === 1 && /Preview isn't available in the desktop app yet/.test(shell));
+  // 2026-11-26: the regression this gate did NOT catch. #263 set `disabled={!a.url || isDesktop}`
+  // on the library tile's hit area, so every tile in the Jingles library was a dead button inside
+  // VONO - no sound, no error, no response. Three things must hold together: the tile is clickable
+  // on a station, the click goes through the proven On-Air path, and it SAYS so, because the reason
+  // #263 touched it at all was that it used to broadcast while looking like an audition.
+  assert("#7b library tile is clickable on the station (not disabled on desktop)",
+    !/className="jcl-hit"[\s\S]{0,120}disabled=\{![\w.]+ \|\| isDesktop\}/.test(shell));
+  assert("#7b library tile routes desktop clicks to On-Air via fireOnAir",
+    /if \(isDesktop\) handleLibraryPlay\(a\);\s*else preview\.toggle\(a\.url\);/.test(shell)
+    && /const handleLibraryPlay = useCallback\(\(a: JingleAsset\) => \{[\s\S]{0,400}fireOnAir\(a\.url\);/.test(shell));
+  // The owner does not want a badge on the tile - just a working click. So what is pinned here
+  // is the non-visual labelling: the hover tooltip, and the accessible name, which must not keep
+  // saying "Play" for something that goes out to the branch.
+  assert("#7b library tile names the desktop action as On-Air (tooltip + accessible name)",
+    /title=\{isDesktop \? tr\("Play on air"\) : undefined\}/.test(shell)
+    && /aria-label=\{isDesktop \? `\$\{tr\("Play on air"\)\} \$\{a\.title\}`/.test(shell));
+  // #7c the SECOND control #263 left dead on a station: the round PLAY on a jingle you just
+  // created. It was `disabled={isDesktop}` with an onPlay that did nothing on desktop, so after
+  // creating a jingle there was no way to hear it at all until it had been assigned to a pad.
+  // Same correction, same proven path: on a station the click is ON-AIR via handleResultPlay.
+  const createFlow = read("components", "jingles-control", "jingle-create-flow.tsx");
+  assert("#7c create-result PLAY is clickable on the station (not disabled on desktop)",
+    /className="sb-jf-play"/.test(createFlow) && !/className="sb-jf-play"[\s\S]{0,120}disabled=\{isDesktop\}/.test(createFlow));
+  assert("#7c create-result PLAY routes desktop clicks to On-Air via handleResultPlay",
+    /if \(isDesktop\) handleResultPlay\(\);\s*else if \(resultCard\) preview\.toggle\(resultCard\.url\);/.test(shell));
+  assert("#7c create-result PLAY names the desktop action as On-Air (tooltip + accessible name)",
+    /title=\{isDesktop \? tr\("Play on air"\) : undefined\}/.test(createFlow)
+    && /aria-label=\{isDesktop \? tr\("Play on air"\) :/.test(createFlow));
   // 2026-11-25: this pinned pre-redesign markup, not the invariant. The result card's On-Air
   // button is still there and still calls handleResultPlay; only its label moved into tr().
-  // The library tile's own On-Air button was removed by the 2026-10-26 redesign (5d816de), and
-  // a library jingle now reaches the air through the Quick Pad board, which is explicit by
+  // The library tile has its own labelled On-Air route again (#7b above), alongside the Quick Pads, and
+  // a library jingle reaches the air through either one, both explicit by
   // design. Same invariant, same two paths, current spelling (CLAUDE.md §18).
   assert("#9 explicit On-Air surfaces still emit via fireOnAir / handleResultPlay",
     /onClick=\{handleResultPlay\}[\s\S]{0,200}📡 \{tr\("On-Air"\)\}/.test(shell) && /const handlePadPlay = useCallback\(\(pad: SamplerPadItem\) => \{[\s\S]{0,400}fireOnAir\(pad\.url\);/.test(shell));

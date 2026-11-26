@@ -1339,6 +1339,18 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
 
   // ── Pad operations ─────────────────────────────────────────────────────────
 
+  // A library tile on the desktop station goes ON-AIR, exactly like a Quick Pad: same
+  // fireOnAir path, same pre-roll bell. (In a browser or on a phone the same tile is a
+  // local audition instead - see the tile's onClick.)
+  const handleLibraryPlay = useCallback((a: JingleAsset) => {
+    if (!a.url) return;
+    if (a.preRoll) {
+      const bell = bellUrlFor(a.bellStyle ?? "ding");
+      if (bell) fireOnAir(bell);
+    }
+    fireOnAir(a.url);
+  }, [fireOnAir]);
+
   const handlePadPlay = useCallback((pad: SamplerPadItem) => {
     if (!pad.url) return;
     if (pad.preRoll) {
@@ -1726,7 +1738,7 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                         onClick={() => {
                           if (!isDesktop) preview.toggle(resultCard.url);
                         }}
-                        title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : tr("Preview in your browser (not On-Air)")}
+                        title={isDesktop ? tr("Preview isn't available in the desktop app yet. Use a browser or phone to preview.") : tr("Preview in your browser (not On-Air)")}
                       >
                         {!isDesktop && preview.previewUrl === resultCard.url ? `■ ${tr("Stop")}` : `▶ ${tr("Preview")}`}
                       </button>
@@ -1799,7 +1811,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               isDesktop={isDesktop}
               previewing={!!resultCard && preview.previewUrl === resultCard.url}
               onPlay={() => {
-                if (!isDesktop && resultCard) preview.toggle(resultCard.url);
+                // On a station there is one speaker system, so the only meaning a click has is
+                // ON-AIR - the same handleResultPlay the explicit On-Air button calls (pre-roll
+                // bell + fireOnAir). In a browser or on a phone it stays a local audition.
+                if (isDesktop) handleResultPlay();
+                else if (resultCard) preview.toggle(resultCard.url);
               }}
               onSave={() => void handleResultSaveToLibrary()}
               onAddToPad={() => resultCard && setAssignForAsset(resultCard)}
@@ -1838,12 +1854,13 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           <button
                             type="button"
                             className="jcl-hit"
-                            disabled={!a.url || isDesktop}
+                            disabled={!a.url}
                             onClick={() => {
-                              if (!isDesktop) preview.toggle(a.url);
+                              if (isDesktop) handleLibraryPlay(a);
+                              else preview.toggle(a.url);
                             }}
-                            title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : undefined}
-                            aria-label={`${on ? tr("Stop") : tr("Play")} ${a.title}`}
+                            title={isDesktop ? tr("Play on air") : undefined}
+                            aria-label={isDesktop ? `${tr("Play on air")} ${a.title}` : `${on ? tr("Stop") : tr("Play")} ${a.title}`}
                           />
                           <span className="jcl-play" aria-hidden>
                             {on ? (

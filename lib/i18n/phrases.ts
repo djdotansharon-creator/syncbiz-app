@@ -193,7 +193,7 @@ export const HE_PHRASES: Record<string, string> = {
   "Let AI write this": "שימו ל־AI לכתוב את זה",
   "Open AI compose": "פתיחת כתיבה עם AI",
   "Result": "תוצאה",
-  "Preview isn't available in the desktop app yet — use a browser or phone to preview": "תצוגה מקדימה עדיין לא זמינה באפליקציית שולחן העבודה — השתמשו בדפדפן או בטלפון",
+  "Preview isn't available in the desktop app yet. Use a browser or phone to preview.": "תצוגה מקדימה עדיין לא זמינה באפליקציית שולחן העבודה. השתמשו בדפדפן או בטלפון.",
   "Preview in your browser (not On-Air)": "תצוגה מקדימה בדפדפן (לא בשידור)",
   "Play On-Air — the branch hears this (ducks store music)": "השמעה בשידור — הסניף שומע את זה (מנמיך את מוזיקת החנות)",
   "On-Air": "בשידור",
