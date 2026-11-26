@@ -41,7 +41,7 @@ assert("U7 HQ-only: Jingles entry, Share / Assign; Pending assignment (UNASSIGNE
 assert("U8 SAME Studio (A'): the Control Room renders JinglesWorkspacePanel with the controlRoom surface — no copy",
   panels.includes('import { JinglesWorkspacePanel } from "@/components/jingles-control/JinglesShell";') && /<JinglesWorkspacePanel[\s\S]{0,80}controlRoom=\{\{/.test(panels));
 assert("U9 Control Room surface hides local On-Air, Pads, local Schedule / Add to Pad; tabs too; Save blocked without an audience",
-  /\{!isCR \? \(\s*<nav className="jc-ws-tabs"/.test(studio) && /\{!isCR \? \(\s*<div className="jcx-quickpads">/.test(studio) &&
+  /\{!isCR && hasJingles \? \(\s*<nav ref=\{wsTabsRef\} className="jc-ws-tabs"/.test(studio) && /\{!isCR && tab === "library" \? \(\s*<div className="jcx-quickpads">/.test(studio) &&
   /\{isDesktop && !isCR \? \(/.test(studio) && studio.includes("{!isCR ? <button type=\"button\" className=\"jc-btn jc-btn--ghost\" onClick={() => setAssignForAsset(resultCard)}>") &&
   studio.includes("{!isCR ? <button type=\"button\" className=\"jc-btn jc-btn--ghost\" onClick={() => setScheduleForAsset(resultCard)}>") &&
   /if \(controlRoom && !controlRoom\.audience\) \{ setGenerateError\(controlRoom\.saveBlockedText\); return; \}/.test(studio));
