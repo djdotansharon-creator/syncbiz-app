@@ -1,0 +1,165 @@
+name: CI
+
+# Until now nothing ran on a pull request: 0 check runs on every commit of main.
+# That is how the jingles Preview regression (5d816de, 2026-10-26) sat on main for
+# a month with its own gate failing and nobody seeing it.
+#
+# What blocks a merge here is only what is GREEN ON MAIN TODAY, so this can be
+# turned on without first fixing a backlog. Everything else runs too, but as a
+# report. Each line below says which it is and why.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------- BLOCKING
+  typecheck:
+    name: Typecheck (app + desktop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # the app's types come from the generated Prisma client; without this step
+      # every store file reports "Property does not exist" and the result is noise
+      - run: npx prisma generate
+      - name: App
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Desktop
+        run: |
+          cd desktop && npm ci && cd ..
+          npx tsc --noEmit -p desktop/tsconfig.json
+
+  long-dash:
+    name: No new long dashes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Make the base branch available
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}" || true
+      - name: Only the lines this pull request adds
+        run: |
+          if [ -f scripts/verify-no-long-dashes.ts ]; then
+            npx -y tsx@4 scripts/verify-no-long-dashes.ts --changed
+          else
+            echo "the rule has not landed yet - nothing to check"
+          fi
+
+  gates:
+    name: Protected-behaviour gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify-p0-url-owner-automix compares a file against the historical
+          # commit 8e8895a; a shallow clone does not have it
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: cd desktop && npm ci
+      # Static gates: they read source, need no database and no MPV. Five of the
+      # six are green on main today. The sixth, verify-play-interrupt-main, is the
+      # one that caught the Preview regression and it goes green with the P0 fix -
+      # so MERGE THAT PULL REQUEST FIRST. Add a gate here only after it has been
+      # seen green on main, or CI starts crying wolf, which is the failure this
+      # file exists to end.
+      - name: Playback and jingles invariants
+        run: |
+          set -e
+          for g in \
+            desktop/scripts/verify-play-interrupt-main.ts \
+            desktop/scripts/verify-gate1bc-transition-intent.ts \
+            scripts/verify-p0-url-owner-automix.ts \
+            scripts/verify-p0-url-eof-advance.ts \
+            scripts/verify-p0-local-url-queue-split.ts \
+            scripts/verify-seek-url-station.ts
+          do
+            echo "::group::$g"
+            npx tsx "$g"
+            echo "::endgroup::"
+          done
+
+  # ------------------------------------------------------- REPORT, NOT BLOCKING
+  lint:
+    name: Lint (report only)
+    runs-on: ubuntu-latest
+    # Reports, never blocks: main carries 90 errors and 268 warnings today, and
+    # blocking on that would block every pull request from day one. It exits 0 on
+    # purpose. `continue-on-error` was not enough: it keeps the WORKFLOW green but
+    # the check itself still shows red, so every pull request wore a permanent red
+    # mark, and a red that is always there teaches people to ignore red.
+    # Once the 90 errors are cleared this should become a ratchet: fail when the
+    # count goes UP against the base branch, which is a real signal.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint, and put the counts where they can be seen
+        run: |
+          set +e
+          npm run lint > lint.txt 2>&1
+          code=$?
+          cat lint.txt
+          line=$(grep -oE '[0-9]+ problems \([0-9]+ errors, [0-9]+ warnings\)' lint.txt | tail -1)
+          {
+            echo "### Lint"
+            echo ""
+            if [ -n "$line" ]; then echo "\`$line\`"; else echo "no summary line; exit code $code"; fi
+            echo ""
+            echo "Reported, not enforced. main carries this backlog today; see the debt list."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+  full-suite:
+    name: Every gate (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true   # 29 of 202 fail on main today: 8 want a database, one
+                              # wants a real MPV, the rest are stale or real gaps
+                              # that have not been triaged yet
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify-p0-url-owner-automix compares a file against the historical
+          # commit 8e8895a; a shallow clone does not have it
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: cd desktop && npm ci
+      - name: Run them all, report pass and fail
+        run: |
+          pass=0; fail=0
+          for g in scripts/verify-*.ts desktop/scripts/verify-*.ts; do
+            if timeout 150 npx tsx "$g" > /tmp/out.txt 2>&1; then
+              pass=$((pass+1))
+            else
+              fail=$((fail+1)); echo "FAIL $g"
+            fi
+          done
+          echo "passed: $pass   failed: $fail"

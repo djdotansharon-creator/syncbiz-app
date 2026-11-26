@@ -291,6 +291,37 @@ points at the intended environment. `dist:win` rewrites `desktop/package.json` â
 reproducible if temporary build-only edits were used. Note: committed
 `desktop/src/main/hosted-url.ts` points at PROD; TEST betas are pinned by transient edits.
 
+### No long dashes - BINDING (owner directive 2026-11-25)
+**Never write a long dash. Anywhere. Write a plain `-` instead.** This covers U+2014 EM DASH and
+U+2013 EN DASH equally, and it covers everything in this repository without exception of kind:
+on-screen text in every language, error and status messages, code, comments, log lines, test-gate
+assertions and their descriptions, seed and JSON data, documents under `docs/`, commit messages,
+PR text and chat. **It applies to every contributor, not only to Claude.** The owner asked for ONE
+rule precisely so nobody has to judge, per dash, whether a customer will see it.
+
+Enforcement is `scripts/verify-no-long-dashes.ts`. `--changed` compares against the branch a pull
+request targets, so it reads ONLY the lines that pull request adds and can never fail over
+something that was already here; `.github/workflows/pr-no-long-dashes.yml` runs it that way on
+every pull request. Run it yourself before opening one.
+
+**The existing text has not been swept yet.** A full-repo run (no `--changed`) reports the
+backlog, about 8,900 long dashes - that is the inventory, not a regression. The sweep is prepared
+and verified on `chore/no-long-dashes`, to be merged in a planned window; the desktop half is on
+`chore/no-long-dashes-desktop` and ships with the next player release. From today the rule holds
+for everything new.
+
+There is exactly one class of exception, and it is technical, never stylistic. Song metadata
+arrives from YouTube, SoundCloud, M3U files and playlists carrying a REAL long dash in the title,
+so the character classes and separator arrays that split or join "Artist - Title" must keep
+accepting all three dash forms - otherwise the player stops showing an artist name. Those idioms
+are listed in `PARSER_IDIOMS` inside the gate. Three paths are also left alone for reasons of
+their own: `prisma/migrations/**` (an applied migration is checksummed in `_prisma_migrations`, so
+editing one breaks `prisma migrate`), `fixtures/**` (sample EXTERNAL data whose dashes are exactly
+what the parsers are tested against) and `lib/url-eof-advance.ts` (pinned byte-for-byte to commit
+`8e8895a` by `verify-p0-url-owner-automix` S5 - a deliberate do-not-touch guard on the playback
+chain, which a cosmetic edit must never trip). Adding an exception means adding it to the gate
+with its reason in the commit message.
+
 ### Secrets
 Never store passwords, API tokens, Railway tokens, JWTs or other secrets in CLAUDE.md, repo docs,
 the baseline file, memory notes, or any committed file. Reference only the secure storage location.

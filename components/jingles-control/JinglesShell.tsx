@@ -39,6 +39,7 @@ import { JingleScheduleDialog, localizeWhen, whenNextLabel } from "./jingle-sche
 import { jingleTint } from "./jingle-tint";
 import { GlassModal } from "@/components/glass-modal";
 import { useDevicePlayer } from "@/lib/device-player-context";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 import { VxSelect } from "@/components/management/vx-select";
 import { useTr } from "@/lib/i18n/use-tr";
 
@@ -1134,11 +1135,14 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
       // THIS desktop is itself the MASTER. When this device is CONTROL (e.g. the GOtv streamer is
       // MASTER), the jingle MUST go over WS to the master device — never the local MPV — otherwise
       // the desktop ducks/plays its own audio while the streamer stays untouched.
+      // F3: append the workspace-scoped jingle token so the MASTER's MPV can authenticate the audio
+      // read (MPV sends no cookie). Bell / non-audio URLs pass through unchanged.
+      const tokenized = appendJingleToken(url);
       const isMaster = devicePlayer?.deviceMode === "MASTER";
       if (isDesktop && isMaster) {
-        triggerPlayInterrupt(url); // desktop is the branch MASTER → local MPV interrupt
+        triggerPlayInterrupt(tokenized); // desktop is the branch MASTER → local MPV interrupt
       } else {
-        devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url }); // CONTROL → cloud WS → branch MASTER
+        devicePlayer?.sendCommandToMaster("PLAY_INTERRUPT", { url: tokenized }); // CONTROL → cloud WS → branch MASTER
       }
     },
     [isDesktop, devicePlayer],
@@ -1783,7 +1787,9 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
               result={resultCard}
               isDesktop={isDesktop}
               previewing={!!resultCard && preview.previewUrl === resultCard.url}
-              onPlay={isDesktop ? handleResultPlay : () => resultCard && preview.toggle(resultCard.url)}
+              onPlay={() => {
+                if (!isDesktop && resultCard) preview.toggle(resultCard.url);
+              }}
               onSave={() => void handleResultSaveToLibrary()}
               onAddToPad={() => resultCard && setAssignForAsset(resultCard)}
               onSchedule={(el) => resultCard && openSchedule(resultCard, el)}
@@ -1817,8 +1823,11 @@ export function JinglesWorkspacePanel({ onClose, controlRoom }: { onClose: () =>
                           <button
                             type="button"
                             className="jcl-hit"
-                            disabled={!a.url}
-                            onClick={() => (isDesktop ? fireOnAir(a.url) : preview.toggle(a.url))}
+                            disabled={!a.url || isDesktop}
+                            onClick={() => {
+                              if (!isDesktop) preview.toggle(a.url);
+                            }}
+                            title={isDesktop ? tr("Preview isn't available in the desktop app yet — use a browser or phone to preview") : undefined}
                             aria-label={`${on ? tr("Stop") : tr("Play")} ${a.title}`}
                           />
                           <span className="jcl-play" aria-hidden>

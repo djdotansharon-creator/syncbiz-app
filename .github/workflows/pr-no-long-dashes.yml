@@ -1,0 +1,34 @@
+name: PR has no long dashes
+
+# Owner directive 2026-11-25: ONE rule, the same for everyone - nothing we write carries a long
+# dash (U+2014 EM DASH or U+2013 EN DASH); it is always a plain "-". See CLAUDE.md, "No long dashes".
+#
+# This check reads ONLY the lines the pull request adds or changes, so it can never fail over
+# something that was already in the repository. The single exception is technical: the character
+# classes and separator arrays that parse "Artist - Title" out of external song metadata have to
+# keep accepting a real long dash, and the gate allows those idioms by name.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Make the base branch available
+        run: git fetch --no-tags --depth=1 origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+
+      - name: No long dashes in what this PR changes
+        run: npx -y tsx@4 scripts/verify-no-long-dashes.ts --changed
