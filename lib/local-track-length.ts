@@ -19,7 +19,7 @@ const BREATH_MS = 20;
 /** lengths are saved in chunks, so a window closed in the middle loses at most one chunk */
 const CHUNK = 50;
 
-type SaveAnswer = { durationSeconds: number | null; applied: number; stillMissing: number };
+export type SaveAnswer = { durationSeconds: number | null; applied: number; stillMissing: number };
 
 /** true only inside the desktop app (it is the machine that owns the files) */
 export function canReadLocalLengths(): boolean {
@@ -33,7 +33,8 @@ export function localTracksMissingLength(playlist: Playlist): { id: string; url:
     .map((t) => ({ id: t.id, url: t.url }));
 }
 
-async function saveLengths(playlistId: string, durations: Record<string, number>): Promise<SaveAnswer | null> {
+/** numbers only (track id -> seconds), never a path or an address; also used by the YouTube length reader (lib/youtube-track-length.ts) */
+export async function saveLengths(playlistId: string, durations: Record<string, number>): Promise<SaveAnswer | null> {
   try {
     const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}/track-durations`, {
       method: "POST",
