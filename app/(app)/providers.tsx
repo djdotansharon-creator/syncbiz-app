@@ -13,6 +13,7 @@ import { ScheduleLivePlayGuard } from "@/components/schedule-live-play-guard";
 import { JingleScheduleAutoPlayer } from "@/components/jingles-control/JingleScheduleAutoPlayer";
 import { AutoplayRecommender } from "@/components/autoplay-recommender";
 import { DeckClipFit } from "@/components/deck-clip-fit";
+import { PlayLengthLearner } from "@/components/play-length-learner";
 import { PlayerAutoCompact } from "@/components/player-auto-compact";
 import { HarnessPlaybackProbe } from "@/components/harness-playback-probe";
 import { PocOfflineLauncher } from "@/components/poc-offline/poc-offline-launcher";
@@ -46,6 +47,7 @@ export function AppProviders({ children, locale }: { children: ReactNode; /** th
                 <AutoplayRecommender />
                 {/* owner 2026-11-25: a square-cover video is enlarged and pushed to the deck's edge (display only; renders null) */}
                 <DeckClipFit />
+                <PlayLengthLearner />
                 <PlayerAutoCompact />
                 {/* Read-only diagnostic probe for the P1.1 playback harness (dev-only, renders null). */}
                 <HarnessPlaybackProbe />
