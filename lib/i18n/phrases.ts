@@ -1008,6 +1008,7 @@ export const HE_PHRASES: Record<string, string> = {
   "The schedule is playing now, until {t}. Play this anyway?": "לוח הזמנים מנגן עכשיו, עד {t}. לנגן את זה בכל זאת?",
   "The schedule is playing now. Play this anyway?": "לוח הזמנים מנגן עכשיו. לנגן את זה בכל זאת?",
   "No, keep the schedule": "לא, להשאיר את לוח הזמנים",
+  "No": "לא",
   "Yes, play it": "כן, לנגן",
   // ── Phone app (2026-11-16) ──
   "Add your first branch from the Control Room on a computer, and it will appear here.": "הוסיפו את הסניף הראשון מחדר הבקרה במחשב, והוא יופיע כאן.",
