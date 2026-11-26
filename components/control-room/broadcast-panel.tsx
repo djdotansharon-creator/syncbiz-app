@@ -6,6 +6,7 @@ import { StatusLed, type MapDotStatus } from "@/components/control-room/branch-m
 import { useMgmt } from "@/lib/i18n/use-mgmt";
 import type { MgmtKey } from "@/lib/i18n/management";
 import { isEligibleForBranch, isPlayable, rowAudience } from "@/lib/jingles/audience";
+import { appendJingleToken } from "@/lib/jingles/jingle-session";
 import type { RegionId } from "@/lib/control-room-regions";
 
 /**
@@ -111,7 +112,9 @@ export function BroadcastPanel({
         t.id,
         !eligibleFor(jingle, t)
           ? { delivered: false, reason: "not_eligible" }
-          : t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: jingle.url }) : { delivered: false, reason: "no_station" },
+          // F3: the branch MPV fetches this url, so it carries the jingle token (same workspace as
+          // the jingle - an eligible branch is in this workspace by definition).
+          : t.liveBranchId ? await sendCommandWithAck(t.liveBranchId, "PLAY_INTERRUPT", { url: appendJingleToken(jingle.url) }) : { delivered: false, reason: "no_station" },
       ] as const),
     );
     setResults(Object.fromEntries(settled));

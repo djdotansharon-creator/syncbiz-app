@@ -27,7 +27,11 @@ assert("U4 PREVIEW is local only: the panels never send a command for a preview 
   (panels.match(/sendCommandWithAck\(/g) ?? []).length === 1 && /onClick=\{\(\) => preview\.toggle\(j\.url\)\}/.test(panels) && !/sendCommandTo\(/.test(panels));
 assert("U5 PLAY NOW: explicit target = this branch, confirmed first ('Play in …?'), only when playable + online",
   /setArming\(j\.id\)/.test(panels) && /jg\.playConfirm/.test(panels) && /disabled=\{!j\.playable \|\| !j\.url \|\| !branch\.liveBranchId\}/.test(panels) &&
-  /sendCommandWithAck\(branch\.liveBranchId, "PLAY_INTERRUPT", \{ url: j\.url \}\)/.test(panels));
+  // 2026-11-26: F3 wraps the url in appendJingleToken before dispatch (the station MPV authenticates
+  // the audio read with it). What U5 guards is the ROUTE and the EXPLICIT TARGET - this branch's own
+  // liveBranchId, never a broadcast - so it matches those and lets the url's wrapper change.
+  // Removing the route, or sending to anything other than this branch, still fails it (checked).
+  /sendCommandWithAck\(branch\.liveBranchId, "PLAY_INTERRUPT", \{ url: [^}]*j\.url/.test(panels));
 assert("U6 branch panel: TWO groups only — 'Branch jingles' (LOCAL of this branch) + 'Available to this branch'; list from GET ?branchId=",
   /useJingles\(`\/api\/jingles\/library\?branchId=\$\{encodeURIComponent\(branch\.id\)\}`\)/.test(panels) &&
   /jg\.ofBranch/.test(panels) && /jg\.available/.test(panels) && !/jg\.network"\)\}<\/p>/.test(panels));
