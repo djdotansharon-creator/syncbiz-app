@@ -382,8 +382,10 @@ html[data-sb-display="white"] .ss-pill--on { background: #1c1c1e; color: #fff; }
 .ss-htick { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--ss-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 html[dir="rtl"] .ss-htick { transform: translateX(50%); }
 .ss-htrack { position: relative; border-radius: 20px; background-color: var(--ss-surface-2); cursor: copy; overflow: hidden; }
-/* a block lifted up or down while it is carried floats OUT of its row (only the sides stay clipped) */
-.ss[data-carry] .ss-htrack { overflow-x: clip; overflow-y: visible; }
+/* a block lifted up or down while it is carried floats OUT of its row (and, since 2026-11-26, out of its sides too) */
+.ss[data-carry] .ss-htrack { overflow: visible; }
+/* the carried block floats above the borders in BOTH directions (owner 2026-11-26): along its row (the track's sides no longer clip it) and across the rows (the week list stops clipping while it is at its top, see weekRowsRef) */
+.ss[data-carry] .ss-hrows--week[data-free="1"] { overflow: visible; }
 /* a carried block rises ABOVE everything — the other rows, the hours — and is not cut by the frame of the calendar (owner 2026-11-16: "as if it is above the times"); its two times stay above it */
 .ss[data-carry] .ss-cal { overflow: visible; }
 .ss[data-carry] .ss-hrow:has(> .ss-htrack > .ss-block.is-dragging), .ss[data-carry] .ss-hrow:has(.ss-block.is-dragging) { position: relative; z-index: 50; }

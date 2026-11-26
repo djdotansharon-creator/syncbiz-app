@@ -262,6 +262,18 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
   // the block being carried: where it is (start / end), the other day it hovers over, and — when it has passed the middle of a neighbour — that neighbour's place while it makes room (`preview`)
   // and the empty slot the carried block will land in (`slot`, in minutes; `row` = the branch of its row)
   const [drag, setDrag] = useState<{ id: string; day: number; start: number; end?: string; overDay?: number; preview?: { id: string; start: number; end: number }; slot?: { start: number; len: number; row: string } } | null>(null);
+  // While a block is carried the week list stops clipping it (owner 2026-11-26: it floats above the borders along its row AND across the rows) - only while the list is at its top: a scrolled list would
+  // jump by what was scrolled the moment it stops being a scroll box, so then it keeps clipping (the track's sides are freed by the stylesheet either way).
+  const weekRowsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = weekRowsRef.current;
+    if (!el) return;
+    if (drag && el.scrollTop === 0) el.dataset.free = "1";
+    else delete el.dataset.free;
+    return () => {
+      delete el.dataset.free;
+    };
+  }, [drag !== null]); // eslint-disable-line react-hooks/exhaustive-deps
   const [hoursOpen, setHoursOpen] = useState(false);
   // the day picker (Day view): the day itself is the control — rest on it and the week's other days appear, or a date from a calendar
   // jingles (owner 2026-11-12): the Jingles screen keeps its own schedule in this browser (per branch); the studio only SHOWS it — a small bell on the timeline at the jingle's time
@@ -2059,7 +2071,7 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
                 <span className="ss-hlabel" />
                 <HoursRuler a={winA} b={winB} width={axisW} zooming={zooming} zoomed={!!zoomWin} axisRef={axisRef} onPanStart={onRulerPointerDown} onReset={resetZoom} />
               </div>
-              <div className="ss-hrows ss-hrows--week">
+              <div className="ss-hrows ss-hrows--week" ref={weekRowsRef}>
                 {WEEK_DAYS.map((d) => (
                   <div key={d} className={`ss-hrow has-label${drag?.overDay === d ? " is-drop-day" : ""}`} data-day={d}>
                     <button type="button" className={`ss-wlabel${weekDates[d] === todayKey ? " is-today" : ""}${clip ? " can-paste" : ""}`} onClick={() => onDayHeadClick(d)} title={clip ? tr("Paste here") : tr("Open this day")}>
