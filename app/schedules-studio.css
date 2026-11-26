@@ -207,11 +207,25 @@ html[data-sb-display="white"] .ss-hover span { background: #1c1c1e; color: #fff;
 html[data-sb-display="white"] .ss-search:focus-within { background: rgba(0, 0, 0, 0.1); }
 .ss-search-ico { flex: none; display: block; }
 .ss-search input { flex: 1; min-width: 0; height: 100%; padding: 0 0 0 10px; padding-inline: 10px 0; border: 0; outline: 0; background: transparent; color: var(--ss-fg); font: inherit; font-size: 13.5px; }
-.ss-chips { display: flex; gap: 6px; flex-wrap: wrap; }
-.ss-chip { height: 26px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: var(--ss-dim); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
+/* the kinds row: ONE line, scrolls sideways when it does not fit, the chosen kind rides in a sliding pill (owner 2026-11-26) */
+.ss-chips { position: relative; flex: none; display: flex; flex-wrap: nowrap; gap: 4px; padding: 3px 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.ss-chips::-webkit-scrollbar { display: none; }
+.ss-chip { position: relative; z-index: 1; flex: 0 0 auto; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--ss-dim); font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: color 260ms ease; }
 .ss-chip:hover { color: var(--ss-fg); }
-.ss-chip.is-on { background: var(--ss-fg); color: var(--ss-pop-bg); }
-html[data-sb-display="white"] .ss-chip.is-on { background: #1c1c1e; color: #fff; }
+.ss-chip.is-on { color: var(--ss-pop-bg); }
+.ss-chip:focus-visible { outline: 2px solid var(--ss-fg); outline-offset: -2px; }
+/* the pill: a one-chip slot slides on the compositor with the display switch's long ease-out tail, and the pill inside squashes and settles like a bubble (same keyframes as .sb-mode-sel-ring) */
+.ss-chip-slot { position: absolute; top: 3px; left: 0; width: var(--pw, 0px); height: 30px; transform: translateX(var(--px, 0px)); pointer-events: none; z-index: 0; opacity: 0; }
+.ss-chips[data-ready="1"] .ss-chip-slot { opacity: 1; transition: transform 900ms cubic-bezier(0.16, 0.9, 0.18, 1), width 900ms cubic-bezier(0.16, 0.9, 0.18, 1), opacity 200ms ease; }
+.ss-chip-pill { display: block; width: 100%; height: 100%; border-radius: 999px; background: var(--ss-fg); }
+.ss-chips[data-ready="1"] .ss-chip-pill { animation: ss-chip-bubble 900ms cubic-bezier(0.16, 0.9, 0.18, 1) both; }
+@keyframes ss-chip-bubble { 0% { transform: scale(1, 1); } 28% { transform: scale(1.18, 0.9); } 58% { transform: scale(0.97, 1.03); } 100% { transform: scale(1, 1); } }
+/* full graphics: the pill is glass (a soft gradient, inner light on the rim, a quiet shadow; no live blur, so it costs nothing) and the chosen word is light */
+html:not([data-sb-fx="lite"]):not([data-sb-display="white"]) .ss-chip.is-on { color: #fff; }
+html:not([data-sb-fx="lite"]):not([data-sb-display="white"]) .ss-chip-pill { background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.1)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 6px 18px rgba(0, 0, 0, 0.32); }
+html[data-sb-display="white"] .ss-chip.is-on { color: #fff; }
+html[data-sb-display="white"] .ss-chip-pill { background: #1c1c1e; }
+@media (prefers-reduced-motion: reduce) { .ss-chips[data-ready="1"] .ss-chip-slot { transition: none; } .ss-chips[data-ready="1"] .ss-chip-pill { animation: none; } .ss-chip { transition: none; } }
 .ss-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 2px; }
 .ss-list::-webkit-scrollbar { display: none; }
 .ss-list--pop { max-height: 280px; }
@@ -384,9 +398,14 @@ html[dir="rtl"] .ss-hnow span { transform: translateX(50%); }
 /* the day as a list, under the timeline (one branch): what plays in every hour, in words */
 .ss-agenda { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; scrollbar-width: none; min-height: 0; }
 .ss-agenda::-webkit-scrollbar { display: none; }
-.ss-ag { display: grid; grid-template-columns: 118px 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 6px 14px 6px 8px; border: 0; border-radius: 14px; background: transparent; color: var(--ss-fg); font: inherit; text-align: start; cursor: pointer; transition: background-color 150ms ease; }
+.ss-ag { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 118px; align-items: center; gap: 12px; width: 100%; padding-block: 6px; padding-inline: 4px 14px; border: 0; border-radius: 14px; background: transparent; color: var(--ss-fg); font: inherit; text-align: start; cursor: pointer; transition: background-color 150ms ease; }
 .ss-ag:hover { background: var(--ss-surface-2); }
 .ss-ag-time { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ss-dim); text-align: end; }
+/* the picture and the name sit at the start edge, the hours at the other end (owner 2026-11-26); the markup keeps its order, the grid places the parts */
+.ss-ag > .ss-cover { grid-column: 1; grid-row: 1; }
+.ss-ag > .ss-ag-name { grid-column: 2; grid-row: 1; }
+.ss-ag > .ss-ag-live { grid-column: 3; grid-row: 1; }
+.ss-ag > .ss-ag-time { grid-column: 4; grid-row: 1; }
 .ss-ag .ss-cover { width: 38px; height: 38px; border-radius: 10px; }
 .ss-ag-name { font-size: 15.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ss-ag-live { padding: 2px 9px; border-radius: 6px; background: var(--ss-now); color: var(--ss-now-ink); font-size: 11px; font-weight: 700; }

@@ -14,7 +14,7 @@ html[data-sb-display="white"][data-sb-fx="lite"] .vono-lp { background: rgba(244
 .vono-lp-btn:hover { transform: scale(1.03); }
 .vono-lp-btn:active { transform: scale(0.98); }
 .vono-lp-btn:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.8); outline-offset: 3px; }
-.vono-lp-yes { background: #2f7bff; color: #fff; box-shadow: 0 10px 30px rgba(47, 123, 255, 0.45); }
+.vono-lp-yes { background: #2f7bff; color: #fff; box-shadow: none; }
 .vono-lp-yes:hover { background: #4a8bff; }
 .vono-lp-no { background: #fff; color: #111114; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
 html[data-sb-display="white"] .vono-lp-body { color: #1c1c1e; }
