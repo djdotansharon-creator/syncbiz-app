@@ -3,7 +3,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { pictureBox } from "../components/deck-clip-fit";
+import { clipPlacement, pictureBox } from "../components/deck-clip-fit";
 
 let pass = 0, fail = 0;
 function assert(name: string, cond: boolean, detail = ""): void {
@@ -42,4 +42,30 @@ const css = rd("app/globals.css");
 assert("W4 the CSS moves the iframe only while the attribute is on (!important — the deck's own script writes `transform: none` every second) and anchors the edge-fade on the moved frame", /\.audio-player-library-deck\[data-sb-clip-fit\] \.sb-deck-video-bg iframe \{ transform: translate\(var\(--sb-clip-tx, 0px\), var\(--sb-clip-ty, 0px\)\) scale\(var\(--sb-clip-z, 1\)\) !important; transform-origin: 50% 50% !important; \}/.test(css) && /\.audio-player-library-deck\[data-sb-clip-fit\] \.sb-deck-video-bg \{ --sb-video-w: var\(--sb-clip-w, 60%\); \}/.test(css));
 assert("W5 the white look: the drop overlay (+) blurs what is behind it again (not in the light graphics), and the share button gets a faint disc only while a fitted picture is under it", /html\[data-sb-display="white"\]:not\(\[data-sb-fx="lite"\]\) \.sb-player-drop\[data-on\] \{ -webkit-backdrop-filter: blur\(18px\) !important; backdrop-filter: blur\(18px\) !important; \}/.test(css) && /html\[data-sb-display="white"\] \.audio-player-library-deck\[data-sb-clip-fit\] \.sb-transport-wing--end \.player-transport-secondary button \{ background: rgba\(255, 255, 255, 0\.6\); border-radius: 999px; \}/.test(css));
 assert("W6 the white look's drop-overlay blur carries !important — app/lite-fx.css rule 1 removes every backdrop-filter in the white look with !important, so without it the blur stays \"none\" (measured 2026-11-25); the light graphics keep that rule", /html\[data-sb-display="white"\]:not\(\[data-sb-fx="lite"\]\) \.sb-player-drop\[data-on\] \{[^}]*backdrop-filter: blur\(18px\) !important/.test(css) && /:is\(html\[data-sb-fx="lite"\], html\[data-sb-display="white"\]\) \*,[\s\S]{0,400}backdrop-filter: none !important/.test(rd("app/lite-fx.css")));
+
+// W7 (owner 2026-11-26, "the video on dad's PC is too low"): the placement follows the frame's REAL layout position. The browser Player lays the frame flush to the slot's outer edge and top; the station / Remote
+// clip lays it out 120 % wide from -10 % with top: 50 % (components/player-surface/desktop-video-dock.tsx). In BOTH, the picture must come out centred vertically and flush to the slot's outer edge.
+{
+  const slotW = 640, slotH = 316;
+  const sq = { x0: 0.31, x1: 0.69, y0: 0, y1: 1 }; // a square cover in the middle of a 16:9 frame
+  const player = (rtl: boolean) => { const w = Math.round((slotH * 16) / 9), h = slotH; return { w, h, left: rtl ? 0 : slotW - w, top: 0, slotW, slotH }; };
+  const dock = (rtl: boolean) => { const w = slotW * 1.2, h = (w * 9) / 16; return { w, h, left: rtl ? 0 : -slotW * 0.1, top: slotH / 2, slotW, slotH }; };
+  const ok: boolean[] = [];
+  const shown: string[] = [];
+  for (const [name, make] of [["player", player], ["dock", dock]] as const) {
+    for (const rtl of [false, true]) {
+      const f = make(rtl);
+      const { z, tx, ty } = clipPlacement(sq, f, rtl);
+      const cx = f.left + f.w / 2, cy = f.top + f.h / 2;
+      const midY = cy + ty + z * f.h * (0.5 - 0.5); // picture's vertical centre (its box is y0 0 .. y1 1)
+      const edge = rtl ? cx + tx + z * f.w * (sq.x0 - 0.5) : cx + tx + z * f.w * (sq.x1 - 0.5);
+      const good = Math.abs(midY - slotH / 2) < 0.5 && Math.abs(edge - (rtl ? 0 : slotW)) < 0.5;
+      ok.push(good);
+      shown.push(`${name}/${rtl ? "rtl" : "ltr"} midY=${midY.toFixed(1)} edge=${edge.toFixed(1)}`);
+    }
+  }
+  assert("W7 the placement follows the frame's real layout position: the picture is centred vertically and flush to the slot's outer edge in the browser Player AND in the station / Remote clip (top 50 %, 120 % wide), left-to-right and right-to-left", ok.every(Boolean), shown.join(" | "));
+}
+const compSrc = rd("components/deck-clip-fit.tsx");
+assert("W8 the component reads the frame's layout position (offsetLeft / offsetTop / its offsetParent), never an assumed one, and the arithmetic is the exported pure clipPlacement", /export function clipPlacement/.test(compSrc) && /left: f\.offsetLeft, top: f\.offsetTop/.test(compSrc) && /slotW: bgW, slotH: bgH/.test(compSrc));
 console.log(`\n${pass} passed, ${fail} failed`);
