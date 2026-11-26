@@ -8,6 +8,18 @@
 
 ## 1. STATUS
 
+- **🔴 P0 JINGLES ANSWERED 401 IN PRODUCTION SINCE #264 - FIXED IN CODE, PR #271 OPEN, NOT MERGED / NOT DEPLOYED / NOT RUNTIME-ACCEPTED. RENDERER ONLY** (no installer; the Lenovo reloads by closing and reopening VONO).
+  **What broke.** #264 (F3) closed the cross-tenant read on `/api/jingles/audio/<id>`: the route now requires either the signed `?jt=` jingle token or the session cookie. MPV presents neither on its own, so the RENDERER appends the token at dispatch. Three dispatchers were converted and FOUR were not, so every jingle fired from those four ducked the music, played nothing, and let the music back. No error on screen; nothing in a log anyone watches.
+  **The four.** (1) scheduled jingles, `components/jingles-control/JingleScheduleAutoPlayer.tsx` - `PROVEN BY RUNTIME` from the PROD HTTP log: the SAME jingle id answered 200 at 06:04:54 fired from a pad and 401 at 06:08:00 fired by the schedule, 24-byte body. (2) Control Room Broadcast, `components/control-room/broadcast-panel.tsx` - `PROVEN BY CODE`. (3) Control Room single branch, `components/control-room/jingles-panels.tsx` - `PROVEN BY CODE`. (4) the phone's jingle pads, `lib/mobile-fleet.tsx` `interrupt()` reached from `components/mobile/mobile-jingles.tsx` - `PROVEN BY CODE`; this one was missed in the first audit because the dispatch is behind `fleet.interrupt`, so a grep for `PLAY_INTERRUPT` did not name the file.
+  **The fix.** The same one-line change on each, at the same boundary the three working dispatchers already use: `appendJingleToken(url)` immediately before dispatch. It is pure and synchronous (nothing added to the fire path), leaves a pre-roll bell URL untouched, and returns the url unchanged when no token is held, so none of these can fail in a way they did not already. The mobile fix sits on `fleet.interrupt`, the single boundary every caller goes through. Nothing in the playback chain, the WS payload shape or the MPV side is touched.
+  **Guard.** `#12` in `desktop/scripts/verify-play-interrupt-main.ts` is a SWEEP, not another named assertion: any file under `app/`, `components/` or `lib/` that dispatches an interrupt must reference `appendJingleToken`. The two that legitimately do not are named in the gate with their reason (`lib/device-player-context.tsx`, the receiver, which plays a url the sender already tokenized; and `components/desktop-mpv-test-panel.tsx`, a dev panel firing a hand-typed URL). Negative-tested: reverting two of the four fails it and names both files.
+  Branch `security/f3-tokenize-all-jingle-firing`, commit `ae1b372`, on top of `8386a84` (#268) so its CI is green. Static: the six blocking CI gates 136/136, desktop typecheck clean, app typecheck clean in the touched files, no long dashes. **Runtime acceptance = one scheduled jingle firing on the Lenovo after the deploy.**
+- **🟡 TWO JINGLE CONTROLS WERE DEAD ON THE STATION (regression from #263, 2026-11-25) - FIXED IN CODE, PR #269 OPEN, NOT MERGED / NOT RUNTIME-ACCEPTED. RENDERER ONLY.**
+  #263 set `disabled={isDesktop}` on two controls instead of relabelling them, so inside VONO they did nothing at all: no sound, no error, no response. (a) every big tile in the Jingles library (`JinglesShell.tsx`, `className="jcl-hit"`); (b) the round PLAY on a jingle you have just created (`components/jingles-control/jingle-create-flow.tsx`, `className="sb-jf-play"`, plus an `onPlay` in the shell that did nothing when `isDesktop`). `PROVEN BY CODE`. Owner-reported 2026-11-26: he could only hear a new jingle by assigning it to a Quick Pad first.
+  An earlier version of PR #269's description said the Create tab kept its own explicit On-Air button so nothing was lost there. **That was wrong and is corrected in the PR:** that button renders only inside `{isDesktop && !isCR ? ...}`, i.e. on the Control Room surface; the ordinary Jingles console renders `JingleCreateFlow`, which had no On-Air button at all. Both tabs were dead ends on a station.
+  Correction: on a station there is one speaker system, so audition-without-broadcasting has no meaning there; the click is ON-AIR through the already-proven paths (`handleLibraryPlay` mirroring `handlePadPlay`, and the existing `handleResultPlay`), with the pre-roll bell. Browser and phone keep the local audition, unchanged. No badge or lamp was added (owner, 2026-11-26: a working click, not a new indicator); the only labelling is non-visual, the tooltip and the accessible name, so a screen reader stops announcing "Play" for something that goes out to the branch.
+  Gate `#7` had FROZEN the regression in place as if it were the invariant (it required TWO disabled-on-desktop controls, one of which was never a Preview control), so restoring the tile would have failed CI. `#7` now guards the one real Preview control; `#7b` and `#7c` are new and guard both restored controls (clickable on a station, routed through the proven path, named On-Air). All five new assertions were negative-tested. Branch `fix/jingle-library-tile-onair`, commit `ce3da2d`. Static: the six blocking gates 141/141.
+- **🟡 `main` CI WAS RED - FIXED IN CODE, PR #268 OPEN** (one line, `desktop/scripts/verify-play-interrupt-main.ts`, commit `8386a84`). Gate `#9` pinned the object literal `{ url }`; #264 made the payload `{ url: tokenized }`, so a correct change failed a gate that exists to protect the ROUTE. Widened to the route and the url key, documented in place, negative-tested (removing the real route still fails it) - CLAUDE.md §18. Both #269 and #271 carry this commit, so merging either one also makes `main` green and makes #268 unnecessary.
 - **🟡 INSTALLER CANDIDATE `2.3.6-rc.1` — built 2026-11-18, NOT INSTALLED anywhere / NOT ACCEPTED / NOT PUBLISHED. DESKTOP MAIN.** Carries the two fixes of the 2026-11-18 restart audit on top of everything that is on `main`:
   **F1** (PR #208) — the C1 gate in `MpvManager.loadInternal` (commit `674fcad`) rejected every Windows drive path, so a LOCAL song (incl. the restart restore and the offline case) never loaded (`MPV_LOAD_REJECTED_C1` in main.log, then silence) — PROVEN BY CODE; now a local DRIVE path passes, UNC / LAN / loopback / non-http stay rejected; the WS boundary stays strict. **F4** (PR #209) — a sealed station token (C6b, DPAPI) that could not be opened in a run is no longer overwritten with `""` by a later unrelated save. Both FIXED IN CODE, not runtime-accepted.
   Source: `main` `83c46d6` (version bump PR #212 on top of `860967f`), clean tree, **no transient build edits**. Endpoints = the committed defaults = **PROD** (`syncbiz-app-production` + `syncbiz-ws-production`); built `app.asar` checked: no TEST host present, the fixes present. Built by the build-only workflow "Desktop Windows installer (build only)" run `44374095205` (never publishes, no tag). Installer `VONO-Player-Setup-2.3.6-rc.1-x64.exe`, 143,470,952 bytes, **unsigned**, SHA256 `982576DFBE5565676F7F0A67F16473D93316A8BD17ED4D55C356B314C5A30839`. The GitHub artifact expires 2026-12-02 — **download and keep a copy + this hash** (backup folder convention `D:\SyncBiz_Backups\pilot\2026-11-18-2.3.6-rc.1\`).
@@ -1017,9 +1029,31 @@ Not pilot blockers. Do not fix inside unrelated work.
    MAIN still reports URL. Desired: startup / reload restores the actual active source / session (not blindly LOCAL);
    no UI / audio source mismatch. Own audit / gate.
 
+23. **DELETE FROM THE JINGLE LIBRARY DOES NOT DELETE (found 2026-11-26, `PROVEN BY CODE`, own audit + approval required).**
+   The trash icon on a library tile runs `setSavedAssets((prev) => prev.filter(...))` and nothing else, and there is NO
+   DELETE route anywhere under `app/api/jingles/` (`library/[id]/route.ts` exports only `PATCH`; verified by grep for
+   `export async function DELETE`). So the tile vanishes from that screen, the jingle returns the next time the console
+   opens (the mount effect refetches the authoritative cloud list), and it never disappears for any other client or for
+   the station. Needs its own audit first: who may delete which jingle under the existing audience model
+   (`lib/jingles/library-service.ts`), what happens to a Quick Pad or a jingle schedule pointing at it, and hard vs soft
+   delete - `/api/jingles/audio/<id>` resolves a jingle's owning workspace from exactly that row, and a hard delete
+   makes the audio id un-owned, which that route treats as "no owning workspace to enforce against" rather than
+   "forbidden". A task card was proposed to the owner 2026-11-26; not started.
+24. **`scripts/verify-control-room-brands.ts` P6 fails on `main` (recorded 2026-11-26, PRE-EXISTING, not a regression).**
+   The failing sub-condition is the `applyControlRoomFilters(...)` call wording in `components/control-room/all-branches-view.tsx`,
+   a file the 2026-11-26 jingle branches do not touch; it fails the same way on the base commit. NOT in the blocking CI
+   gate set (that job runs six scripts; this one is in "Every gate (report only)"). Realign or fix it in its own change.
+25. **Two brittle static assertions were realigned on 2026-11-26 (CLAUDE.md §18), declared here so it is not rediscovered
+   as a weakening:** `verify-jingles-ui` U5 and `verify-control-room-brands` P6 pinned the PLAY_INTERRUPT payload's object
+   literal rather than the invariant they guard, so appending the jingle token broke them. Both now match the route and
+   the explicit target, are documented in place, and were negative-tested (breaking the target or the route still fails
+   them). Same class of brittleness as gate `#9` (#268). A payload literal is not an invariant; a route and a target are.
+
 Carried over (still open):
 - Jingle library/pads still use `branchId:"default"`; no link to `MediaAsset`; generated-but-unsaved MP3s
-  are never cleaned up; `/api/jingles/audio/<id>` is unauthenticated (UUID-only).
+  are never cleaned up. ~~`/api/jingles/audio/<id>` is unauthenticated (UUID-only)~~ **RESOLVED by #264 (F3),
+  2026-11-25: the route requires a signed `?jt=` jingle token or the session cookie, and a saved jingle's owning
+  workspace must match the principal. See the P0 entry in §1 for what that broke on the firing side.**
 - Desktop app has no local Preview engine yet (Preview unavailable there by design for now).
 - Temporary `[VONO MetaSync]` `console.warn` diagnostics — still present in `lib/device-player-context.tsx`.
 - `[VONO Shuffle Diag]` `console.log` — still present in `components/audio-player.tsx` (~4395).
@@ -1034,6 +1068,11 @@ Carried over (still open):
 - Pre-existing desktop `tsconfig.typecheck.json` errors (not the packaging path) — known, untouched.
 
 ## 10. DO NOT REGRESS
+
+*(added 2026-11-26, jingle token + the two dead station controls)*
+- every surface that fires a jingle appends the workspace-scoped jingle token before dispatch (gate `#12` sweeps for it)
+- a library tile and the Create result's PLAY both act on the desktop station, through `fireOnAir` / `handleResultPlay`, named On-Air (gates `#7b` / `#7c`)
+- a jingle dispatch stays pure and synchronous: no I/O, no await added to the fire path
 
 *(added 2026-10-07, P0 URL continuity + ownership — renderer `d617314`)*
 - URL session natural EOF → exactly one auto-advance to the next URL (no wrap at the last item, no duplicate load)
