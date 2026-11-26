@@ -6522,6 +6522,8 @@ html[data-sb-display="white"] .player-transport-secondary button[class][class][c
   -webkit-background-clip: text; background-clip: text; animation: sb-djl-sweep 6.5s ease-in-out infinite; }
 @keyframes sb-djl-sweep { 0%, 18% { background-position: 100% 0; } 62%, 100% { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) { .sb-djl-title { animation: none; color: #fff; background: none; } }
+/* the sweep runs only while the right rail is OPEN (owner 2026-11-26: "if the DJ AI button is closed why show it"); a collapsed rail kept it running out of sight, redrawing the screen every frame */
+.sb-rail-content[data-open="false"] .sb-djl-title { animation: none; }
 
 /* ── (co) 2026-10-18 owner round 10 ── search field: a magnifier + one word that rises / falls / is replaced (Music · Genres …),
    centred; focus → the magnifier travels to the start and the word folds away. The mic is plain white and glows with the voice. ── */
