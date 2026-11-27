@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useTranslations } from "@/lib/locale-context";
 import { useTr } from "@/lib/i18n/use-tr";
 import { LAST_LEGACY_VERSION, isBelowMinEngine, isNewer } from "@/lib/desktop-version";
+import { startDesktopUpdate } from "@/lib/start-desktop-update";
 
 /**
  * Electron-only header pill (owner 2026-11-02: next to the logo, a flat ellipse with no frame, "Update" / "עדכון").
@@ -243,7 +244,12 @@ export function DesktopUpdatePill() {
               </span>
               <div ref={innerRef} className="sb-update-in" style={{ width: CARD_W }}>
                 <span className="sb-update-ver" dir="ltr">{target.version}</span>
-                <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer">
+                <a className="sb-update-go" href={target.href} target="_blank" rel="noopener noreferrer"
+                  onClick={(e) => {
+                    // an engine that can update itself (>= 2.3.2) does it here (download, verify, install); an older one just follows the link
+                    if (startDesktopUpdate(target.href)) e.preventDefault();
+                  }}
+                >
                   <span className="sb-pill-t">{text}</span>
                 </a>
                 <a className="sb-update-new" href="/whats-new" target="_blank" rel="noopener noreferrer">{trp("What's new")}</a>
