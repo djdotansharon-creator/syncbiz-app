@@ -14,6 +14,7 @@ import { detectDeviceLabel, getEnrollmentDeviceId } from "@/lib/enrollment-devic
 import { PlayerIcon, RemoteIcon } from "@/components/device-role-badge";
 import { InfoIcon } from "@/components/info-icon";
 import { isNewer } from "@/lib/desktop-version";
+import { startDesktopUpdate } from "@/lib/start-desktop-update";
 
 type Approval = { enforced: false } | { enforced: true; status: string; role?: "PLAYER" | "REMOTE"; playerClass?: string | null; branchIds?: string[] };
 type Me = { email?: string | null; accountName?: string | null; name?: string | null };
@@ -207,7 +208,7 @@ export function DeviceDetailsModal({ open, onClose }: { open: boolean; onClose: 
                 {newer && engine?.latest ? (
                   <>
                     {" · "}
-                    <a className="sb-devdet-update" href={engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases"} target="_blank" rel="noopener noreferrer">{t.updateTo.replace("{v}", engine.latest)}</a>
+                    <a className="sb-devdet-update" href={engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases"} target="_blank" rel="noopener noreferrer" onClick={(e) => { if (startDesktopUpdate(engine.href ?? "https://github.com/djdotansharon-creator/syncbiz-app/releases")) e.preventDefault(); }}>{t.updateTo.replace("{v}", engine.latest)}</a>
                   </>
                 ) : null}
               </dd>
