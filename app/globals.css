@@ -108,7 +108,7 @@ button:active:not(:disabled) {
 }
 
 /* the login screen's background (owner 2026-10-28): a soft, slightly light, colourful blurred background — plain radial gradients (no blur filter, nothing heavy for a weak graphics card) */
-.vono-ambient { background: radial-gradient(72vmax 58vmax at 8% 6%, rgba(48, 209, 88, 0.2), transparent 62%), radial-gradient(66vmax 60vmax at 94% 98%, rgba(92, 132, 255, 0.26), transparent 62%), radial-gradient(52vmax 42vmax at 80% 4%, rgba(176, 112, 255, 0.15), transparent 60%), #15151c; }
+.vono-ambient { background: radial-gradient(72vmax 58vmax at 8% 6%, rgba(10, 132, 255, 0.20), transparent 62%), radial-gradient(66vmax 60vmax at 94% 98%, rgba(56, 120, 255, 0.18), transparent 62%), radial-gradient(52vmax 42vmax at 80% 4%, rgba(28, 64, 150, 0.22), transparent 60%), linear-gradient(180deg, #020617 0%, #0f172a 48%, #020617 100%); }
 
 /* ─── SyncBiz clean design tokens (Apple-inspired) ───
    One restrained accent, hairline borders, soft elevation — no neon glow. */
@@ -8191,7 +8191,7 @@ html[data-sb-display="white"] .sb-rad-btn-go { background: #1c1c1e; color: #fff;
 .sb-devdet-i { display: inline-flex; flex: none; width: 20px; height: 20px; color: rgba(255, 255, 255, 0.82); }
 
 /* the login screen's background (owner 2026-10-28): a soft, slightly light, colourful blurred background — plain radial gradients (no blur filter, nothing heavy for a weak graphics card) */
-.vono-ambient { background: radial-gradient(72vmax 58vmax at 8% 6%, rgba(48, 209, 88, 0.2), transparent 62%), radial-gradient(66vmax 60vmax at 94% 98%, rgba(92, 132, 255, 0.26), transparent 62%), radial-gradient(52vmax 42vmax at 80% 4%, rgba(176, 112, 255, 0.15), transparent 60%), #15151c; }
+.vono-ambient { background: radial-gradient(72vmax 58vmax at 8% 6%, rgba(10, 132, 255, 0.20), transparent 62%), radial-gradient(66vmax 60vmax at 94% 98%, rgba(56, 120, 255, 0.18), transparent 62%), radial-gradient(52vmax 42vmax at 80% 4%, rgba(28, 64, 150, 0.22), transparent 60%), linear-gradient(180deg, #020617 0%, #0f172a 48%, #020617 100%); }
 
 /* the role icon is a button now (it opens the Player / Remote details window — owner 2026-10-31): no browser button look */
 button.sb-role-icon { appearance: none; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
