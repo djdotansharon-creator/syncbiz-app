@@ -13,6 +13,8 @@ import {
 import { useRemoteOwner, type ConnectionStatus } from "@/lib/remote-control/ws-client";
 import type { BranchSummary, StationPlaybackState } from "@/lib/remote-control/types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
+import { isLibraryLocalSource } from "@/lib/library-display-classification";
+import { LOCAL_PLAY_COMMAND, isDuplicateLocalPlay, localPlayKey, resolveLocalPlayRequest } from "@/lib/remote-local-play";
 import type { UnifiedSource } from "@/lib/source-types";
 import { getPlaylistTracks } from "@/lib/playlist-types";
 import { warmTone } from "@/lib/cover-tone";
@@ -448,9 +450,23 @@ export function MobileFleetProvider({ children }: { children: ReactNode }) {
     send("PREV");
   }, [beginNav, send, target]);
 
+  const lastLocalPlayRef = useRef<{ key: string; at: number } | null>(null); // a double tap is one intent
   const playSource = useCallback(
     (source: UnifiedSource) => {
       if (!target()) return;
+      if (isLibraryLocalSource(source)) {
+        // A LOCAL (computer-files) playlist: only the station's own window can start it, and a PLAY_SOURCE for it is metadata only (the screen would
+        // say it plays while the music does not change). IDS ONLY, never a path (lib/remote-local-play.ts); a request that cannot be made plain sends nothing.
+        const req = resolveLocalPlayRequest(source);
+        if (!("reject" in req)) {
+          const nowMs = Date.now();
+          if (!isDuplicateLocalPlay(lastLocalPlayRef.current, req, nowMs)) {
+            lastLocalPlayRef.current = { key: localPlayKey(req), at: nowMs };
+            send(LOCAL_PLAY_COMMAND, req);
+          }
+        }
+        return;
+      }
       const key = targetKeyOf(source?.id, 0); // this path sends no trackIndex → the station mirrors index 0
       if (decideUserCommand(transitionRef.current, { kind: "select", targetKey: key }) !== "accept") return;
       const prior = liveStateRef.current?.mpvAttemptId;

@@ -22,6 +22,7 @@ import { payloadToUnifiedSource } from "@/lib/remote-control/payload-to-source";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
 import { routeStationTransport, resolveUrlSessionStep, resolveUrlSessionJump, resolveExactUrlTarget, ownPlayableUrl, playlistShellIdOfLeaf } from "@/lib/station-transport-routing";
 import { expandPlaylistEntityToItems } from "@/lib/syncbiz-playlist-queue";
+import { LOCAL_PLAY_COMMAND, isDuplicateLocalPlay, localPlayKey, resolveLocalPlayRequest, resolveRelayedLocalTarget } from "@/lib/remote-local-play";
 import { initialUrlEofState, observeUrlEof, disarmUrlEof, type UrlEofState } from "@/lib/url-eof-advance";
 import {
   beginTransition, decideUserCommand, failTransition, holdsAudible, isBlocking, observeTransition, targetKeyOf, tickTransition,
@@ -1207,7 +1208,7 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   }, [isActive, status, deviceMode, playStatus, sendState, currentSource?.id, currentTrackIndex, queue, queueIndex, volume, shuffle, autoMixState, repeatModeState, sessionMirrorInput]);
 
   const sendCommandToMaster = useCallback(
-    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string; intent?: "user" }) => {
+    (command: RemoteCommand, payload?: { url?: string; source?: PlaySourcePayload; position?: number; volume?: number; value?: boolean; trackIndex?: number; sessionSourceId?: string; queueItemId?: string; intent?: "user"; sourceId?: string }) => {
       if (!masterDeviceId) return;
       sendCommand(masterDeviceId, command, payload);
     },
@@ -1267,6 +1268,11 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
   const stepRelayConsumedRef = useRef<{ boot: string; seq: number } | null>(null);
   const relayedStepRef = useRef<(direction: "next" | "prev", seq: number) => void>(() => {});
   const relayedJumpRef = useRef<(trackIndex: number, sessionSourceId: string | null, seq: number) => void>(() => {});
+  /** A Remote started a LOCAL playlist (ids only) - relayed by MAIN like a step / jump; played by THIS window like a click. */
+  const relayedLocalPlayRef = useRef<(sourceId: string, trackIndex: number, seq: number) => void>(() => {});
+  const localPlayRelayTokenRef = useRef(0);
+  /** the last LOCAL play this Remote asked the station for (a double click is one intent) */
+  const lastRemoteLocalPlayRef = useRef<{ key: string; at: number } | null>(null);
   const masterStateRef = useRef<StationPlaybackState | null>(masterState);
   masterStateRef.current = masterState;
   /** This controller can observe MAIN attempt ids directly (the designated station's co-located renderer). */
@@ -1336,6 +1342,21 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
         lastSentUrlLeafRef.current = null;
         setUrlTransition(null); // P0 Gate 1c: explicit LOCAL selection clears the URL intent (existing safe LOCAL path)
         playSource(source, trackIndex ?? 0);
+      } else if (source && isLibraryLocalSource(source)) {
+        // A Remote (not the station) picked a LOCAL playlist / song: only the station's own window can start LOCAL audio, so send the
+        // station IDS ONLY ({ sourceId, trackIndex }, never a path - CLAUDE.md section 12). MAIN relays it to its window, which plays it like a
+        // click. A request that cannot be made plain (fail closed) sends nothing and keeps the current audio. (Before: refused here, so a
+        // Remote could not start a local playlist at all.)
+        const req = resolveLocalPlayRequest(source, trackIndex);
+        if ("reject" in req) {
+          console.warn("[VONO local-play] selection rejected - " + req.reject + " (nothing sent; current audio kept)", { id: source?.id ?? null, trackIndex });
+          return;
+        }
+        const nowMs = Date.now();
+        if (isDuplicateLocalPlay(lastRemoteLocalPlayRef.current, req, nowMs)) { console.info("[VONO local-play] selection ignored - the same target was just sent"); return; }
+        lastRemoteLocalPlayRef.current = { key: localPlayKey(req), at: nowMs };
+        console.warn("[VONO MetaSync] select->WS PLAY_LOCAL_SOURCE " + JSON.stringify(req));
+        sendCommandToMaster(LOCAL_PLAY_COMMAND, req);
       } else {
         // P0 Gate 1e — LOCKED: a non-LOCAL PLAY_SOURCE must carry the playable URL of THAT EXACT track. Resolve the
         // exact target (a borrowed leaf id / shell + index → the parent playlist's leaf at that index); no playable
@@ -1639,6 +1660,8 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
           relayedStepRef.current(st.sessionStepDirection, reqSeq);
         } else if (last && last.boot === reqBoot && reqSeq > last.seq && st.sessionStepDirection === "jump" && typeof st.sessionStepIndex === "number") {
           relayedJumpRef.current(st.sessionStepIndex, typeof st.sessionStepSessionId === "string" ? st.sessionStepSessionId : null, reqSeq); // P0 Gate 1e
+        } else if (last && last.boot === reqBoot && reqSeq > last.seq && st.sessionStepDirection === "local-play" && typeof st.sessionStepIndex === "number" && typeof st.sessionStepSessionId === "string") {
+          relayedLocalPlayRef.current(st.sessionStepSessionId, st.sessionStepIndex, reqSeq); // a Remote starts a LOCAL playlist (ids only)
         }
       }
       const sent = lastSentUrlLeafRef.current;
@@ -1806,6 +1829,29 @@ export function DevicePlayerProvider({ children }: { children: ReactNode }) {
     console.info("[VONO step-relay] remote JUMP " + index + " #" + seq + " → " + result);
   }, [transportRunsLocally, jumpUrlSession]);
   useEffect(() => { relayedJumpRef.current = relayedJump; }, [relayedJump]);
+
+  // A Remote started a LOCAL playlist on this station (ids only, relayed by MAIN with the same exactly-once identity as a step / jump).
+  // THIS window looks the playlist up BY ID in its own library and starts it through `playSourceOrSend` - the SAME path as a click on that
+  // playlist here (LOCAL ownership, MAIN session sync, existing LOCAL engine). Not the station owner / not in this library / not a LOCAL source /
+  // a newer request arrived meanwhile -> nothing changes and the current music keeps playing. Never a path on the wire (CLAUDE.md section 12).
+  const relayedLocalPlay = useCallback((sourceId: string, trackIndex: number, seq: number) => {
+    if (!canLocalExecRef.current) {
+      console.info("[VONO local-play-relay] remote local play #" + seq + " -> ignored - not the station session owner");
+      return;
+    }
+    const token = ++localPlayRelayTokenRef.current; // the newest request wins
+    fetchUnifiedSourcesWithFallback()
+      .then((items) => {
+        if (token !== localPlayRelayTokenRef.current) { console.info("[VONO local-play-relay] #" + seq + " -> superseded by a newer request"); return; }
+        if (!canLocalExecRef.current) { console.info("[VONO local-play-relay] #" + seq + " -> ignored - no longer the station session owner"); return; }
+        const target = resolveRelayedLocalTarget(items, { sourceId, trackIndex });
+        if ("reject" in target) { console.warn("[VONO local-play-relay] #" + seq + " -> rejected (" + target.reject + "); current music kept"); return; }
+        console.info("[VONO local-play-relay] #" + seq + " -> starting LOCAL " + JSON.stringify({ id: target.source.id, trackIndex: target.trackIndex }));
+        playSourceOrSendRef.current(target.source, target.trackIndex);
+      })
+      .catch(() => { console.warn("[VONO local-play-relay] #" + seq + " -> library not readable; current music kept"); });
+  }, []);
+  useEffect(() => { relayedLocalPlayRef.current = relayedLocalPlay; }, [relayedLocalPlay]);
 
   const jumpToSessionIndexOrSend = useCallback((index: number, sessionSourceId: string) => {
     if (isStationObserver()) {

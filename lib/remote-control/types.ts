@@ -28,7 +28,10 @@ export type RemoteCommand =
   // Executed on the branch MASTER via the existing desktop bridge (mpvPlayInterrupt).
   | "PLAY_INTERRUPT"
   // P0 Gate 1e: absolute jump to session item N — MAIN relays it to the station renderer (the URL session owner).
-  | "JUMP_SESSION_INDEX";
+  | "JUMP_SESSION_INDEX"
+  // A Remote starts a LOCAL (computer-files) playlist on the station: IDS ONLY ({ sourceId, trackIndex }), never a path
+  // (lib/remote-local-play.ts). MAIN relays it to the station's own window, which plays it like a click.
+  | "PLAY_LOCAL_SOURCE";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 

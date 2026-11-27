@@ -622,8 +622,9 @@ export type MvpStatusSnapshot = {
    *  carries the SAME identity (consumed once) and a renderer remount baselines the current seq (never replays). */
   sessionStepBootId?: string;
   sessionStepSeq?: number;
-  sessionStepDirection?: "next" | "prev" | "jump" | null;
-  /** P0 Gate 1e: for a "jump" request — the absolute session item index + the session source id the remote saw. */
+  sessionStepDirection?: "next" | "prev" | "jump" | "local-play" | null;
+  /** P0 Gate 1e: for a "jump" request - the absolute session item index + the session source id the remote saw.
+   *  "local-play" (a Remote starts a LOCAL playlist, ids only): the SAME two fields - `sessionStepSessionId` = the library source id, `sessionStepIndex` = the row. */
   sessionStepIndex?: number | null;
   sessionStepSessionId?: string | null;
   /** P0 Gate 1f: orchestrator.isMusicAttemptPending() — false exactly from XFADE_RAMP_START (standby) / first real

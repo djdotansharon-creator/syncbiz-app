@@ -40,6 +40,7 @@ import type {
 } from "../shared/mvp-types";
 import type { StationPlaybackState } from "../shared/station-state";
 import { registrationIntentBranchDesktopApp } from "../shared/syncbiz-registration-intent";
+import { LOCAL_PLAY_COMMAND, isLocalPlayPayload } from "../shared/local-play-command";
 import {
   readDesignationRecord,
   writeDesignationRecord,
@@ -201,7 +202,7 @@ export class DeviceWsManager {
   // P0 Gate 1d: remote NEXT / PREV relay identity (see MvpStatusSnapshot.sessionStep*).
   private readonly sessionStepBootId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   private sessionStepSeq = 0;
-  private sessionStepDirection: "next" | "prev" | "jump" | null = null;
+  private sessionStepDirection: "next" | "prev" | "jump" | "local-play" | null = null;
   private sessionStepIndex: number | null = null;
   private sessionStepSessionId: string | null = null;
   private lastError: string | null = null;
@@ -427,6 +428,27 @@ export class DeviceWsManager {
     const moved = this.navigateCatalogStep(cmd);
     if (moved) this.lastCommandSummary = cmd;
     this.sendStateUpdateIfMaster();
+  }
+
+  /**
+   * A Remote starts a LOCAL (computer-files) playlist on this station (owner 2026-11-26). The command carries IDS ONLY
+   * ({ sourceId, trackIndex }; never a path). Only the station's OWN window can start LOCAL audio (it drives the existing
+   * LOCAL engine), so MAIN does exactly what it does for a remote NEXT / PREV / JUMP: ONE exactly-once relay request (new seq)
+   * on the status snapshot. MAIN's session metadata, the queue and MPV are NOT touched here - they change only when the window
+   * actually starts the playlist (the normal LOCAL session sync). Any other shape -> ignored (nothing relayed).
+   */
+  private handleRemoteLocalPlay(payload: unknown): void {
+    if (!isLocalPlayPayload(payload)) {
+      this.lastCommandSummary = `${LOCAL_PLAY_COMMAND} ignored (not exactly { sourceId, trackIndex })`;
+      console.warn("[VONO local-play-relay] WS " + LOCAL_PLAY_COMMAND + " ignored - invalid payload shape");
+      return;
+    }
+    this.sessionStepSeq += 1;
+    this.sessionStepDirection = "local-play";
+    this.sessionStepIndex = payload.trackIndex;
+    this.sessionStepSessionId = payload.sourceId;
+    this.lastCommandSummary = `${LOCAL_PLAY_COMMAND} ${payload.trackIndex} (relayed to station renderer #${this.sessionStepSeq})`;
+    console.log("[VONO local-play-relay] WS " + LOCAL_PLAY_COMMAND + " -> renderer request", { seq: this.sessionStepSeq, trackIndex: payload.trackIndex });
   }
 
   /**
@@ -1536,6 +1558,8 @@ export class DeviceWsManager {
             this.handleRemoteStep(cmd);
           } else if (cmd === "JUMP_SESSION_INDEX") {
             this.handleRemoteJump(p.payload); // P0 Gate 1e
+          } else if (cmd === LOCAL_PLAY_COMMAND) {
+            this.handleRemoteLocalPlay(p.payload); // a Remote starts a LOCAL playlist: relay to the station window (ids only)
           } else {
             this.runTransportCommand(cmd, p.payload, "ws");
             this.sendStateUpdateIfMaster();

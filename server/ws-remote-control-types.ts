@@ -27,7 +27,9 @@ export type RemoteCommand =
   | "JUMP_SESSION_INDEX"
   // P0 Drop Next (forwarded unchanged; type only).
   | "QUEUE_NEXT"
-  | "QUEUE_REMOVE";
+  | "QUEUE_REMOVE"
+  // A Remote starts a LOCAL playlist on the station: IDS ONLY ({ sourceId, trackIndex }) - shape-checked in server/local-play-command.ts.
+  | "PLAY_LOCAL_SOURCE";
 
 export type ClientRole = "device" | "controller" | "owner_global";
 
