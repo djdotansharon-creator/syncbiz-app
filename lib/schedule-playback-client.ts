@@ -40,6 +40,18 @@ export type SchedulePlaybackHandlers = {
 type AppRouterLike = { push: (href: string) => void };
 
 /**
+ * 2026-11-21 (diagnostic only — changes no behaviour): a start that is REFUSED used to leave no trace (the engine just retries each poll), so "my block did not start"
+ * could not be told apart from "this window never saw the block". One log line per block and per reason (never one per poll); a success clears it.
+ */
+const refusalNoted = new Map<string, string>();
+function noteRefusal(schedule: Schedule, route: ScheduleRoute, why: string): void {
+  const line = `${why} (this window's route: ${route.kind}${route.kind === "station" ? `, cloud ${route.urlReady ? "ready" : "not ready"}` : ""})`;
+  if (refusalNoted.get(schedule.id) === line) return;
+  refusalNoted.set(schedule.id, line);
+  console.warn(`[VONO schedule] "${schedule.name ?? schedule.id}" did NOT start — ${line}`);
+}
+
+/**
  * Same rules as ScheduleCard "Play now": playlist / radio / source, embedded → /player, else in-app (a local file is played by the Player itself — its path is never sent to the server).
  * Playlist/radio paths use setQueue(..., { force: true }) so a scheduled block always preempts whatever was playing.
  * Playlist payload uses GET /api/playlists/:id (disk) only — no localStorage merge.
@@ -56,7 +68,10 @@ export async function runSchedulePlayback(
   const route: ScheduleRoute = handlers.route ?? { kind: "default" };
   // Designated station's own window, route not known yet (MAIN's designation snapshot pending): start nothing — the
   // current music keeps playing and the next poll retries (never the renderer's own player on top of MAIN's session).
-  if (route.kind === "wait") return false;
+  if (route.kind === "wait") {
+    noteRefusal(schedule, route, "this station has not yet said whether it is the designated player");
+    return false;
+  }
   /**
    * Start a playlist / radio target. Designated station's own window: EXACTLY a manual library click — queue + playSourceOrSend
    * (URL → MAIN's session, LOCAL → the accepted LOCAL path), WITHOUT stopping the current music first; a URL target waits
@@ -64,7 +79,11 @@ export async function runSchedulePlayback(
    */
   const start = (unified: UnifiedSource, stationTrackIndex: number): boolean => {
     if (route.kind === "station") {
-      if (!stationMayStart(route, unified.type)) return false;
+      if (!stationMayStart(route, unified.type)) {
+        noteRefusal(schedule, route, `a ${unified.type} source travels through the cloud to the player, and that connection is not ready`);
+        return false;
+      }
+      refusalNoted.delete(schedule.id);
       setQueue([unified], { force: true });
       playSource(unified, stationTrackIndex);
       markScheduleDriven(unified.id); // the player may line up a suggested song after it instead of starting it over (lib/schedule-driven.ts)
@@ -119,6 +138,11 @@ export async function runSchedulePlayback(
           return start(localUnified, 0);
         }
       }
+      noteRefusal(
+        schedule,
+        route,
+        route.kind === "station" ? "this playlist has no file or link to play" : "it is a LOCAL playlist and only the designated station's own window may start it",
+      );
       setLastMessage(
         "הפלייליסט נשמר רק כמעטפת קטלוג (local) בלי קישורי YouTube/HTTP. פתח את הפלייליסט בספרייה והוסף שירים, או בחר פלייליסט עם קישורים ישירים — ניגון אוטומטי בדפדפן דורש כתובת https.",
       );
@@ -202,7 +226,10 @@ export async function runSchedulePlayback(
   }
   setLastMessage(null);
   const unifiedSrc = sourceToUnified(src);
-  if (route.kind === "station" && !stationMayStart(route, unifiedSrc.type)) return false;
+  if (route.kind === "station" && !stationMayStart(route, unifiedSrc.type)) {
+    noteRefusal(schedule, route, `a ${unifiedSrc.type} source travels through the cloud to the player, and that connection is not ready`);
+    return false;
+  }
   playSource(unifiedSrc, 0);
   markScheduleDriven(unifiedSrc.id);
   const target = (src.target ?? src.uriOrPath ?? "").trim();
