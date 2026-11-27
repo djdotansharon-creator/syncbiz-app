@@ -15,6 +15,8 @@ import type { StationPlaybackState, DeviceInfo, GuestRecommendationPayload } fro
 import { GuestRecommendationModal } from "@/components/guest-recommendation-modal";
 import type { UnifiedSource } from "@/lib/source-types";
 import { unifiedSourceToPayload } from "@/lib/remote-control/source-to-payload";
+import { isLibraryLocalSource } from "@/lib/library-display-classification";
+import { LOCAL_PLAY_COMMAND, isDuplicateLocalPlay, localPlayKey, resolveLocalPlayRequest } from "@/lib/remote-local-play";
 import {
   beginTransition, decideUserCommand, failTransition, holdsAudible, isBlocking, observeTransition, targetKeyOf, tickTransition,
   type UrlTransition,
@@ -161,9 +163,23 @@ export function StationControllerProvider({ children }: { children: ReactNode })
     sendCommand(masterDeviceId, "PREV");
   }, [masterDeviceId, sendCommand, beginNav]);
 
+  const lastLocalPlayRef = useRef<{ key: string; at: number } | null>(null); // a double click is one intent
   const sendPlaySource = useCallback(
     (source: UnifiedSource) => {
       if (!masterDeviceId) return;
+      if (isLibraryLocalSource(source)) {
+        // A LOCAL (computer-files) playlist: only the station's own window can start it (a PLAY_SOURCE for it is metadata only). IDS ONLY, never a
+        // path (lib/remote-local-play.ts); a request that cannot be made plain sends nothing.
+        const req = resolveLocalPlayRequest(source);
+        if (!("reject" in req)) {
+          const nowMs = Date.now();
+          if (!isDuplicateLocalPlay(lastLocalPlayRef.current, req, nowMs)) {
+            lastLocalPlayRef.current = { key: localPlayKey(req), at: nowMs };
+            sendCommand(masterDeviceId, LOCAL_PLAY_COMMAND, req);
+          }
+        }
+        return;
+      }
       const key = targetKeyOf(source?.id, 0); // this path sends no trackIndex → MAIN mirrors index 0
       if (decideUserCommand(transitionRef.current, { kind: "select", targetKey: key }) !== "accept") return; // P0 Gate 1c
       const prior = remoteStateRef.current?.mpvAttemptId;

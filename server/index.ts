@@ -53,6 +53,7 @@ import {
 import { verifyWsToken } from "./ws-token.js";
 import { loadDesignations, saveDesignations } from "./branch-designation-store.js";
 import { isForbiddenMediaTarget } from "./remote-media-url-policy.js";
+import { localPlayCommandMalformed } from "./local-play-command.js";
 import {
   BRANCH_ALIAS_RUNTIME_MODE,
   applyAliasSync,
@@ -1679,6 +1680,14 @@ wss.on("connection", (ws) => {
       // C2 SECURITY: reject a URL-bearing COMMAND whose immediate media target is forbidden (internal/loopback/
       // file/UNC/non-http(s)) BEFORE any routing — defense in depth with the station A1/A2 gates. Relative
       // "/api/jingles/..." and public http(s) pass untouched, so jingles / radio / YouTube / etc. keep working.
+      // A Remote's "play this LOCAL playlist" carries IDS ONLY ({ sourceId, trackIndex }); anything else (a smuggled url / path, a bad id) is refused
+      // before routing (CLAUDE.md section 12: local paths never travel).
+      if (localPlayCommandMalformed(msg.command, msg.payload)) {
+        console.warn("[SyncBiz WS] COMMAND rejected - PLAY_LOCAL_SOURCE payload is not exactly { sourceId, trackIndex }");
+        if (ackId) { sendAck(false, "forbidden"); return; }
+        ws.send(JSON.stringify({ type: "ERROR", message: "Invalid local play request" } as ServerMessage));
+        return;
+      }
       if (commandHasForbiddenMediaTarget(msg.command, msg.payload)) {
         console.warn("[SyncBiz WS] COMMAND rejected — forbidden media target (C2)", { command: msg.command });
         if (ackId) { sendAck(false, "forbidden"); return; }
