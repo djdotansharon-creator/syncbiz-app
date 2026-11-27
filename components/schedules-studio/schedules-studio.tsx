@@ -2017,11 +2017,10 @@ export function SchedulesStudio({ initialSchedules, playlists, sources, radioSta
               <span className="ss-switch-track"><span className="ss-switch-knob" /></span>
             </button>
             <button type="button" className="ss-btn ss-btn--ghost" onClick={() => setHoursOpen(true)}>{tr("Business hours")}</button>
-            {/* the circle at the very end of the header: a plus on a white disc (a black disc on the white display); standing on it names it; pressing it opens the music list (the list with the
+            {/* the circle at the very end of the header: a plus on a white disc (a black disc on the white display); it stays a plain round button on hover (owner 2026-11-27: it no longer opens into a label); pressing it opens the music list (the list with the
                 search, at the side) and the plus turns in place into an X — pressing again closes it (owner 2026-11-16; this one button replaced "+ Add music" and the arrow) */}
             <div className="ss-add" aria-hidden={panelOpen || undefined}>
               <button type="button" className="ss-add-btn" onClick={togglePanel} aria-expanded={panelOpen} tabIndex={panelOpen ? -1 : 0} aria-label={tr("Add music")}>
-                <span className="ss-add-label" aria-hidden>{tr("Add music")}</span>
                 <span className="ss-add-ico" aria-hidden>
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
                 </span>
