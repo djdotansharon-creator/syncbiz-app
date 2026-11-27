@@ -8,7 +8,7 @@ import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import { schedulesForBranch } from "@/lib/schedule-branch-scope";
 import { getScheduleSwitch } from "@/lib/branch-schedule-switch";
 import { normalizeScheduleVolume } from "@/lib/schedule-volume-value";
-import { getCanonicalLegacyBranchId } from "@/lib/branch-resolver";
+import { getCanonicalLegacyBranchId, branchBelongsToWorkspace } from "@/lib/branch-resolver";
 import { prisma } from "@/lib/prisma";
 import type { Schedule, ScheduleRecurrence, ScheduleTargetType } from "@/lib/types";
 
@@ -115,6 +115,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (!(await hasBranchAccess(user.id, branchId, user.tenantId))) {
+    return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
+  }
+  // an owner/admin passes the check above for ANY id: the branch must also be one of THIS business's (else a foreign reference / stub Branch row is saved)
+  if (!(await branchBelongsToWorkspace(resolveAccountScope(user.tenantId), branchId))) {
     return NextResponse.json({ error: "Forbidden: no access to this branch" }, { status: 403 });
   }
   shadowAuthorize("schedules:POST", { userId: user.id, workspaceId: user.tenantId }, "schedule.edit", [branchId]); // Gate 3A shadow: log only, never blocks

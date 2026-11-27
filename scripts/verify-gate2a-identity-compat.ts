@@ -140,12 +140,18 @@ const LENOVO = "dsk-cbeb93d0-0023-47e0-aebc-b07fe350415f";
   const contentRoutes = ["app/api/jingles/pads/route.ts", "app/api/jingles/library/route.ts", "app/api/playlists/route.ts", "app/api/radio/route.ts"];
   // Gate 2B-1 (documented change): content routes may import ONLY the 2B-1 content-compat helpers from the resolver
   // (no shadow/resolution-mode switch); playlists/radio routes stay resolver-free (their stores canonicalize).
-  assert("content routes use only the 2B-1 content-compat resolver helpers", contentRoutes.every((p) => {
+  // 2026-11-24 (documented change, branch-in-workspace guard): the radio route may import ONE more helper, `branchBelongsToWorkspace` — a READ-ONLY
+  // "is this branch one of this business's?" check AND-ed after hasBranchAccess. It normalizes nothing and switches no mode, so the invariant
+  // (routes never canonicalize content / never use the resolution mode; the stores do) is intact. The playlists route stays resolver-free.
+  assert("content routes use only the 2B-1 content-compat resolver helpers (radio: + the read-only branchBelongsToWorkspace guard)", contentRoutes.every((p) => {
     const src = read(...p.split("/"));
     const m = src.match(/import \{([^}]*)\} from "@\/lib\/branch-resolver";/);
     if (!m) return !/branch-resolver/.test(src);
-    return m[1].split(",").map((s) => s.trim()).filter(Boolean).every((n) => ["canonicalContentBranchForWrite", "expandLegacyBranchEquivalents"].includes(n));
-  }) && !/branch-resolver/.test(read("app", "api", "playlists", "route.ts")) && !/branch-resolver/.test(read("app", "api", "radio", "route.ts")));
+    return m[1].split(",").map((s) => s.trim()).filter(Boolean).every((n) => ["canonicalContentBranchForWrite", "expandLegacyBranchEquivalents", "branchBelongsToWorkspace"].includes(n));
+  }) && !/branch-resolver/.test(read("app", "api", "playlists", "route.ts")) && (() => {
+    const radioImport = read("app", "api", "radio", "route.ts").match(/import \{([^}]*)\} from "@\/lib\/branch-resolver";/);
+    return !radioImport || radioImport[1].trim() === "branchBelongsToWorkspace";
+  })());
 
   console.log(`\n${pass} passed, ${fail} failed`);
 })();

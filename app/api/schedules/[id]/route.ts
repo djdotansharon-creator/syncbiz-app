@@ -7,6 +7,7 @@ import { normalizeScheduleTimeLocal } from "@/lib/schedule-target-helpers";
 import { validateScheduleTarget } from "@/lib/schedule-target-validator";
 import { normalizeScheduleVolume } from "@/lib/schedule-volume-value";
 import { normalizeSkipDates } from "@/lib/schedule-skip";
+import { branchBelongsToWorkspace } from "@/lib/branch-resolver";
 import type { Schedule, ScheduleTargetType } from "@/lib/types";
 
 function resolveAccountScope(userTenantId: string): string {
@@ -85,6 +86,10 @@ export async function PATCH(
   if (data.branchId !== undefined) {
     const branchId = (data.branchId ?? "default").trim() || "default";
     if (!(await hasBranchAccess(access.user!.id, branchId, access.user!.tenantId))) {
+      return NextResponse.json({ error: "Forbidden: no access to target branch" }, { status: 403 });
+    }
+    // an owner/admin passes the check above for ANY id: the target must also be one of THIS business's (the schedule row has a cascading FK to the branch)
+    if (!(await branchBelongsToWorkspace(resolveAccountScope(access.user!.tenantId), branchId))) {
       return NextResponse.json({ error: "Forbidden: no access to target branch" }, { status: 403 });
     }
   }

@@ -125,6 +125,36 @@ export async function contentBranchesEquivalent(
   return legacyBranchEquivalent(x, y, await getCanonicalLegacyBranchId(workspaceId));
 }
 
+/** Is there a Branch row with this id in this business (workspace id or slug — the same lookup the stores use)? */
+export type BranchRowLookup = (branchId: string, workspaceKey: string) => Promise<boolean>;
+const lookupBranchRow: BranchRowLookup = async (branchId, workspaceKey) =>
+  !!(await prisma.branch.findFirst({
+    where: { id: branchId, workspace: { OR: [{ id: workspaceKey }, { slug: workspaceKey }] } },
+    select: { id: true },
+  }));
+
+/**
+ * WRITE guard for a branch id that arrives from the client and is about to be SAVED on a new/changed row.
+ * `hasBranchAccess` answers "yes" to ANY id for an owner/admin (the "*" wildcard), so on its own it lets a branch id of
+ * ANOTHER business be stored in this one (a dangling / foreign reference). This adds: the branch is one of THIS business's.
+ *  - the legacy key "default" (and empty) is ALWAYS valid and costs no query — single-branch businesses, desktop / mobile
+ *    clients and the pilot station keep working exactly as before;
+ *  - the workspace's canonical branch (the row whose legacyKey is "default") is an ordinary Branch row of the workspace, so it passes;
+ *  - any other id must be a Branch row of the caller's workspace. No workspace → false.
+ * It never widens access (it is only ever AND-ed after hasBranchAccess) and never touches station / MASTER identity.
+ */
+export async function branchBelongsToWorkspace(
+  workspaceId: string | null | undefined,
+  branchId: string | null | undefined,
+  lookup: BranchRowLookup = lookupBranchRow,
+): Promise<boolean> {
+  const ws = (workspaceId ?? "").trim();
+  if (!ws) return false;
+  const id = (branchId ?? "").trim() || LEGACY_DEFAULT_BRANCH_KEY;
+  if (id === LEGACY_DEFAULT_BRANCH_KEY) return true;
+  return lookup(id, ws);
+}
+
 const legacyKeyCache = new Map<string, { key: string | null; at: number }>();
 /**
  * The branch key EXISTING clients registered with: a canonical branch that represents a legacy key (Branch.legacyKey)
